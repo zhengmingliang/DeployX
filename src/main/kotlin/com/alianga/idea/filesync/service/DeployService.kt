@@ -1,7 +1,6 @@
 package com.alianga.idea.filesync.service
 
 import com.alianga.idea.filesync.model.*
-import com.alianga.idea.filesync.ssh.RemoteCommandExecutor
 import com.alianga.idea.filesync.ssh.RsyncWrapper
 import com.alianga.idea.filesync.ssh.SshConnection
 import com.intellij.openapi.application.ApplicationManager
@@ -48,7 +47,6 @@ class DeployService {
     )
 
     private val rsyncWrapper = RsyncWrapper()
-    private val commandExecutor = RemoteCommandExecutor()
 
     /**
      * Upload-only 批量上传。按 server/mapping/root/excludes/commands 分组，使用 rsync --files-from 合并上传。

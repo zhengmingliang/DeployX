@@ -23,55 +23,81 @@ class SshConnection(private val serverConfig: ServerConfig) {
     private var session: Session? = null
 
     /**
-     * 建立 SSH 连接
+     * 建立 SSH 连接（带重试机制）
      */
     fun connect(): Boolean {
-        return try {
-            val session = jsch.getSession(serverConfig.user, serverConfig.host, serverConfig.port)
-            val timeout = FileSyncSettings.getInstance().connectTimeout
+        return connectWithRetry()
+    }
 
-            // 配置认证方式
-            when (serverConfig.authType) {
-                ServerConfig.AuthType.PASSWORD -> {
-                    session.setPassword(serverConfig.password)
-                }
-                ServerConfig.AuthType.KEY -> {
-                    if (serverConfig.keyFile.isNotEmpty()) {
-                        jsch.addIdentity(serverConfig.keyFile)
+    /**
+     * 建立 SSH 连接，支持重试
+     * 针对服务器 SSH 连接限制（如 MaxStartups）或网络波动进行自动重试
+     */
+    private fun connectWithRetry(maxRetries: Int = 3, retryDelayMs: Long = 2000): Boolean {
+        var lastException: Exception? = null
+
+        for (attempt in 1..maxRetries) {
+            try {
+                val session = jsch.getSession(serverConfig.user, serverConfig.host, serverConfig.port)
+                val timeout = FileSyncSettings.getInstance().connectTimeout
+
+                // 配置认证方式
+                when (serverConfig.authType) {
+                    ServerConfig.AuthType.PASSWORD -> {
+                        session.setPassword(serverConfig.password)
+                    }
+                    ServerConfig.AuthType.KEY -> {
+                        if (serverConfig.keyFile.isNotEmpty()) {
+                            jsch.addIdentity(serverConfig.keyFile)
+                        }
                     }
                 }
-            }
 
-            // SSH 配置 - 优化 mwiede JSch 2.28.3 的兼容性
-            val config = Properties().apply {
-                put("StrictHostKeyChecking", "no")
-                // 连接超时（毫秒）- 用于 socket 连接阶段
-                put("ConnectTimeout", timeout.toString())
-                // 会话超时（毫秒）- 用于读取超时
-                put("timeout", timeout.toString())
-                // 优先认证方式顺序 - 避免不必要的尝试
-                put("PreferredAuthentications", "publickey,password,keyboard-interactive")
-                // 服务端 Alive 检查 - 防止连接被防火墙断开
-                put("ServerAliveInterval", "30000")
-                put("ServerAliveCountMax", "3")
-            }
-            session.setConfig(config)
-            // 全局超时设置
-            session.timeout = timeout
+                // SSH 配置 - 优化 mwiede JSch 2.28.3 的兼容性
+                val config = Properties().apply {
+                    put("StrictHostKeyChecking", "no")
+                    // 连接超时（毫秒）- 用于 socket 连接阶段
+                    put("ConnectTimeout", timeout.toString())
+                    // 会话超时（毫秒）- 用于读取超时
+                    put("timeout", timeout.toString())
+                    // 优先认证方式顺序 - 避免不必要的尝试
+                    put("PreferredAuthentications", "publickey,password,keyboard-interactive")
+                    // 服务端 Alive 检查 - 防止连接被防火墙断开
+                    put("ServerAliveInterval", "30000")
+                    put("ServerAliveCountMax", "3")
+                }
+                session.setConfig(config)
+                // 全局超时设置
+                session.timeout = timeout
 
-            LOG.info("Connecting to ${serverConfig.displayAddress} with timeout ${timeout}ms...")
-            session.connect()
-            this.session = session
-            LOG.info("SSH connected to ${serverConfig.displayAddress}")
-            true
-        } catch (e: Exception) {
-            val errorMsg = "SSH connection failed to ${serverConfig.displayAddress}: ${e.message}"
-            LOG.error(errorMsg, e)
-            // 记录更详细的错误信息便于调试
-            println("[DEBUG] $errorMsg")
-            e.printStackTrace()
-            false
+                if (attempt > 1) {
+                    LOG.info("Connecting to ${serverConfig.displayAddress} (attempt $attempt/$maxRetries)...")
+                } else {
+                    LOG.info("Connecting to ${serverConfig.displayAddress} with timeout ${timeout}ms...")
+                }
+
+                session.connect()
+                this.session = session
+                LOG.info("SSH connected to ${serverConfig.displayAddress}")
+                return true
+            } catch (e: Exception) {
+                lastException = e
+                val errorMsg = "SSH connection attempt $attempt failed to ${serverConfig.displayAddress}: ${e.message}"
+                LOG.warn(errorMsg, e)
+
+                if (attempt < maxRetries) {
+                    LOG.info("Retrying in ${retryDelayMs}ms...")
+                    Thread.sleep(retryDelayMs)
+                }
+            }
         }
+
+        // 所有重试都失败
+        val finalErrorMsg = "SSH connection failed after $maxRetries attempts to ${serverConfig.displayAddress}: ${lastException?.message}"
+        LOG.error(finalErrorMsg, lastException)
+        println("[DEBUG] $finalErrorMsg")
+        lastException?.printStackTrace()
+        return false
     }
 
     /**
