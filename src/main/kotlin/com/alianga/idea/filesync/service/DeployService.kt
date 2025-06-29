@@ -1,6 +1,7 @@
 package com.alianga.idea.filesync.service
 
 import com.alianga.idea.filesync.model.*
+import com.alianga.idea.filesync.ssh.RemoteCommandExecutor
 import com.alianga.idea.filesync.ssh.RsyncWrapper
 import com.alianga.idea.filesync.ssh.SshConnection
 import com.intellij.openapi.application.ApplicationManager
@@ -47,6 +48,7 @@ class DeployService {
     )
 
     private val rsyncWrapper = RsyncWrapper()
+    private val commandExecutor = RemoteCommandExecutor()
 
     /**
      * Upload-only 批量上传。按 server/mapping/root/excludes/commands 分组，使用 rsync --files-from 合并上传。
@@ -202,32 +204,56 @@ class DeployService {
             groupLog("远程根目录: ${key.remoteBaseDir}")
             groupLog("文件数: ${groupItems.size}")
 
-            val sshConnection = SshConnection(server)
-            try {
+            // 计算需要 SSH 连接的步骤
+            val needsSshConnection = !key.preCommand.isNullOrBlank() ||
+                    !key.backupDir.isNullOrBlank() ||
+                    !key.unzipDest.isNullOrBlank() ||
+                    !key.postCommand.isNullOrBlank()
+
+            // 相对路径预处理
+            val relativePaths = groupItems.map { item ->
+                if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
+            }.filter { it.isNotBlank() }
+
+            // 先建立 SSH 连接（如果需要），确保连接可用后再上传
+            val sshConnection = if (needsSshConnection) {
                 groupLog("正在连接服务器 ${server.displayAddress}...")
-                if (!sshConnection.connect()) {
-                    val result = DeployResult(false, taskId = taskId, error = "无法连接到服务器: ${server.displayAddress}")
+                val conn = SshConnection(server)
+                if (!conn.connect()) {
+                    val result = DeployResult(
+                        false,
+                        taskId = taskId,
+                        error = "无法连接到服务器: ${server.displayAddress}",
+                        duration = System.currentTimeMillis() - startTime
+                    )
                     results.add(result)
                     groupLog("[ERROR] ${result.error}")
                     return@forEach
                 }
                 groupLog("SSH 连接成功")
+                conn
+            } else null
 
+            try {
+                // 步骤 1: 上传前命令（在备份和上传之前执行）
                 if (!key.preCommand.isNullOrBlank()) {
                     groupLog("[PRE] 执行上传前命令: ${key.preCommand}")
-                    val preResult = sshConnection.executeCommand(key.preCommand)
+                    val preResult = sshConnection!!.executeCommand(key.preCommand)
                     if (preResult.output.isNotBlank()) groupLog("[PRE] 输出: ${preResult.output.trim()}")
                     if (!preResult.success) groupLog("[WARN] 上传前命令执行失败 (${preResult.exitCode}): ${preResult.error}")
                     else groupLog("[PRE] 命令执行成功")
                 }
 
-                val backupPath = if (!key.backupDir.isNullOrBlank()) {
+                // 步骤 2: 备份（在上传之前执行，确保备份的是旧版本）
+                var backupPath: String? = null
+                val backupDir = key.backupDir
+                if (sshConnection != null && !backupDir.isNullOrBlank()) {
                     val backupResult = if (!key.backupSource.isNullOrBlank()) {
-                        groupLog("[1/3] 备份配置源: ${key.backupSource} → ${key.backupDir}")
-                        doBackup(sshConnection, key.backupSource, key.backupDir, groupLog)
+                        groupLog("[1/${if (needsSshConnection) 4 else 2}] 备份配置源: ${key.backupSource} → $backupDir")
+                        doBackup(sshConnection, key.backupSource, backupDir, groupLog)
                     } else {
-                        groupLog("[1/3] 备份本次选择的远程文件 → ${key.backupDir}")
-                        doBackupSelected(sshConnection, key.remoteBaseDir, groupItems.map { it.relativePath }, key.backupDir, groupLog)
+                        groupLog("[1/${if (needsSshConnection) 4 else 2}] 备份本次选择的远程文件 → $backupDir")
+                        doBackupSelected(sshConnection, key.remoteBaseDir, groupItems.map { it.relativePath }, backupDir, groupLog)
                     }
                     if (!backupResult.success) {
                         val result = DeployResult(
@@ -240,16 +266,14 @@ class DeployService {
                         groupLog("[ERROR] ${result.error}")
                         return@forEach
                     }
-                    backupResult.path
+                    backupPath = backupResult.path
                 } else {
-                    groupLog("[1/3] 跳过备份（未配置备份目录）")
-                    null
+                    groupLog("[1/${if (needsSshConnection) 4 else 2}] 跳过备份（未配置备份目录）")
                 }
 
-                groupLog("[2/3] 批量上传文件...")
-                val relativePaths = groupItems.map { item ->
-                    if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
-                }.filter { it.isNotBlank() }
+                // 步骤 3: 上传文件（使用 rsync 命令）
+                val uploadStep = if (needsSshConnection) 2 else 1
+                groupLog("[$uploadStep/${if (needsSshConnection) 4 else 2}] 批量上传文件...")
                 val syncResult = TransferService.getInstance().transferFilesFrom(
                     sourceBaseDir = key.sourceBaseDir,
                     remoteBaseDir = key.remoteBaseDir,
@@ -273,14 +297,43 @@ class DeployService {
                 }
                 groupLog("上传完成")
 
+                // 如果不需要 SSH 连接，直接完成
+                if (!needsSshConnection) {
+                    val duration = System.currentTimeMillis() - startTime
+                    groupLog("========== 部署分组完成！耗时: ${duration}ms ==========")
+                    val reportGroup = buildReportGroup(
+                        server = server,
+                        sourceBaseDir = key.sourceBaseDir,
+                        remoteBaseDir = key.remoteBaseDir,
+                        localPaths = groupItems.map { it.localPath },
+                        relativePaths = groupItems.map { it.relativePath },
+                        success = true,
+                        duration = duration,
+                        totalSize = syncResult.totalSize,
+                        output = syncResult.output
+                    )
+                    val result = DeployResult(
+                        success = true,
+                        taskId = taskId,
+                        transferredFiles = syncResult.transferredFiles,
+                        totalSize = syncResult.totalSize,
+                        duration = duration,
+                        reportGroup = reportGroup
+                    )
+                    results.add(result)
+                    saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS)
+                    return@forEach
+                }
+
+                // 步骤 4: 解压
                 if (!key.unzipDest.isNullOrBlank()) {
                     val zipItems = groupItems.filter { it.relativePath.endsWith(".zip", ignoreCase = true) }
                     when {
-                        zipItems.isEmpty() -> groupLog("[3/3] 已配置解压，但本组没有 zip 文件，跳过解压")
+                        zipItems.isEmpty() -> groupLog("[3/4] 已配置解压，但本组没有 zip 文件，跳过解压")
                         zipItems.size == 1 -> {
                             val remoteZip = joinRemotePath(key.remoteBaseDir, zipItems.first().relativePath)
-                            groupLog("[3/3] 解压远程文件: $remoteZip → ${key.unzipDest}")
-                            val unzipResult = doUnzip(sshConnection, remoteZip, key.unzipDest)
+                            groupLog("[3/4] 解压远程文件: $remoteZip → ${key.unzipDest}")
+                            val unzipResult = doUnzip(sshConnection!!, remoteZip, key.unzipDest)
                             if (!unzipResult.success) {
                                 val result = DeployResult(
                                     false,
@@ -313,12 +366,13 @@ class DeployService {
                         }
                     }
                 } else {
-                    groupLog("[3/3] 跳过解压（未配置解压目标）")
+                    groupLog("[3/4] 跳过解压（未配置解压目标）")
                 }
 
+                // 步骤 5: 上传后命令
                 if (!key.postCommand.isNullOrBlank()) {
                     groupLog("[POST] 执行上传后命令: ${key.postCommand}")
-                    val postResult = sshConnection.executeCommand(key.postCommand)
+                    val postResult = sshConnection!!.executeCommand(key.postCommand)
                     if (postResult.output.isNotBlank()) groupLog("[POST] 输出: ${postResult.output.trim()}")
                     if (!postResult.success) groupLog("[WARN] 上传后命令执行失败 (${postResult.exitCode}): ${postResult.error}")
                     else groupLog("[POST] 命令执行成功")
@@ -354,7 +408,7 @@ class DeployService {
                 results.add(result)
                 groupLog("[ERROR] ${result.error}")
             } finally {
-                sshConnection.disconnect()
+                sshConnection?.disconnect()
             }
         }
 
@@ -385,12 +439,17 @@ class DeployService {
                 logs = listOf("错误: 服务器不存在: ${request.serverId}")
             )
 
-        val sshConnection = SshConnection(server)
+        // 判断是否需要 SSH 连接
+        val needsSshConnection = !request.preCommand.isNullOrBlank() ||
+                !request.backupDir.isNullOrBlank() ||
+                !request.unzipDest.isNullOrBlank() ||
+                !request.postCommand.isNullOrBlank()
 
-        try {
-            // 建立 SSH 连接
+        // 先建立 SSH 连接（如果需要），确保连接可用后再上传
+        val sshConnection = if (needsSshConnection) {
             logCallback?.invoke("正在连接服务器 ${server.displayAddress}...")
-            if (!sshConnection.connect()) {
+            val conn = SshConnection(server)
+            if (!conn.connect()) {
                 logCallback?.invoke("[ERROR] 无法连接到服务器: ${server.displayAddress}")
                 return DeployResult(
                     success = false,
@@ -400,53 +459,57 @@ class DeployService {
                 )
             }
             logCallback?.invoke("SSH 连接成功")
+            conn
+        } else null
 
-            // 步骤 0: 执行上传前命令（可选）
+        try {
+            // 步骤 1: 执行上传前命令（在备份和上传之前执行）
             if (!request.preCommand.isNullOrBlank()) {
                 logCallback?.invoke("[PRE] 执行上传前命令: ${request.preCommand}")
-                val preResult = sshConnection.executeCommand(request.preCommand)
+                val preResult = sshConnection!!.executeCommand(request.preCommand)
                 if (preResult.output.isNotBlank()) {
                     logCallback?.invoke("[PRE] 输出: ${preResult.output.trim()}")
                 }
                 if (!preResult.success) {
                     logCallback?.invoke("[WARN] 上传前命令执行失败 (exit code: ${preResult.exitCode}): ${preResult.error}")
-                    // 前置命令失败不阻断部署，只警告
                 } else {
                     logCallback?.invoke("[PRE] 命令执行成功")
                 }
             }
 
-            // 步骤 1: 备份（可选）- 只备份正在上传的文件/目录，而非整个远程目录
-            val backupPath = if (!request.backupDir.isNullOrBlank()) {
+            // 步骤 2: 备份（在上传之前执行，确保备份的是旧版本）
+            var backupPath: String? = null
+            if (sshConnection != null && !request.backupDir.isNullOrBlank()) {
                 val localFile = File(request.localPath)
-                // 备份源：优先使用配置的 backupSource，否则自动推断
                 val backupSource = if (!request.backupSource.isNullOrBlank()) {
                     request.backupSource
                 } else {
                     "${request.remotePath}/${localFile.name}"
                 }
-                logCallback?.invoke("[1/3] 备份: $backupSource → ${request.backupDir}")
-                val backupResult = doBackup(sshConnection, backupSource, request.backupDir!!, logCallback)
+                val backupDir = request.backupDir!!
+                logCallback?.invoke("[1/${if (needsSshConnection) 4 else 2}] 备份: $backupSource → $backupDir")
+                val backupResult = doBackup(sshConnection, backupSource, backupDir, logCallback)
                 if (backupResult.success) {
                     logCallback?.invoke("备份成功: ${backupResult.path}")
-                    backupResult.path
+                    backupPath = backupResult.path
                 } else {
                     logCallback?.invoke("[ERROR] 备份失败: ${backupResult.error}")
                     return DeployResult(
                         success = false,
                         taskId = taskId,
+                        backupPath = backupResult.path,
                         error = "备份失败: ${backupResult.error}",
                         logs = listOf("备份失败: ${backupResult.error}"),
                         duration = System.currentTimeMillis() - startTime
                     )
                 }
             } else {
-                logCallback?.invoke("[1/3] 跳过备份（未配置备份目录）")
-                null
+                logCallback?.invoke("[1/${if (needsSshConnection) 4 else 2}] 跳过备份（未配置备份目录）")
             }
 
-            // 步骤 2: 上传文件
-            logCallback?.invoke("[2/3] 上传文件...")
+            // 步骤 3: 上传文件（使用 rsync 命令）
+            val uploadStep = if (needsSshConnection) 2 else 1
+            logCallback?.invoke("[$uploadStep/${if (needsSshConnection) 4 else 2}] 上传文件...")
             val syncOptions = SyncOptions(excludePatterns = request.excludePatterns)
             val syncResult = TransferService.getInstance().transfer(
                 request.localPath,
@@ -459,7 +522,6 @@ class DeployService {
 
             if (!syncResult.success) {
                 logCallback?.invoke("[ERROR] 上传失败: ${syncResult.error}")
-                // 记录失败历史
                 saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.FAILED)
                 return DeployResult(
                     success = false,
@@ -472,12 +534,38 @@ class DeployService {
             }
             logCallback?.invoke("上传完成")
 
-            // 步骤 3: 解压（可选）
+            // 如果不需要 SSH 连接，直接完成
+            if (!needsSshConnection) {
+                val duration = System.currentTimeMillis() - startTime
+                logCallback?.invoke("========== 部署完成！耗时: ${duration}ms ==========")
+                saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS)
+                val reportGroup = buildReportGroup(
+                    server = server,
+                    sourceBaseDir = File(request.localPath).parent ?: request.localPath,
+                    remoteBaseDir = request.remotePath,
+                    localPaths = listOf(request.localPath),
+                    relativePaths = listOf(File(request.localPath).name),
+                    success = true,
+                    duration = duration,
+                    totalSize = syncResult.totalSize,
+                    output = syncResult.output
+                )
+                return DeployResult(
+                    success = true,
+                    taskId = taskId,
+                    transferredFiles = syncResult.transferredFiles,
+                    totalSize = syncResult.totalSize,
+                    duration = duration,
+                    reportGroup = reportGroup
+                )
+            }
+
+            // 步骤 4: 解压（可选）
             if (!request.unzipDest.isNullOrBlank()) {
-                logCallback?.invoke("[3/3] 解压远程文件...")
+                logCallback?.invoke("[3/4] 解压远程文件...")
                 val filename = File(request.localPath).name
                 val remoteFile = "${request.remotePath}/$filename"
-                val unzipResult = doUnzip(sshConnection, remoteFile, request.unzipDest)
+                val unzipResult = doUnzip(sshConnection!!, remoteFile, request.unzipDest)
 
                 if (unzipResult.success) {
                     logCallback?.invoke("解压成功: ${request.unzipDest}")
@@ -495,13 +583,13 @@ class DeployService {
                     )
                 }
             } else {
-                logCallback?.invoke("[3/3] 跳过解压（未配置解压目标）")
+                logCallback?.invoke("[3/4] 跳过解压（未配置解压目标）")
             }
 
-            // 步骤 4: 执行上传后命令（可选）
+            // 步骤 5: 执行上传后命令（可选）
             if (!request.postCommand.isNullOrBlank()) {
                 logCallback?.invoke("[POST] 执行上传后命令: ${request.postCommand}")
-                val postResult = sshConnection.executeCommand(request.postCommand)
+                val postResult = sshConnection!!.executeCommand(request.postCommand)
                 if (postResult.output.isNotBlank()) {
                     logCallback?.invoke("[POST] 输出: ${postResult.output.trim()}")
                 }
@@ -514,8 +602,6 @@ class DeployService {
 
             val duration = System.currentTimeMillis() - startTime
             logCallback?.invoke("========== 部署完成！耗时: ${duration}ms ==========")
-
-            // 记录成功历史
             saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS)
 
             val reportGroup = buildReportGroup(
@@ -539,7 +625,6 @@ class DeployService {
                 duration = duration,
                 reportGroup = reportGroup
             )
-
         } catch (e: Exception) {
             LOG.error("Deploy failed", e)
             logCallback?.invoke("[ERROR] 部署异常: ${e.message}")
@@ -550,7 +635,7 @@ class DeployService {
                 duration = System.currentTimeMillis() - startTime
             )
         } finally {
-            sshConnection.disconnect()
+            sshConnection?.disconnect()
         }
     }
 

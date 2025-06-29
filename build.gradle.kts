@@ -13,7 +13,7 @@ repositories {
 
 dependencies {
     // SSH connection
-    implementation("com.jcraft:jsch:0.1.55")
+    implementation("com.github.mwiede:jsch:2.28.3")
 
     // JSON processing
     implementation("com.google.code.gson:gson:2.10.1")

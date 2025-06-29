@@ -28,6 +28,7 @@ class SshConnection(private val serverConfig: ServerConfig) {
     fun connect(): Boolean {
         return try {
             val session = jsch.getSession(serverConfig.user, serverConfig.host, serverConfig.port)
+            val timeout = FileSyncSettings.getInstance().connectTimeout
 
             // 配置认证方式
             when (serverConfig.authType) {
@@ -41,20 +42,34 @@ class SshConnection(private val serverConfig: ServerConfig) {
                 }
             }
 
-            // SSH 配置
+            // SSH 配置 - 优化 mwiede JSch 2.28.3 的兼容性
             val config = Properties().apply {
                 put("StrictHostKeyChecking", "no")
-                put("ConnectTimeout", FileSyncSettings.getInstance().connectTimeout.toString())
+                // 连接超时（毫秒）- 用于 socket 连接阶段
+                put("ConnectTimeout", timeout.toString())
+                // 会话超时（毫秒）- 用于读取超时
+                put("timeout", timeout.toString())
+                // 优先认证方式顺序 - 避免不必要的尝试
+                put("PreferredAuthentications", "publickey,password,keyboard-interactive")
+                // 服务端 Alive 检查 - 防止连接被防火墙断开
+                put("ServerAliveInterval", "30000")
+                put("ServerAliveCountMax", "3")
             }
             session.setConfig(config)
-            session.timeout = FileSyncSettings.getInstance().connectTimeout
+            // 全局超时设置
+            session.timeout = timeout
 
+            LOG.info("Connecting to ${serverConfig.displayAddress} with timeout ${timeout}ms...")
             session.connect()
             this.session = session
             LOG.info("SSH connected to ${serverConfig.displayAddress}")
             true
         } catch (e: Exception) {
-            LOG.error("SSH connection failed to ${serverConfig.displayAddress}", e)
+            val errorMsg = "SSH connection failed to ${serverConfig.displayAddress}: ${e.message}"
+            LOG.error(errorMsg, e)
+            // 记录更详细的错误信息便于调试
+            println("[DEBUG] $errorMsg")
+            e.printStackTrace()
             false
         }
     }
