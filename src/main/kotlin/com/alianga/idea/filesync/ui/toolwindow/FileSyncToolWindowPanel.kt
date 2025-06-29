@@ -12,6 +12,7 @@ import com.alianga.idea.filesync.service.HistoryManager
 import com.alianga.idea.filesync.service.MappingManager
 import com.alianga.idea.filesync.service.ServerManager
 import com.alianga.idea.filesync.service.SyncService
+import com.alianga.idea.filesync.service.TerminalService
 import com.alianga.idea.filesync.service.UpdateReportFormatter
 import com.alianga.idea.filesync.ui.dialog.RemotePathChooserDialog
 import com.alianga.idea.filesync.ui.settings.MappingEditDialog
@@ -129,8 +130,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         toolbar.targetComponent = this
 
         // ===== 操作面板 =====
+        val serverWithTerminalPanel = JPanel(BorderLayout(6, 0)).apply {
+            add(serverCombo, BorderLayout.CENTER)
+            add(createIconButton("打开终端", AllIcons.Nodes.Console) { openTerminal() }, BorderLayout.EAST)
+        }
         val serverPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent("目标服务器:", serverCombo)
+            .addLabeledComponent("目标服务器:", serverWithTerminalPanel)
             .panel
 
         val filePanel = FormBuilder.createFormBuilder()
@@ -155,7 +160,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(createActionButton("开始部署", AllIcons.Actions.Execute) { startDeploy() })
             add(Box.createHorizontalStrut(8))
             add(createActionButton("快速推送", AllIcons.Actions.Upload) { quickPush() })
-            add(Box.createHorizontalStrut(16))
+            add(Box.createHorizontalStrut(8))
             add(createActionButton("保存为映射", AllIcons.Actions.MenuSaveall) { saveAsMapping() })
         }
 
@@ -725,6 +730,27 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     /**
+     * 打开 SSH 终端连接到当前选中的服务器
+     */
+    private fun openTerminal() {
+        val serverId = getSelectedServerId()
+        if (serverId == null) {
+            Messages.showWarningDialog("请先选择目标服务器", "打开终端")
+            return
+        }
+
+        val server = serverManager.getServer(serverId)
+        if (server == null) {
+            Messages.showErrorDialog("找不到服务器配置", "打开终端")
+            return
+        }
+
+        if (!TerminalService.getInstance().openTerminal(project, server)) {
+            Messages.showErrorDialog("无法打开 SSH 终端，请确保 Terminal 插件已启用", "打开终端")
+        }
+    }
+
+    /**
      * 将当前操作面板的配置保存为目录映射
      */
     private fun saveAsMapping() {
@@ -774,5 +800,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     private fun createActionButton(text: String, icon: Icon, handler: () -> Unit): JButton {
         return JButton(text, icon).apply { addActionListener { handler() } }
+    }
+
+    private fun createIconButton(toolTip: String, icon: Icon, handler: () -> Unit): JButton {
+        return JButton(icon).apply {
+            this.toolTipText = toolTip
+            isFocusable = false
+            addActionListener { handler() }
+        }
     }
 }

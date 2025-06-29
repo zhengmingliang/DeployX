@@ -14,12 +14,14 @@
             <li>💾 智能备份：支持备份源配置、压缩包备份和选择文件打包备份</li>
             <li>📦 智能解压：上传后可按配置解压压缩包</li>
             <li>📜 日志/历史/报告：按服务器拆分日志 Tab，支持历史记录、重新部署、复制/导出更新报告</li>
+            <li>🖥️ SSH 终端：一键打开远程服务器 SSH 终端，支持密码和密钥认证</li>
         </ul>
     ]]></description>
 
     <idea-version since-build="223" until-build=""/>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
 
     <!-- ============================================================ -->
     <!--                        EXTENSIONS                             -->
@@ -41,6 +43,8 @@
             serviceImplementation="com.alianga.idea.filesync.service.DeployService"/>
         <applicationService
             serviceImplementation="com.alianga.idea.filesync.service.HistoryManager"/>
+        <applicationService
+            serviceImplementation="com.alianga.idea.filesync.service.TerminalService"/>
 
         <!-- Settings Page -->
         <applicationConfigurable
@@ -120,7 +124,20 @@
             <separator/>
             <reference id="FileSync.Deploy"/>
             <reference id="FileSync.PreviewSync"/>
+            <separator/>
+            <reference id="FileSync.OpenSshTerminal"/>
         </group>
+
+        <!-- Open SSH Terminal Action -->
+        <action id="FileSync.OpenSshTerminal"
+                class="com.alianga.idea.filesync.action.OpenSshTerminalAction"
+                text="Open SSH Terminal"
+                description="Open SSH terminal to remote server"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt T"/>
+        </action>
     </actions>
 
 </idea-plugin>

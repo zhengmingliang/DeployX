@@ -4,6 +4,7 @@ import com.alianga.idea.filesync.config.FileSyncSettings
 import com.alianga.idea.filesync.model.ServerConfig
 import com.intellij.openapi.diagnostic.Logger
 import com.jcraft.jsch.ChannelExec
+import com.jcraft.jsch.ChannelShell
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
@@ -184,6 +185,21 @@ class SshConnection(private val serverConfig: ServerConfig) {
         session?.disconnect()
         session = null
         LOG.info("SSH disconnected from ${serverConfig.displayAddress}")
+    }
+
+
+    /**
+     * 打开 Shell 通道，用于交互式终端
+     * @param termType 终端类型，如 xterm, vt100, ansi 等
+     */
+    fun openShellChannel(termType: String = "xterm"): ChannelShell {
+        val session = this.session ?: throw IllegalStateException("SSH session not connected")
+        val channel = session.openChannel("shell") as ChannelShell
+        channel.setPty(true)  // 启用伪终端
+        channel.setPtyType(termType)
+        channel.connect()
+        LOG.info("Shell channel opened: $termType for ${serverConfig.displayAddress}")
+        return channel
     }
 
     /**
