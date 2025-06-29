@@ -73,7 +73,7 @@ class SyncFileAction : AnAction() {
         }
 
         val skipped = files.size - items.size
-        val panel = FileSyncToolWindowPanel.activePanel
+        val panel = FileSyncToolWindowPanel.getPanel(project)
         if (panel != null) {
             if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
             panel.executeUploadBatch(items)

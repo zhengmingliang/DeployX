@@ -46,10 +46,17 @@ import javax.swing.*
 class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPanel(true, true) {
 
     companion object {
-        /** 当前活跃的面板实例，供 Action 调用 */
-        @Volatile
-        var activePanel: FileSyncToolWindowPanel? = null
-            private set
+        /** 按 Project 存储面板实例，供 Action 调用 */
+        private val panelByProject = linkedMapOf<String, FileSyncToolWindowPanel>()
+
+        fun getPanel(project: Project): FileSyncToolWindowPanel? {
+            return panelByProject[project.hashCode().toString()]
+        }
+
+        /** 供兼容旧代码使用，建议使用 getPanel(project) */
+        @Deprecated("请使用 getPanel(Project) 方法", ReplaceWith("getPanel(project)"))
+        val activePanel: FileSyncToolWindowPanel?
+            get() = panelByProject.values.lastOrNull()
     }
 
     private val serverManager = ServerManager.getInstance()
@@ -89,7 +96,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private var lastUpdateReportText: String = ""
 
     init {
-        activePanel = this
+        panelByProject[project.hashCode().toString()] = this
         setupUI()
         setupActions()
         refreshServerCombo()

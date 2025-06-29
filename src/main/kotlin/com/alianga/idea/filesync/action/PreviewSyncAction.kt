@@ -48,7 +48,7 @@ class PreviewSyncAction : AnAction() {
 
         ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
 
-        val panel = FileSyncToolWindowPanel.activePanel
+        val panel = FileSyncToolWindowPanel.getPanel(project)
         if (panel != null) {
             if (previewItems.size < files.size) panel.appendLog("[WARN] 有 ${files.size - previewItems.size} 个文件未匹配到映射，已跳过")
             panel.executePreviewBatch(previewItems)
