@@ -115,10 +115,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(createAction("Copy Report", AllIcons.Actions.Copy) {
                 copyLastReport()
             })
-            add(createAction("Export Report", AllIcons.Actions.MenuSaveall) {
+            add(createAction("Export Report", AllIcons.ToolbarDecorator.Export) {
                 exportLastReport()
             })
-            add(createAction("Clear Log", AllIcons.Actions.GC) {
+            add(createAction("Clear Log", AllIcons.Actions.ClearCash) {
                 logArea.text = ""
                 serverLogAreas.values.forEach { it.text = "" }
             })
@@ -154,7 +154,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(Box.createHorizontalStrut(8))
             add(createActionButton("快速推送", AllIcons.Actions.Upload) { quickPush() })
             add(Box.createHorizontalStrut(16))
-            add(createActionButton("保存为映射", AllIcons.Actions.AddToDictionary) { saveAsMapping() })
+            add(createActionButton("保存为映射", AllIcons.Actions.MenuSaveall) { saveAsMapping() })
         }
 
         val progressPanel = JPanel(BorderLayout(8, 0)).apply {
