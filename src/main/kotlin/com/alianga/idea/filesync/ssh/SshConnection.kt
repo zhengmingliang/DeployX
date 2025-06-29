@@ -26,6 +26,13 @@ class SshConnection(private val serverConfig: ServerConfig) {
      * 建立 SSH 连接（带重试机制）
      */
     fun connect(): Boolean {
+        return connectWithRetry().success
+    }
+
+    /**
+     * 建立 SSH 连接，返回详细结果（带重试机制）
+     */
+    fun connectWithDetails(): ConnectResult {
         return connectWithRetry()
     }
 
@@ -33,7 +40,7 @@ class SshConnection(private val serverConfig: ServerConfig) {
      * 建立 SSH 连接，支持重试
      * 针对服务器 SSH 连接限制（如 MaxStartups）或网络波动进行自动重试
      */
-    private fun connectWithRetry(maxRetries: Int = 3, retryDelayMs: Long = 2000): Boolean {
+    private fun connectWithRetry(maxRetries: Int = 3, retryDelayMs: Long = 2000): ConnectResult {
         var lastException: Exception? = null
 
         for (attempt in 1..maxRetries) {
@@ -79,7 +86,7 @@ class SshConnection(private val serverConfig: ServerConfig) {
                 session.connect()
                 this.session = session
                 LOG.info("SSH connected to ${serverConfig.displayAddress}")
-                return true
+                return ConnectResult(true)
             } catch (e: Exception) {
                 lastException = e
                 val errorMsg = "SSH connection attempt $attempt failed to ${serverConfig.displayAddress}: ${e.message}"
@@ -94,10 +101,11 @@ class SshConnection(private val serverConfig: ServerConfig) {
 
         // 所有重试都失败
         val finalErrorMsg = "SSH connection failed after $maxRetries attempts to ${serverConfig.displayAddress}: ${lastException?.message}"
+        val exceptionClass = lastException?.javaClass?.simpleName
         LOG.error(finalErrorMsg, lastException)
         println("[DEBUG] $finalErrorMsg")
         lastException?.printStackTrace()
-        return false
+        return ConnectResult(false, finalErrorMsg, exceptionClass)
     }
 
     /**
@@ -193,5 +201,14 @@ class SshConnection(private val serverConfig: ServerConfig) {
     data class ConnectionTestResult(
         val success: Boolean,
         val message: String
+    )
+
+    /**
+     * SSH 连接结果，包含详细错误信息
+     */
+    data class ConnectResult(
+        val success: Boolean,
+        val errorMessage: String? = null,
+        val exceptionClass: String? = null
     )
 }

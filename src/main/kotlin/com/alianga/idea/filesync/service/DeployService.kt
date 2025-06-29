@@ -98,10 +98,15 @@ class DeployService {
             try {
                 if (sshConnection != null) {
                     groupLog("正在连接服务器 ${server.displayAddress} 以执行命令...")
-                    if (!sshConnection.connect()) {
-                        val result = SyncResult(false, error = "无法连接服务器执行命令: ${server.displayAddress}")
+                    val connectResult = sshConnection.connectWithDetails()
+                    if (!connectResult.success) {
+                        val errorDetail = if (connectResult.exceptionClass != null) " (${connectResult.exceptionClass})" else ""
+                        val result = SyncResult(false, error = "无法连接服务器执行命令: ${server.displayAddress}$errorDetail")
                         results.add(result)
                         groupLog("[ERROR] ${result.error}")
+                        if (connectResult.errorMessage != null) {
+                            groupLog("[DETAIL] ${connectResult.errorMessage}")
+                        }
                         return@forEach
                     }
                 }
@@ -217,15 +222,20 @@ class DeployService {
             val sshConnection = if (needsSshConnection) {
                 groupLog("正在连接服务器 ${server.displayAddress}...")
                 val conn = SshConnection(server)
-                if (!conn.connect()) {
+                val connectResult = conn.connectWithDetails()
+                if (!connectResult.success) {
+                    val errorDetail = if (connectResult.exceptionClass != null) " (${connectResult.exceptionClass})" else ""
                     val result = DeployResult(
                         false,
                         taskId = taskId,
-                        error = "无法连接到服务器: ${server.displayAddress}",
+                        error = "无法连接到服务器: ${server.displayAddress}$errorDetail",
                         duration = System.currentTimeMillis() - startTime
                     )
                     results.add(result)
                     groupLog("[ERROR] ${result.error}")
+                    if (connectResult.errorMessage != null) {
+                        groupLog("[DETAIL] ${connectResult.errorMessage}")
+                    }
                     return@forEach
                 }
                 groupLog("SSH 连接成功")
@@ -447,13 +457,21 @@ class DeployService {
         val sshConnection = if (needsSshConnection) {
             logCallback?.invoke("正在连接服务器 ${server.displayAddress}...")
             val conn = SshConnection(server)
-            if (!conn.connect()) {
-                logCallback?.invoke("[ERROR] 无法连接到服务器: ${server.displayAddress}")
+            val connectResult = conn.connectWithDetails()
+            if (!connectResult.success) {
+                val errorDetail = if (connectResult.exceptionClass != null) " (${connectResult.exceptionClass})" else ""
+                logCallback?.invoke("[ERROR] 无法连接到服务器: ${server.displayAddress}$errorDetail")
+                if (connectResult.errorMessage != null) {
+                    logCallback?.invoke("[DETAIL] ${connectResult.errorMessage}")
+                }
                 return DeployResult(
                     success = false,
                     taskId = taskId,
-                    error = "无法连接到服务器: ${server.displayAddress}",
-                    logs = listOf("错误: 无法连接到服务器")
+                    error = "无法连接到服务器: ${server.displayAddress}$errorDetail",
+                    logs = listOfNotNull(
+                        "错误: 无法连接到服务器",
+                        connectResult.errorMessage?.let { "详情: $it" }
+                    )
                 )
             }
             logCallback?.invoke("SSH 连接成功")
