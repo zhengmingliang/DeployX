@@ -1,5 +1,7 @@
 # Gradle
 .gradle/
+.codegraph
+.kotlin
 build/
 
 # IntelliJ IDEA

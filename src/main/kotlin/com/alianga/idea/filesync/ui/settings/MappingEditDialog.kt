@@ -2,6 +2,7 @@ package com.alianga.idea.filesync.ui.settings
 
 import com.alianga.idea.filesync.model.MappingConfig
 import com.alianga.idea.filesync.service.ServerManager
+import com.alianga.idea.filesync.ui.dialog.RemotePathChooserDialog
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
@@ -25,7 +26,7 @@ class MappingEditDialog(
     private val nameField = JBTextField()
     private val localDirField = TextFieldWithBrowseButton()
     private val serverCombo = JComboBox<String>()
-    private val remoteDirField = JBTextField()
+    private val remoteDirField = TextFieldWithBrowseButton()
     private val backupEnabledCheck = JBCheckBox("启用部署前备份")
     private val backupDirField = JBTextField()
     private val backupSourceField = JBTextField()
@@ -59,6 +60,7 @@ class MappingEditDialog(
 
         setupServerCombo()
         setupLocalDirBrowser()
+        setupRemoteDirBrowser()
 
         // 备份/解压启用状态联动
         backupEnabledCheck.addChangeListener {
@@ -100,6 +102,24 @@ class MappingEditDialog(
             null,
             FileChooserDescriptorFactory.createSingleFolderDescriptor()
         )
+    }
+
+    private fun setupRemoteDirBrowser() {
+        remoteDirField.addActionListener {
+            // 获取当前选中的服务器
+            val selectedServerStr = serverCombo.selectedItem?.toString() ?: return@addActionListener
+            val serverId = selectedServerStr.substringBefore(" - ")
+            val server = ServerManager.getInstance().getServer(serverId) ?: return@addActionListener
+
+            // 打开远程路径选择对话框
+            val currentPath = remoteDirField.text.trim().ifBlank { "/" }
+            val dialog = RemotePathChooserDialog(server, currentPath)
+            if (dialog.showAndGet()) {
+                remoteDirField.text = dialog.getSelectedPath()
+            }
+        }
+        // 设置工具提示
+        remoteDirField.toolTipText = "点击右侧按钮浏览远程服务器目录，或直接输入路径"
     }
 
     private fun fillData(mapping: MappingConfig, nameEditable: Boolean) {

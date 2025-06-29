@@ -13,6 +13,7 @@ import com.alianga.idea.filesync.service.MappingManager
 import com.alianga.idea.filesync.service.ServerManager
 import com.alianga.idea.filesync.service.SyncService
 import com.alianga.idea.filesync.service.UpdateReportFormatter
+import com.alianga.idea.filesync.ui.dialog.RemotePathChooserDialog
 import com.alianga.idea.filesync.ui.settings.MappingEditDialog
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.*
@@ -31,6 +32,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
+import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.util.ui.FormBuilder
 import java.awt.BorderLayout
 import java.awt.Font
@@ -66,7 +68,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     // 操作 tab 组件
     private val serverCombo = JComboBox<String>()
     private val localPathField = JBTextField()
-    private val remotePathField = JBTextField()
+    private val remotePathField = TextFieldWithBrowseButton()
     private val backupCheck = JBCheckBox("部署前备份")
     private val backupDirField = JBTextField()
     private val unzipCheck = JBCheckBox("上传后解压")
@@ -223,6 +225,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         unzipCheck.addChangeListener { unzipDestField.isEnabled = unzipCheck.isSelected }
         backupDirField.isEnabled = false
         unzipDestField.isEnabled = false
+
+        // 设置远程路径浏览按钮
+        remotePathField.addActionListener {
+            val selectedServerStr = serverCombo.selectedItem?.toString() ?: return@addActionListener
+            val serverId = selectedServerStr.substringBefore(" - ")
+            val server = serverManager.getServer(serverId) ?: return@addActionListener
+
+            val currentPath = remotePathField.text.trim().ifBlank { "/" }
+            val dialog = RemotePathChooserDialog(server, currentPath)
+            if (dialog.showAndGet()) {
+                remotePathField.text = dialog.getSelectedPath()
+            }
+        }
+        remotePathField.toolTipText = "点击右侧按钮浏览远程服务器目录，或直接输入路径"
     }
 
     private fun refreshServerCombo() {
