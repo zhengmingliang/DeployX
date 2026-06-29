@@ -5,14 +5,18 @@ import com.alianga.idea.filesync.model.DeployRequest
 import com.alianga.idea.filesync.model.HistoryRecord
 import com.alianga.idea.filesync.model.MappingConfig
 import com.alianga.idea.filesync.model.UploadItem
+import com.alianga.idea.filesync.model.UpdateReport
+import com.alianga.idea.filesync.model.UpdateReportGroup
 import com.alianga.idea.filesync.service.DeployService
 import com.alianga.idea.filesync.service.HistoryManager
 import com.alianga.idea.filesync.service.MappingManager
 import com.alianga.idea.filesync.service.ServerManager
 import com.alianga.idea.filesync.service.SyncService
+import com.alianga.idea.filesync.service.UpdateReportFormatter
 import com.alianga.idea.filesync.ui.settings.MappingEditDialog
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
@@ -30,6 +34,7 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import java.awt.BorderLayout
 import java.awt.Font
+import java.awt.datatransfer.StringSelection
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import javax.swing.*
@@ -78,6 +83,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val tabbedPane = JBTabbedPane()
 
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+    private var lastUpdateReport: UpdateReport? = null
+    private var lastUpdateReportText: String = ""
 
     init {
         activePanel = this
@@ -95,6 +102,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(createAction("Refresh", AllIcons.Actions.Refresh) {
                 refreshServerCombo()
                 refreshHistory()
+            })
+            add(createAction("Copy Report", AllIcons.Actions.Copy) {
+                copyLastReport()
+            })
+            add(createAction("Export Report", AllIcons.Actions.MenuSaveall) {
+                exportLastReport()
             })
             add(createAction("Clear Log", AllIcons.Actions.GC) {
                 logArea.text = ""
@@ -343,6 +356,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 )
                 SwingUtilities.invokeLater {
                     val successCount = results.count { it.success }
+                    updateLastReport("UPLOAD", results.mapNotNull { it.reportGroup })
                     progressBar.value = 100
                     progressLabel.text = "批量上传完成：$successCount/${results.size} 组成功"
                     refreshHistory()
@@ -378,6 +392,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 )
                 SwingUtilities.invokeLater {
                     val successCount = results.count { it.success }
+                    updateLastReport("DEPLOY", results.mapNotNull { it.reportGroup })
                     progressBar.value = 100
                     progressLabel.text = "批量部署完成：$successCount/${results.size} 组成功"
                     refreshHistory()
@@ -445,6 +460,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 )
                 SwingUtilities.invokeLater {
                     progressBar.value = if (result.success) 100 else progressBar.value
+                    updateLastReport("DEPLOY", listOfNotNull(result.reportGroup))
                     progressLabel.text = if (result.success) "部署完成" else "部署失败: ${result.error ?: ""}"
                     refreshHistory()
                 }
@@ -476,6 +492,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 )
                 SwingUtilities.invokeLater {
                     progressBar.value = if (result.success) 100 else progressBar.value
+                    updateLastReport("QUICK_PUSH", listOfNotNull(result.reportGroup))
                     progressLabel.text = if (result.success) "推送完成" else "推送失败: ${result.error ?: ""}"
                     refreshHistory()
                 }
@@ -502,6 +519,38 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 }
             }
         })
+    }
+
+    private fun updateLastReport(operationType: String, groups: List<UpdateReportGroup>) {
+        if (groups.isEmpty()) return
+        val report = UpdateReport(operationType = operationType, groups = groups)
+        lastUpdateReport = report
+        lastUpdateReportText = UpdateReportFormatter.format(report)
+        appendLog("[REPORT] 已生成更新报告，可复制或导出")
+    }
+
+    private fun copyLastReport() {
+        if (lastUpdateReportText.isBlank()) {
+            Messages.showWarningDialog("当前还没有可复制的更新报告", "Copy Report")
+            return
+        }
+        CopyPasteManager.getInstance().setContents(StringSelection(lastUpdateReportText))
+        Messages.showInfoMessage("更新报告已复制到剪贴板", "Copy Report")
+    }
+
+    private fun exportLastReport() {
+        if (lastUpdateReportText.isBlank()) {
+            Messages.showWarningDialog("当前还没有可导出的更新报告", "Export Report")
+            return
+        }
+        val chooser = JFileChooser().apply {
+            selectedFile = java.io.File("file-sync-report-${System.currentTimeMillis()}.md")
+        }
+        val result = chooser.showSaveDialog(this)
+        if (result == JFileChooser.APPROVE_OPTION) {
+            chooser.selectedFile.writeText(lastUpdateReportText)
+            Messages.showInfoMessage("更新报告已导出: ${chooser.selectedFile.absolutePath}", "Export Report")
+        }
     }
 
     fun appendLog(message: String) {
@@ -579,6 +628,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 )
                 SwingUtilities.invokeLater {
                     progressBar.value = if (result.success) 100 else progressBar.value
+                    updateLastReport("MANUAL_DEPLOY", listOfNotNull(result.reportGroup))
                     progressLabel.text = if (result.success) "部署完成" else "部署失败"
                     refreshHistory()
                 }
@@ -614,6 +664,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 )
                 SwingUtilities.invokeLater {
                     progressBar.value = if (result.success) 100 else progressBar.value
+                    updateLastReport("QUICK_PUSH", listOfNotNull(result.reportGroup))
                     progressLabel.text = if (result.success) "推送完成" else "推送失败"
                     refreshHistory()
                 }

@@ -53,7 +53,22 @@ data class HistoryRecord(
     val preCommand: String = "",
 
     @SerializedName("post_command")
-    val postCommand: String = ""
+    val postCommand: String = "",
+
+    @SerializedName("relative_paths")
+    val relativePaths: List<String> = emptyList(),
+
+    @SerializedName("remote_paths")
+    val remotePaths: List<String> = emptyList(),
+
+    @SerializedName("server_name")
+    val serverName: String = "",
+
+    @SerializedName("server_address")
+    val serverAddress: String = "",
+
+    @SerializedName("report_text")
+    val reportText: String = ""
 ) {
     enum class OperationType(val value: String) {
         @SerializedName("sync")

@@ -122,7 +122,21 @@ class DeployService {
                     logCallback = logCallback,
                     progressCallback = progressCallback
                 )
-                results.add(result)
+
+                val resultWithReport = result.copy(
+                    reportGroup = buildReportGroup(
+                        server = server,
+                        sourceBaseDir = key.sourceBaseDir,
+                        remoteBaseDir = key.remoteBaseDir,
+                        localPaths = groupItems.map { it.localPath },
+                        relativePaths = relativePaths,
+                        success = result.success,
+                        duration = result.duration,
+                        totalSize = result.totalSize,
+                        output = result.output
+                    )
+                )
+                results.add(resultWithReport)
 
                 if (!dryRun && !key.postCommand.isNullOrBlank()) {
                     logCallback?.invoke("[POST] 执行上传后命令: ${key.postCommand}")
@@ -304,13 +318,25 @@ class DeployService {
 
                 val duration = System.currentTimeMillis() - startTime
                 logCallback?.invoke("========== 部署分组完成！耗时: ${duration}ms ==========")
+                val reportGroup = buildReportGroup(
+                    server = server,
+                    sourceBaseDir = key.sourceBaseDir,
+                    remoteBaseDir = key.remoteBaseDir,
+                    localPaths = groupItems.map { it.localPath },
+                    relativePaths = groupItems.map { it.relativePath },
+                    success = true,
+                    duration = duration,
+                    totalSize = syncResult.totalSize,
+                    output = syncResult.output
+                )
                 val result = DeployResult(
                     success = true,
                     taskId = taskId,
                     backupPath = backupPath,
                     transferredFiles = syncResult.transferredFiles,
                     totalSize = syncResult.totalSize,
-                    duration = duration
+                    duration = duration,
+                    reportGroup = reportGroup
                 )
                 results.add(result)
                 saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS)
@@ -484,13 +510,26 @@ class DeployService {
             // 记录成功历史
             saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS)
 
+            val reportGroup = buildReportGroup(
+                server = server,
+                sourceBaseDir = File(request.localPath).parent ?: request.localPath,
+                remoteBaseDir = request.remotePath,
+                localPaths = listOf(request.localPath),
+                relativePaths = listOf(File(request.localPath).name),
+                success = true,
+                duration = duration,
+                totalSize = syncResult.totalSize,
+                output = syncResult.output
+            )
+
             return DeployResult(
                 success = true,
                 taskId = taskId,
                 backupPath = backupPath,
                 transferredFiles = syncResult.transferredFiles,
                 totalSize = syncResult.totalSize,
-                duration = duration
+                duration = duration,
+                reportGroup = reportGroup
             )
 
         } catch (e: Exception) {
@@ -567,6 +606,34 @@ class DeployService {
         return deploy(record.toDeployRequest(), logCallback, progressCallback)
     }
 
+    private fun buildReportGroup(
+        server: ServerConfig,
+        sourceBaseDir: String,
+        remoteBaseDir: String,
+        localPaths: List<String>,
+        relativePaths: List<String>,
+        success: Boolean,
+        duration: Long,
+        totalSize: Long,
+        output: String
+    ): UpdateReportGroup {
+        val normalizedRelativePaths = relativePaths.map { it.trim('/') }.filter { it.isNotBlank() }
+        return UpdateReportGroup(
+            serverId = server.id,
+            serverName = server.name,
+            serverAddress = server.displayAddress,
+            sourceBaseDir = sourceBaseDir,
+            remoteBaseDir = remoteBaseDir,
+            selectedLocalPaths = localPaths,
+            relativePaths = normalizedRelativePaths,
+            remotePaths = normalizedRelativePaths.map { joinRemotePath(remoteBaseDir, it) },
+            success = success,
+            duration = duration,
+            totalSize = totalSize,
+            rsyncOutput = output
+        )
+    }
+
     private fun saveGroupHistory(
         key: DeployGroupKey,
         items: List<DeployItem>,
@@ -574,6 +641,23 @@ class DeployService {
         duration: Long,
         status: HistoryRecord.OperationStatus
     ) {
+        val server = ServerManager.getInstance().getServer(key.serverId)
+        val reportGroup = if (server != null) {
+            buildReportGroup(
+                server = server,
+                sourceBaseDir = key.sourceBaseDir,
+                remoteBaseDir = key.remoteBaseDir,
+                localPaths = items.map { it.localPath },
+                relativePaths = items.map { it.relativePath },
+                success = status == HistoryRecord.OperationStatus.SUCCESS,
+                duration = duration,
+                totalSize = syncResult.totalSize,
+                output = syncResult.output
+            )
+        } else null
+        val reportText = reportGroup?.let {
+            UpdateReportFormatter.format(UpdateReport(operationType = "DEPLOY", groups = listOf(it)))
+        } ?: ""
         HistoryManager.getInstance().addRecord(
             HistoryRecord(
                 type = HistoryRecord.OperationType.DEPLOY,
@@ -588,7 +672,12 @@ class DeployService {
                 unzipDest = key.unzipDest ?: "",
                 excludePatterns = key.excludePatterns,
                 preCommand = key.preCommand ?: "",
-                postCommand = key.postCommand ?: ""
+                postCommand = key.postCommand ?: "",
+                relativePaths = reportGroup?.relativePaths ?: emptyList(),
+                remotePaths = reportGroup?.remotePaths ?: emptyList(),
+                serverName = reportGroup?.serverName ?: "",
+                serverAddress = reportGroup?.serverAddress ?: "",
+                reportText = reportText
             )
         )
     }
@@ -602,6 +691,23 @@ class DeployService {
         startTime: Long,
         status: com.alianga.idea.filesync.model.HistoryRecord.OperationStatus
     ) {
+        val server = ServerManager.getInstance().getServer(request.serverId)
+        val reportGroup = if (server != null) {
+            buildReportGroup(
+                server = server,
+                sourceBaseDir = File(request.localPath).parent ?: request.localPath,
+                remoteBaseDir = request.remotePath,
+                localPaths = listOf(request.localPath),
+                relativePaths = listOf(File(request.localPath).name),
+                success = status == HistoryRecord.OperationStatus.SUCCESS,
+                duration = System.currentTimeMillis() - startTime,
+                totalSize = syncResult.totalSize,
+                output = syncResult.output
+            )
+        } else null
+        val reportText = reportGroup?.let {
+            UpdateReportFormatter.format(UpdateReport(operationType = "DEPLOY", groups = listOf(it)))
+        } ?: ""
         HistoryManager.getInstance().addRecord(
             HistoryRecord(
                 type = HistoryRecord.OperationType.DEPLOY,
@@ -616,7 +722,12 @@ class DeployService {
                 unzipDest = request.unzipDest ?: "",
                 excludePatterns = request.excludePatterns,
                 preCommand = request.preCommand ?: "",
-                postCommand = request.postCommand ?: ""
+                postCommand = request.postCommand ?: "",
+                relativePaths = reportGroup?.relativePaths ?: emptyList(),
+                remotePaths = reportGroup?.remotePaths ?: emptyList(),
+                serverName = reportGroup?.serverName ?: "",
+                serverAddress = reportGroup?.serverAddress ?: "",
+                reportText = reportText
             )
         )
     }

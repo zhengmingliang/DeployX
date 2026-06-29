@@ -11,5 +11,6 @@ data class DeployResult(
     val totalSize: Long = 0,
     val duration: Long = 0,
     val logs: List<String> = emptyList(),
-    val error: String? = null
+    val error: String? = null,
+    val reportGroup: UpdateReportGroup? = null
 )

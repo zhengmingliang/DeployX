@@ -9,5 +9,6 @@ data class SyncResult(
     val totalSize: Long = 0,
     val duration: Long = 0,
     val error: String? = null,
-    val output: String = ""
+    val output: String = "",
+    val reportGroup: UpdateReportGroup? = null
 )
