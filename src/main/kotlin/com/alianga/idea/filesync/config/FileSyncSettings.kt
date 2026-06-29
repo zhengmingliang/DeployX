@@ -29,7 +29,8 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
         // rsync 配置
         var rsyncPath: String = "rsync",
         var rsyncOptions: String = "-avz --progress --stats",
-        var sshpassAvailable: Boolean = true
+        var sshpassAvailable: Boolean = true,
+        var transferMode: String = "AUTO"
     )
 
     private var myState = State()
@@ -88,4 +89,8 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
     var sshpassAvailable: Boolean
         get() = myState.sshpassAvailable
         set(value) { myState.sshpassAvailable = value }
+
+    var transferMode: String
+        get() = myState.transferMode
+        set(value) { myState.transferMode = value }
 }

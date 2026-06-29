@@ -4,6 +4,7 @@ import com.alianga.idea.filesync.config.FileSyncSettings
 import com.alianga.idea.filesync.model.ServerConfig
 import com.intellij.openapi.diagnostic.Logger
 import com.jcraft.jsch.ChannelExec
+import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import java.io.ByteArrayOutputStream
@@ -115,6 +116,16 @@ class SshConnection(private val serverConfig: ServerConfig) {
         } finally {
             disconnect()
         }
+    }
+
+    /**
+     * 打开 SFTP 通道。调用方负责 disconnect channel。
+     */
+    fun openSftpChannel(): ChannelSftp {
+        val session = this.session ?: throw IllegalStateException("SSH session not connected")
+        val channel = session.openChannel("sftp") as ChannelSftp
+        channel.connect()
+        return channel
     }
 
     /**

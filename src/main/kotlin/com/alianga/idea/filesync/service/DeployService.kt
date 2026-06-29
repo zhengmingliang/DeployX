@@ -117,7 +117,7 @@ class DeployService {
                     if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
                 }.filter { it.isNotBlank() }
 
-                val result = rsyncWrapper.syncFilesFrom(
+                val result = TransferService.getInstance().transferFilesFrom(
                     sourceBaseDir = key.sourceBaseDir,
                     remoteBaseDir = key.remoteBaseDir,
                     relativePaths = relativePaths,
@@ -250,7 +250,7 @@ class DeployService {
                 val relativePaths = groupItems.map { item ->
                     if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
                 }.filter { it.isNotBlank() }
-                val syncResult = rsyncWrapper.syncFilesFrom(
+                val syncResult = TransferService.getInstance().transferFilesFrom(
                     sourceBaseDir = key.sourceBaseDir,
                     remoteBaseDir = key.remoteBaseDir,
                     relativePaths = relativePaths,
@@ -448,7 +448,7 @@ class DeployService {
             // 步骤 2: 上传文件
             logCallback?.invoke("[2/3] 上传文件...")
             val syncOptions = SyncOptions(excludePatterns = request.excludePatterns)
-            val syncResult = rsyncWrapper.sync(
+            val syncResult = TransferService.getInstance().transfer(
                 request.localPath,
                 request.remotePath,
                 server,

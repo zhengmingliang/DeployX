@@ -40,7 +40,7 @@ class SyncService {
         val server = ServerManager.getInstance().getServer(serverId)
             ?: return SyncResult(false, error = "服务器不存在: $serverId")
 
-        return rsyncWrapper.sync(localPath, remotePath, server, options, logCallback, progressCallback)
+        return TransferService.getInstance().transfer(localPath, remotePath, server, options, logCallback, progressCallback)
     }
 
     /**
@@ -58,6 +58,9 @@ class SyncService {
         val server = ServerManager.getInstance().getServer(serverId)
             ?: return SyncResult(false, error = "服务器不存在: $serverId")
 
+        if (!TransferService.getInstance().canPreviewWithRsync()) {
+            return SyncResult(false, error = "预览需要 rsync。当前本机未安装/未配置 rsync，SFTP fallback 只能实际上传，无法提供 rsync dry-run 预览。")
+        }
         val dryRunOptions = options.copy(dryRun = true)
         return rsyncWrapper.sync(localPath, remotePath, server, dryRunOptions, logCallback)
     }
