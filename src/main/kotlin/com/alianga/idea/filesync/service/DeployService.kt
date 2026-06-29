@@ -55,7 +55,8 @@ class DeployService {
         items: List<UploadItem>,
         dryRun: Boolean = false,
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        serverLogCallback: ((serverId: String, line: String) -> Unit)? = null
     ): List<SyncResult> {
         if (items.isEmpty()) return emptyList()
 
@@ -73,19 +74,22 @@ class DeployService {
 
         val results = mutableListOf<SyncResult>()
         groups.forEach { (key, groupItems) ->
+            val groupLog: (String) -> Unit = { line ->
+                if (serverLogCallback != null) serverLogCallback.invoke(key.serverId, line) else logCallback?.invoke(line)
+            }
             val server = ServerManager.getInstance().getServer(key.serverId)
             if (server == null) {
                 val result = SyncResult(false, error = "服务器不存在: ${key.serverId}")
                 results.add(result)
-                logCallback?.invoke("[ERROR] ${result.error}")
+                groupLog("[ERROR] ${result.error}")
                 return@forEach
             }
 
-            logCallback?.invoke("========== ${if (dryRun) "预览" else "上传"}分组 ==========")
-            logCallback?.invoke("服务器: ${server.displayAddress}")
-            logCallback?.invoke("本地根目录: ${key.sourceBaseDir}")
-            logCallback?.invoke("远程根目录: ${key.remoteBaseDir}")
-            logCallback?.invoke("文件数: ${groupItems.size}")
+            groupLog("========== ${if (dryRun) "预览" else "上传"}分组 ==========")
+            groupLog("服务器: ${server.displayAddress}")
+            groupLog("本地根目录: ${key.sourceBaseDir}")
+            groupLog("远程根目录: ${key.remoteBaseDir}")
+            groupLog("文件数: ${groupItems.size}")
 
             val sshConnection = if (!dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
                 SshConnection(server)
@@ -93,20 +97,20 @@ class DeployService {
 
             try {
                 if (sshConnection != null) {
-                    logCallback?.invoke("正在连接服务器 ${server.displayAddress} 以执行命令...")
+                    groupLog("正在连接服务器 ${server.displayAddress} 以执行命令...")
                     if (!sshConnection.connect()) {
                         val result = SyncResult(false, error = "无法连接服务器执行命令: ${server.displayAddress}")
                         results.add(result)
-                        logCallback?.invoke("[ERROR] ${result.error}")
+                        groupLog("[ERROR] ${result.error}")
                         return@forEach
                     }
                 }
 
                 if (!dryRun && !key.preCommand.isNullOrBlank()) {
-                    logCallback?.invoke("[PRE] 执行上传前命令: ${key.preCommand}")
+                    groupLog("[PRE] 执行上传前命令: ${key.preCommand}")
                     val preResult = sshConnection!!.executeCommand(key.preCommand)
-                    if (preResult.output.isNotBlank()) logCallback?.invoke("[PRE] 输出: ${preResult.output.trim()}")
-                    if (!preResult.success) logCallback?.invoke("[WARN] 上传前命令失败 (${preResult.exitCode}): ${preResult.error}")
+                    if (preResult.output.isNotBlank()) groupLog("[PRE] 输出: ${preResult.output.trim()}")
+                    if (!preResult.success) groupLog("[WARN] 上传前命令失败 (${preResult.exitCode}): ${preResult.error}")
                 }
 
                 val relativePaths = groupItems.map { item ->
@@ -119,7 +123,7 @@ class DeployService {
                     relativePaths = relativePaths,
                     serverConfig = server,
                     options = SyncOptions(excludePatterns = key.excludePatterns, dryRun = dryRun),
-                    logCallback = logCallback,
+                    logCallback = groupLog,
                     progressCallback = progressCallback
                 )
 
@@ -139,10 +143,10 @@ class DeployService {
                 results.add(resultWithReport)
 
                 if (!dryRun && !key.postCommand.isNullOrBlank()) {
-                    logCallback?.invoke("[POST] 执行上传后命令: ${key.postCommand}")
+                    groupLog("[POST] 执行上传后命令: ${key.postCommand}")
                     val postResult = sshConnection!!.executeCommand(key.postCommand)
-                    if (postResult.output.isNotBlank()) logCallback?.invoke("[POST] 输出: ${postResult.output.trim()}")
-                    if (!postResult.success) logCallback?.invoke("[WARN] 上传后命令失败 (${postResult.exitCode}): ${postResult.error}")
+                    if (postResult.output.isNotBlank()) groupLog("[POST] 输出: ${postResult.output.trim()}")
+                    if (!postResult.success) groupLog("[WARN] 上传后命令失败 (${postResult.exitCode}): ${postResult.error}")
                 }
             } finally {
                 sshConnection?.disconnect()
@@ -158,7 +162,8 @@ class DeployService {
     fun deployBatch(
         items: List<DeployItem>,
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        serverLogCallback: ((serverId: String, line: String) -> Unit)? = null
     ): List<DeployResult> {
         if (items.isEmpty()) return emptyList()
         val groups = items.groupBy {
@@ -178,48 +183,51 @@ class DeployService {
 
         val results = mutableListOf<DeployResult>()
         groups.forEach { (key, groupItems) ->
+            val groupLog: (String) -> Unit = { line ->
+                if (serverLogCallback != null) serverLogCallback.invoke(key.serverId, line) else logCallback?.invoke(line)
+            }
             val startTime = System.currentTimeMillis()
             val taskId = UUID.randomUUID().toString().substring(0, 8)
             val server = ServerManager.getInstance().getServer(key.serverId)
             if (server == null) {
                 val result = DeployResult(false, taskId = taskId, error = "服务器不存在: ${key.serverId}")
                 results.add(result)
-                logCallback?.invoke("[ERROR] ${result.error}")
+                groupLog("[ERROR] ${result.error}")
                 return@forEach
             }
 
-            logCallback?.invoke("========== 部署分组 $taskId ==========")
-            logCallback?.invoke("服务器: ${server.displayAddress}")
-            logCallback?.invoke("本地根目录: ${key.sourceBaseDir}")
-            logCallback?.invoke("远程根目录: ${key.remoteBaseDir}")
-            logCallback?.invoke("文件数: ${groupItems.size}")
+            groupLog("========== 部署分组 $taskId ==========")
+            groupLog("服务器: ${server.displayAddress}")
+            groupLog("本地根目录: ${key.sourceBaseDir}")
+            groupLog("远程根目录: ${key.remoteBaseDir}")
+            groupLog("文件数: ${groupItems.size}")
 
             val sshConnection = SshConnection(server)
             try {
-                logCallback?.invoke("正在连接服务器 ${server.displayAddress}...")
+                groupLog("正在连接服务器 ${server.displayAddress}...")
                 if (!sshConnection.connect()) {
                     val result = DeployResult(false, taskId = taskId, error = "无法连接到服务器: ${server.displayAddress}")
                     results.add(result)
-                    logCallback?.invoke("[ERROR] ${result.error}")
+                    groupLog("[ERROR] ${result.error}")
                     return@forEach
                 }
-                logCallback?.invoke("SSH 连接成功")
+                groupLog("SSH 连接成功")
 
                 if (!key.preCommand.isNullOrBlank()) {
-                    logCallback?.invoke("[PRE] 执行上传前命令: ${key.preCommand}")
+                    groupLog("[PRE] 执行上传前命令: ${key.preCommand}")
                     val preResult = sshConnection.executeCommand(key.preCommand)
-                    if (preResult.output.isNotBlank()) logCallback?.invoke("[PRE] 输出: ${preResult.output.trim()}")
-                    if (!preResult.success) logCallback?.invoke("[WARN] 上传前命令执行失败 (${preResult.exitCode}): ${preResult.error}")
-                    else logCallback?.invoke("[PRE] 命令执行成功")
+                    if (preResult.output.isNotBlank()) groupLog("[PRE] 输出: ${preResult.output.trim()}")
+                    if (!preResult.success) groupLog("[WARN] 上传前命令执行失败 (${preResult.exitCode}): ${preResult.error}")
+                    else groupLog("[PRE] 命令执行成功")
                 }
 
                 val backupPath = if (!key.backupDir.isNullOrBlank()) {
                     val backupResult = if (!key.backupSource.isNullOrBlank()) {
-                        logCallback?.invoke("[1/3] 备份配置源: ${key.backupSource} → ${key.backupDir}")
-                        doBackup(sshConnection, key.backupSource, key.backupDir, logCallback)
+                        groupLog("[1/3] 备份配置源: ${key.backupSource} → ${key.backupDir}")
+                        doBackup(sshConnection, key.backupSource, key.backupDir, groupLog)
                     } else {
-                        logCallback?.invoke("[1/3] 备份本次选择的远程文件 → ${key.backupDir}")
-                        doBackupSelected(sshConnection, key.remoteBaseDir, groupItems.map { it.relativePath }, key.backupDir, logCallback)
+                        groupLog("[1/3] 备份本次选择的远程文件 → ${key.backupDir}")
+                        doBackupSelected(sshConnection, key.remoteBaseDir, groupItems.map { it.relativePath }, key.backupDir, groupLog)
                     }
                     if (!backupResult.success) {
                         val result = DeployResult(
@@ -229,16 +237,16 @@ class DeployService {
                             duration = System.currentTimeMillis() - startTime
                         )
                         results.add(result)
-                        logCallback?.invoke("[ERROR] ${result.error}")
+                        groupLog("[ERROR] ${result.error}")
                         return@forEach
                     }
                     backupResult.path
                 } else {
-                    logCallback?.invoke("[1/3] 跳过备份（未配置备份目录）")
+                    groupLog("[1/3] 跳过备份（未配置备份目录）")
                     null
                 }
 
-                logCallback?.invoke("[2/3] 批量上传文件...")
+                groupLog("[2/3] 批量上传文件...")
                 val relativePaths = groupItems.map { item ->
                     if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
                 }.filter { it.isNotBlank() }
@@ -248,7 +256,7 @@ class DeployService {
                     relativePaths = relativePaths,
                     serverConfig = server,
                     options = SyncOptions(excludePatterns = key.excludePatterns),
-                    logCallback = logCallback,
+                    logCallback = groupLog,
                     progressCallback = progressCallback
                 )
                 if (!syncResult.success) {
@@ -260,18 +268,18 @@ class DeployService {
                         duration = System.currentTimeMillis() - startTime
                     )
                     results.add(result)
-                    logCallback?.invoke("[ERROR] ${result.error}")
+                    groupLog("[ERROR] ${result.error}")
                     return@forEach
                 }
-                logCallback?.invoke("上传完成")
+                groupLog("上传完成")
 
                 if (!key.unzipDest.isNullOrBlank()) {
                     val zipItems = groupItems.filter { it.relativePath.endsWith(".zip", ignoreCase = true) }
                     when {
-                        zipItems.isEmpty() -> logCallback?.invoke("[3/3] 已配置解压，但本组没有 zip 文件，跳过解压")
+                        zipItems.isEmpty() -> groupLog("[3/3] 已配置解压，但本组没有 zip 文件，跳过解压")
                         zipItems.size == 1 -> {
                             val remoteZip = joinRemotePath(key.remoteBaseDir, zipItems.first().relativePath)
-                            logCallback?.invoke("[3/3] 解压远程文件: $remoteZip → ${key.unzipDest}")
+                            groupLog("[3/3] 解压远程文件: $remoteZip → ${key.unzipDest}")
                             val unzipResult = doUnzip(sshConnection, remoteZip, key.unzipDest)
                             if (!unzipResult.success) {
                                 val result = DeployResult(
@@ -284,10 +292,10 @@ class DeployService {
                                     duration = System.currentTimeMillis() - startTime
                                 )
                                 results.add(result)
-                                logCallback?.invoke("[ERROR] ${result.error}")
+                                groupLog("[ERROR] ${result.error}")
                                 return@forEach
                             }
-                            logCallback?.invoke("解压成功: ${key.unzipDest}")
+                            groupLog("解压成功: ${key.unzipDest}")
                         }
                         else -> {
                             val result = DeployResult(
@@ -300,24 +308,24 @@ class DeployService {
                                 duration = System.currentTimeMillis() - startTime
                             )
                             results.add(result)
-                            logCallback?.invoke("[ERROR] ${result.error}")
+                            groupLog("[ERROR] ${result.error}")
                             return@forEach
                         }
                     }
                 } else {
-                    logCallback?.invoke("[3/3] 跳过解压（未配置解压目标）")
+                    groupLog("[3/3] 跳过解压（未配置解压目标）")
                 }
 
                 if (!key.postCommand.isNullOrBlank()) {
-                    logCallback?.invoke("[POST] 执行上传后命令: ${key.postCommand}")
+                    groupLog("[POST] 执行上传后命令: ${key.postCommand}")
                     val postResult = sshConnection.executeCommand(key.postCommand)
-                    if (postResult.output.isNotBlank()) logCallback?.invoke("[POST] 输出: ${postResult.output.trim()}")
-                    if (!postResult.success) logCallback?.invoke("[WARN] 上传后命令执行失败 (${postResult.exitCode}): ${postResult.error}")
-                    else logCallback?.invoke("[POST] 命令执行成功")
+                    if (postResult.output.isNotBlank()) groupLog("[POST] 输出: ${postResult.output.trim()}")
+                    if (!postResult.success) groupLog("[WARN] 上传后命令执行失败 (${postResult.exitCode}): ${postResult.error}")
+                    else groupLog("[POST] 命令执行成功")
                 }
 
                 val duration = System.currentTimeMillis() - startTime
-                logCallback?.invoke("========== 部署分组完成！耗时: ${duration}ms ==========")
+                groupLog("========== 部署分组完成！耗时: ${duration}ms ==========")
                 val reportGroup = buildReportGroup(
                     server = server,
                     sourceBaseDir = key.sourceBaseDir,
@@ -344,7 +352,7 @@ class DeployService {
                 LOG.error("Batch deploy group failed", e)
                 val result = DeployResult(false, taskId = taskId, error = "部署异常: ${e.message}", duration = System.currentTimeMillis() - startTime)
                 results.add(result)
-                logCallback?.invoke("[ERROR] ${result.error}")
+                groupLog("[ERROR] ${result.error}")
             } finally {
                 sshConnection.disconnect()
             }

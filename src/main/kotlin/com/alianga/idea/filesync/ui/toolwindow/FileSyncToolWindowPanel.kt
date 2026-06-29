@@ -73,6 +73,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     // 日志 tab
     private val logArea = JBTextArea()
+    private val logTabbedPane = JBTabbedPane()
+    private val serverLogAreas = linkedMapOf<String, JBTextArea>()
 
     // 历史 tab
     private val historyListModel = DefaultListModel<String>()
@@ -111,6 +113,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             })
             add(createAction("Clear Log", AllIcons.Actions.GC) {
                 logArea.text = ""
+                serverLogAreas.values.forEach { it.text = "" }
             })
         }
         val toolbar = ActionManager.getInstance().createActionToolbar("FileSyncToolbar", actionGroup, true)
@@ -166,11 +169,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         operationPanel.add(progressPanel)
 
         // ===== 日志面板 =====
-        logArea.isEditable = false
-        logArea.font = Font("Monospaced", Font.PLAIN, 12)
-        logArea.lineWrap = true
-        logArea.wrapStyleWord = true
-        val logScrollPane = JBScrollPane(logArea)
+        configureLogArea(logArea)
+        logTabbedPane.addTab("全部", AllIcons.Nodes.LogFolder, JBScrollPane(logArea))
 
         // ===== 历史面板 =====
         historyList.addListSelectionListener { e ->
@@ -204,7 +204,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // ===== Tab 面板 =====
         tabbedPane.addTab("操作", AllIcons.Actions.Execute, JBScrollPane(operationPanel))
-        tabbedPane.addTab("日志", AllIcons.Nodes.LogFolder, logScrollPane)
+        tabbedPane.addTab("日志", AllIcons.Nodes.LogFolder, logTabbedPane)
         tabbedPane.addTab("历史", AllIcons.Vcs.History, historyPanel)
 
         setContent(tabbedPane)
@@ -271,7 +271,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             override fun run(indicator: ProgressIndicator) {
                 val result = deployService.redeploy(
                     record,
-                    logCallback = { line -> appendLog(line) },
+                    logCallback = { line -> appendLog(record.serverId, line) },
                     progressCallback = { progress ->
                         SwingUtilities.invokeLater {
                             progressBar.value = progress.percentage
@@ -346,7 +346,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 indicator.text = "Batch uploading ${items.size} item(s)..."
                 val results = deployService.uploadBatch(
                     items,
-                    logCallback = { line -> appendLog(line) },
+                    serverLogCallback = { serverId, line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
                         SwingUtilities.invokeLater {
                             progressBar.value = progress.percentage.coerceIn(0, 100)
@@ -382,7 +382,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 indicator.text = "Batch deploying ${items.size} item(s)..."
                 val results = deployService.deployBatch(
                     items,
-                    logCallback = { line -> appendLog(line) },
+                    serverLogCallback = { serverId, line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
                         SwingUtilities.invokeLater {
                             progressBar.value = progress.percentage.coerceIn(0, 100)
@@ -419,7 +419,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 val results = deployService.uploadBatch(
                     items,
                     dryRun = true,
-                    logCallback = { line -> appendLog(line) },
+                    serverLogCallback = { serverId, line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
                         SwingUtilities.invokeLater {
                             progressBar.value = progress.percentage.coerceIn(0, 100)
@@ -450,7 +450,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             override fun run(indicator: ProgressIndicator) {
                 val result = deployService.deploy(
                     request,
-                    logCallback = { line -> appendLog(line) },
+                    logCallback = { line -> appendLog(request.serverId, line) },
                     progressCallback = { progress ->
                         SwingUtilities.invokeLater {
                             progressBar.value = progress.percentage
@@ -482,7 +482,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 val result = deployService.push(
                     localPath,
                     serverId,
-                    logCallback = { line -> appendLog(line) },
+                    logCallback = { line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
                         SwingUtilities.invokeLater {
                             progressBar.value = progress.percentage
@@ -511,7 +511,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Previewing Sync...", true) {
             override fun run(indicator: ProgressIndicator) {
                 val result = SyncService.getInstance().previewSync(localPath, remotePath, serverId) { line ->
-                    appendLog(line)
+                    appendLog(serverId, line)
                 }
                 SwingUtilities.invokeLater {
                     progressLabel.text = if (result.success) "预览完成" else "预览失败"
@@ -553,13 +553,42 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
     }
 
+    private fun configureLogArea(area: JBTextArea) {
+        area.isEditable = false
+        area.font = Font("Monospaced", Font.PLAIN, 12)
+        area.lineWrap = true
+        area.wrapStyleWord = true
+    }
+
+    private fun getOrCreateServerLogArea(serverId: String): JBTextArea {
+        return serverLogAreas.getOrPut(serverId) {
+            JBTextArea().also { area ->
+                configureLogArea(area)
+                val server = serverManager.getServer(serverId)
+                val title = if (server != null && server.name != server.id) "${server.id} - ${server.name}" else serverId
+                logTabbedPane.addTab(title, AllIcons.Nodes.LogFolder, JBScrollPane(area))
+            }
+        }
+    }
+
     fun appendLog(message: String) {
+        appendLog(null, message)
+    }
+
+    fun appendLog(serverId: String?, message: String) {
         val time = LocalTime.now().format(timeFormatter)
-        SwingUtilities.invokeLater {
-            logArea.append("[$time] $message\n")
+        val line = "[$time] $message\n"
+        val block = {
+            logArea.append(line)
             logArea.caretPosition = logArea.document.length
+            if (!serverId.isNullOrBlank()) {
+                val serverArea = getOrCreateServerLogArea(serverId)
+                serverArea.append(line)
+                serverArea.caretPosition = serverArea.document.length
+            }
             tabbedPane.selectedIndex = 1
         }
+        if (SwingUtilities.isEventDispatchThread()) block() else SwingUtilities.invokeLater(block)
     }
 
     private fun previewSync() {
@@ -580,7 +609,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             override fun run(indicator: ProgressIndicator) {
                 indicator.text = "正在预览同步..."
                 val result = SyncService.getInstance().previewSync(localPath, remotePath, serverId) { line ->
-                    appendLog(line)
+                    appendLog(serverId, line)
                 }
                 SwingUtilities.invokeLater {
                     progressLabel.text = if (result.success) "预览完成" else "预览失败"
@@ -618,7 +647,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             override fun run(indicator: ProgressIndicator) {
                 val result = deployService.deploy(
                     request,
-                    logCallback = { line -> appendLog(line) },
+                    logCallback = { line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
                         SwingUtilities.invokeLater {
                             progressBar.value = progress.percentage
@@ -654,7 +683,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 val result = deployService.push(
                     localPath,
                     serverId,
-                    logCallback = { line -> appendLog(line) },
+                    logCallback = { line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
                         SwingUtilities.invokeLater {
                             progressBar.value = progress.percentage
