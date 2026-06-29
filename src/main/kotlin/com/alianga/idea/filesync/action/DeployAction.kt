@@ -29,19 +29,14 @@ class DeployAction : AnAction() {
         val firstFile = files.first()
         val localPath = firstFile.path
 
-        val allMappings = MappingManager.getInstance().getMappings()
-        val matchedMappings = allMappings.filter { m ->
-            val normPath = localPath.replace("\\", "/").let { if (firstFile.isDirectory) "$it/" else it }
-            val normMapping = m.localDir.replace("\\", "/").let { if (it.endsWith("/")) it else "$it/" }
-            normPath.startsWith(normMapping) || normPath == normMapping.trimEnd('/')
-        }
+        val resolvedMappings = MappingManager.getInstance().resolveMappingsByLocalPath(localPath, firstFile.isDirectory)
 
-        if (matchedMappings.isEmpty()) {
+        if (resolvedMappings.isEmpty()) {
             showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
             return
         }
 
-        val availableServers = matchedMappings.map { it.serverId }.distinct()
+        val availableServers = resolvedMappings.map { it.mapping.serverId }.distinct()
             .mapNotNull { ServerManager.getInstance().getServer(it) }
 
         val serverSelectionDialog = ServerSelectionDialog(
@@ -50,8 +45,9 @@ class DeployAction : AnAction() {
         if (!serverSelectionDialog.showAndGet()) return
         val targetServer = serverSelectionDialog.selectedServer ?: return
 
-        val targetMapping = matchedMappings.firstOrNull { it.serverId == targetServer.id }
-            ?: matchedMappings.first()
+        val targetResolvedMapping = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
+            ?: resolvedMappings.first()
+        val targetMapping = targetResolvedMapping.mapping
 
         ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
 
@@ -60,9 +56,9 @@ class DeployAction : AnAction() {
             val request = DeployRequest(
                 localPath = localPath,
                 serverId = targetServer.id,
-                remotePath = targetMapping.remoteDir,
+                remotePath = targetResolvedMapping.resolvedRemoteDir,
                 backupDir = if (targetMapping.backupEnabled) targetMapping.backupDir.ifBlank { null } else null,
-                backupSource = targetMapping.backupSource.ifBlank { null },
+                backupSource = if (targetMapping.backupEnabled) targetMapping.backupSource.ifBlank { null } else null,
                 unzipDest = if (targetMapping.unzipEnabled) targetMapping.unzipDest.ifBlank { null } else null,
                 excludePatterns = targetMapping.exclude,
                 preCommand = targetMapping.preCommand.ifBlank { null },

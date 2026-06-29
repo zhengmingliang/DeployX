@@ -27,8 +27,8 @@ class PreviewSyncAction : AnAction() {
         val firstFile = files.first()
         val localPath = firstFile.path
 
-        val mapping = MappingManager.getInstance().findMappingByLocalPath(localPath)
-        if (mapping == null) {
+        val resolvedMapping = MappingManager.getInstance().resolveMappingByLocalPath(localPath, firstFile.isDirectory)
+        if (resolvedMapping == null) {
             showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
             return
         }
@@ -37,7 +37,7 @@ class PreviewSyncAction : AnAction() {
 
         val panel = FileSyncToolWindowPanel.activePanel
         if (panel != null) {
-            panel.executePreview(localPath, mapping.remoteDir, mapping.serverId)
+            panel.executePreview(localPath, resolvedMapping.resolvedRemoteDir, resolvedMapping.mapping.serverId)
         } else {
             showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
         }

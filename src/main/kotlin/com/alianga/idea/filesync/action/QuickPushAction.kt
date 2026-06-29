@@ -28,19 +28,14 @@ class QuickPushAction : AnAction() {
         val firstFile = files.first()
         val localPath = firstFile.path
 
-        val allMappings = MappingManager.getInstance().getMappings()
-        val matchedMappings = allMappings.filter { m ->
-            val normPath = localPath.replace("\\", "/").let { if (firstFile.isDirectory) "$it/" else it }
-            val normMapping = m.localDir.replace("\\", "/").let { if (it.endsWith("/")) it else "$it/" }
-            normPath.startsWith(normMapping) || normPath == normMapping.trimEnd('/')
-        }
+        val resolvedMappings = MappingManager.getInstance().resolveMappingsByLocalPath(localPath, firstFile.isDirectory)
 
-        if (matchedMappings.isEmpty()) {
+        if (resolvedMappings.isEmpty()) {
             showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
             return
         }
 
-        val availableServers = matchedMappings.map { it.serverId }.distinct()
+        val availableServers = resolvedMappings.map { it.mapping.serverId }.distinct()
             .mapNotNull { ServerManager.getInstance().getServer(it) }
 
         val targetServerId = if (availableServers.size > 1) {
@@ -48,7 +43,7 @@ class QuickPushAction : AnAction() {
             if (!dialog.showAndGet()) return
             dialog.selectedServer?.id ?: return
         } else {
-            availableServers.firstOrNull()?.id ?: matchedMappings.first().serverId
+            availableServers.firstOrNull()?.id ?: resolvedMappings.first().mapping.serverId
         }
 
         ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()

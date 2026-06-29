@@ -5,6 +5,7 @@ import com.alianga.idea.filesync.model.MappingConfig
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
+import java.io.File
 
 /**
  * 映射管理器 - 负责目录映射配置的 CRUD 操作（基于唯一ID）
@@ -18,6 +19,14 @@ class MappingManager {
         fun getInstance(): MappingManager =
             ApplicationManager.getApplication().getService(MappingManager::class.java)
     }
+
+    data class ResolvedMapping(
+        val mapping: MappingConfig,
+        /** 当前选择路径相对映射本地根目录的路径 */
+        val relativePath: String,
+        /** rsync 目标目录：文件会上传到该目录，目录会作为子目录上传到该目录 */
+        val resolvedRemoteDir: String
+    )
 
     private val mappings = mutableListOf<MappingConfig>()
 
@@ -68,6 +77,32 @@ class MappingManager {
         findMappingsByLocalPath(localPath).firstOrNull()
 
     /**
+     * 根据本地路径解析映射，并按相对路径计算远程目标目录。
+     *
+     * 例：
+     * - 映射：local=/target, remote=/app
+     * - 选择目录：/target/lib          -> resolvedRemoteDir=/app，rsync 后远端为 /app/lib
+     * - 选择文件：/target/lib/a.jar    -> resolvedRemoteDir=/app/lib，rsync 后远端为 /app/lib/a.jar
+     */
+    fun resolveMappingsByLocalPath(localPath: String, isDirectory: Boolean = File(localPath).isDirectory): List<ResolvedMapping> {
+        val normalizedPath = normalizePath(localPath)
+        return findMappingsByLocalPath(localPath).map { mapping ->
+            val mappingPath = normalizePath(mapping.localDir)
+            val relativePath = when {
+                normalizedPath == mappingPath -> ""
+                normalizedPath.startsWith("$mappingPath/") -> normalizedPath.removePrefix("$mappingPath/").trim('/')
+                else -> ""
+            }
+            val remoteSubDir = parentRelativePath(relativePath)
+            val resolvedRemoteDir = joinRemotePath(mapping.remoteDir, remoteSubDir)
+            ResolvedMapping(mapping, relativePath, resolvedRemoteDir)
+        }
+    }
+
+    fun resolveMappingByLocalPath(localPath: String, isDirectory: Boolean = File(localPath).isDirectory): ResolvedMapping? =
+        resolveMappingsByLocalPath(localPath, isDirectory).firstOrNull()
+
+    /**
      * 添加映射（自动生成ID）
      */
     fun addMapping(config: MappingConfig): MappingConfig {
@@ -109,5 +144,18 @@ class MappingManager {
 
     private fun normalizePath(path: String): String {
         return path.replace("\\", "/").trimEnd('/')
+    }
+
+    private fun parentRelativePath(relativePath: String): String {
+        if (relativePath.isBlank()) return ""
+        val normalized = relativePath.replace("\\", "/").trim('/')
+        val index = normalized.lastIndexOf('/')
+        return if (index <= 0) "" else normalized.substring(0, index)
+    }
+
+    private fun joinRemotePath(base: String, subDir: String): String {
+        val normalizedBase = base.trimEnd('/')
+        val normalizedSub = subDir.trim('/')
+        return if (normalizedSub.isBlank()) normalizedBase else "$normalizedBase/$normalizedSub"
     }
 }

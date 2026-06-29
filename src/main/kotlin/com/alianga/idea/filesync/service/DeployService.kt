@@ -216,8 +216,8 @@ class DeployService {
     ): DeployResult {
         LOG.info("Quick push: $localPath")
 
-        val mapping = MappingManager.getInstance().findMappingByLocalPath(localPath)
-        if (mapping == null) {
+        val resolvedMappings = MappingManager.getInstance().resolveMappingsByLocalPath(localPath)
+        if (resolvedMappings.isEmpty()) {
             logCallback?.invoke("[ERROR] 未找到匹配的映射，请先配置目录映射")
             return DeployResult(
                 success = false,
@@ -225,13 +225,20 @@ class DeployService {
             )
         }
 
+        val resolvedMapping = if (serverId != null) {
+            resolvedMappings.firstOrNull { it.mapping.serverId == serverId } ?: resolvedMappings.first()
+        } else {
+            resolvedMappings.first()
+        }
+        val mapping = resolvedMapping.mapping
+
         val targetServerId = serverId ?: mapping.serverId
-        logCallback?.invoke("匹配映射: ${mapping.name} → ${targetServerId}:${mapping.remoteDir}")
+        logCallback?.invoke("匹配映射: ${mapping.name} → ${targetServerId}:${resolvedMapping.resolvedRemoteDir}")
 
         val request = DeployRequest(
             localPath = localPath,
             serverId = targetServerId,
-            remotePath = mapping.remoteDir,
+            remotePath = resolvedMapping.resolvedRemoteDir,
             backupDir = if (mapping.backupEnabled) mapping.backupDir.ifBlank { null } else null,
             backupSource = if (mapping.backupEnabled) mapping.backupSource.ifBlank { null } else null,
             unzipDest = if (mapping.unzipEnabled) mapping.unzipDest.ifBlank { null } else null,
