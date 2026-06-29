@@ -3,6 +3,7 @@ package com.alianga.idea.filesync.ui.toolwindow
 import com.alianga.idea.filesync.model.DeployRequest
 import com.alianga.idea.filesync.model.HistoryRecord
 import com.alianga.idea.filesync.model.MappingConfig
+import com.alianga.idea.filesync.model.UploadItem
 import com.alianga.idea.filesync.service.DeployService
 import com.alianga.idea.filesync.service.HistoryManager
 import com.alianga.idea.filesync.service.MappingManager
@@ -312,6 +313,41 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private fun getSelectedServerId(): String? {
         val selected = serverCombo.selectedItem?.toString() ?: return null
         return selected.substringBefore(" - ")
+    }
+
+    /**
+     * 公开方法：供 Sync / Quick Push 调用 upload-only 批量上传。
+     */
+    fun executeUploadBatch(items: List<UploadItem>) {
+        if (items.isEmpty()) {
+            appendLog("[WARN] 没有可上传的文件")
+            return
+        }
+        appendLog("========== 批量上传，共 ${items.size} 个 ==========")
+        progressBar.value = 0
+        progressLabel.text = "批量上传中..."
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Uploading...", true) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.text = "Batch uploading ${items.size} item(s)..."
+                val results = deployService.uploadBatch(
+                    items,
+                    logCallback = { line -> appendLog(line) },
+                    progressCallback = { progress ->
+                        SwingUtilities.invokeLater {
+                            progressBar.value = progress.percentage.coerceIn(0, 100)
+                            progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
+                        }
+                    }
+                )
+                SwingUtilities.invokeLater {
+                    val successCount = results.count { it.success }
+                    progressBar.value = 100
+                    progressLabel.text = "批量上传完成：$successCount/${results.size} 组成功"
+                    refreshHistory()
+                }
+            }
+        })
     }
 
     /**

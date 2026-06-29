@@ -23,7 +23,106 @@ class DeployService {
             ApplicationManager.getApplication().getService(DeployService::class.java)
     }
 
+    data class UploadGroupKey(
+        val serverId: String,
+        val mappingId: String,
+        val sourceBaseDir: String,
+        val remoteBaseDir: String,
+        val excludePatterns: List<String>,
+        val preCommand: String?,
+        val postCommand: String?
+    )
+
     private val rsyncWrapper = RsyncWrapper()
+
+    /**
+     * Upload-only 批量上传。按 server/mapping/root/excludes/commands 分组，使用 rsync --files-from 合并上传。
+     */
+    fun uploadBatch(
+        items: List<UploadItem>,
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+    ): List<SyncResult> {
+        if (items.isEmpty()) return emptyList()
+
+        val groups = items.groupBy {
+            UploadGroupKey(
+                serverId = it.serverId,
+                mappingId = it.mappingId,
+                sourceBaseDir = it.sourceBaseDir.trimEnd('/'),
+                remoteBaseDir = it.remoteBaseDir.trimEnd('/'),
+                excludePatterns = it.excludePatterns,
+                preCommand = it.preCommand,
+                postCommand = it.postCommand
+            )
+        }
+
+        val results = mutableListOf<SyncResult>()
+        groups.forEach { (key, groupItems) ->
+            val server = ServerManager.getInstance().getServer(key.serverId)
+            if (server == null) {
+                val result = SyncResult(false, error = "服务器不存在: ${key.serverId}")
+                results.add(result)
+                logCallback?.invoke("[ERROR] ${result.error}")
+                return@forEach
+            }
+
+            logCallback?.invoke("========== 上传分组 ==========")
+            logCallback?.invoke("服务器: ${server.displayAddress}")
+            logCallback?.invoke("本地根目录: ${key.sourceBaseDir}")
+            logCallback?.invoke("远程根目录: ${key.remoteBaseDir}")
+            logCallback?.invoke("文件数: ${groupItems.size}")
+
+            val sshConnection = if (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank()) {
+                SshConnection(server)
+            } else null
+
+            try {
+                if (sshConnection != null) {
+                    logCallback?.invoke("正在连接服务器 ${server.displayAddress} 以执行命令...")
+                    if (!sshConnection.connect()) {
+                        val result = SyncResult(false, error = "无法连接服务器执行命令: ${server.displayAddress}")
+                        results.add(result)
+                        logCallback?.invoke("[ERROR] ${result.error}")
+                        return@forEach
+                    }
+                }
+
+                if (!key.preCommand.isNullOrBlank()) {
+                    logCallback?.invoke("[PRE] 执行上传前命令: ${key.preCommand}")
+                    val preResult = sshConnection!!.executeCommand(key.preCommand)
+                    if (preResult.output.isNotBlank()) logCallback?.invoke("[PRE] 输出: ${preResult.output.trim()}")
+                    if (!preResult.success) logCallback?.invoke("[WARN] 上传前命令失败 (${preResult.exitCode}): ${preResult.error}")
+                }
+
+                val relativePaths = groupItems.map { item ->
+                    if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
+                }.filter { it.isNotBlank() }
+
+                val result = rsyncWrapper.syncFilesFrom(
+                    sourceBaseDir = key.sourceBaseDir,
+                    remoteBaseDir = key.remoteBaseDir,
+                    relativePaths = relativePaths,
+                    serverConfig = server,
+                    options = SyncOptions(excludePatterns = key.excludePatterns),
+                    logCallback = logCallback,
+                    progressCallback = progressCallback
+                )
+                results.add(result)
+
+                if (!key.postCommand.isNullOrBlank()) {
+                    logCallback?.invoke("[POST] 执行上传后命令: ${key.postCommand}")
+                    val postResult = sshConnection!!.executeCommand(key.postCommand)
+                    if (postResult.output.isNotBlank()) logCallback?.invoke("[POST] 输出: ${postResult.output.trim()}")
+                    if (!postResult.success) logCallback?.invoke("[WARN] 上传后命令失败 (${postResult.exitCode}): ${postResult.error}")
+                }
+            } finally {
+                sshConnection?.disconnect()
+            }
+        }
+
+        return results
+    }
 
     /**
      * 完整部署
@@ -211,6 +310,8 @@ class DeployService {
     fun push(
         localPath: String,
         serverId: String? = null,
+        includePreCommand: Boolean = false,
+        includePostCommand: Boolean = false,
         logCallback: ((String) -> Unit)? = null,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
     ): DeployResult {
@@ -239,12 +340,12 @@ class DeployService {
             localPath = localPath,
             serverId = targetServerId,
             remotePath = resolvedMapping.resolvedRemoteDir,
-            backupDir = if (mapping.backupEnabled) mapping.backupDir.ifBlank { null } else null,
-            backupSource = if (mapping.backupEnabled) mapping.backupSource.ifBlank { null } else null,
-            unzipDest = if (mapping.unzipEnabled) mapping.unzipDest.ifBlank { null } else null,
+            backupDir = null,
+            backupSource = null,
+            unzipDest = null,
             excludePatterns = mapping.exclude,
-            preCommand = if (mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
-            postCommand = if (mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
+            preCommand = if (includePreCommand && mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
+            postCommand = if (includePostCommand && mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
         )
 
         return deploy(request, logCallback, progressCallback)

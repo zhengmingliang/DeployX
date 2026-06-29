@@ -1,6 +1,6 @@
 package com.alianga.idea.filesync.action
 
-import com.alianga.idea.filesync.model.DeployRequest
+import com.alianga.idea.filesync.model.UploadItem
 import com.alianga.idea.filesync.service.MappingManager
 import com.alianga.idea.filesync.service.ServerManager
 import com.alianga.idea.filesync.ui.dialog.ServerSelectionDialog
@@ -15,8 +15,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 
 /**
- * 同步文件 Action - 右键菜单 "Sync to Server"
- * 支持多文件/目录批量同步
+ * 同步文件 Action - upload-only，支持多文件/目录批量上传
  */
 class SyncFileAction : AnAction() {
 
@@ -42,40 +41,53 @@ class SyncFileAction : AnAction() {
             .distinct()
             .mapNotNull { ServerManager.getInstance().getServer(it) }
 
+        val commandAvailability = buildCommandAvailability(resolvedByFile.values.flatten())
         val serverSelectionDialog = ServerSelectionDialog(
             availableServers,
             "选择目标服务器",
-            "已选择 ${files.size} 个文件/目录，请选择上传目标服务器："
+            "已选择 ${files.size} 个文件/目录，请选择上传目标服务器：",
+            showCommandOptions = true,
+            commandAvailabilityByServerId = commandAvailability
         )
         if (!serverSelectionDialog.showAndGet()) return
         val targetServer = serverSelectionDialog.selectedServer ?: return
 
         ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
 
-        val requests = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
+        val items = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
             val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
                 ?: return@mapNotNull null
             val mapping = resolved.mapping
-            DeployRequest(
+            UploadItem(
                 localPath = file.path,
+                isDirectory = file.isDirectory,
                 serverId = targetServer.id,
-                remotePath = resolved.resolvedRemoteDir,
-                backupDir = if (mapping.backupEnabled) mapping.backupDir.ifBlank { null } else null,
-                backupSource = if (mapping.backupEnabled) mapping.backupSource.ifBlank { null } else null,
-                unzipDest = if (mapping.unzipEnabled) mapping.unzipDest.ifBlank { null } else null,
+                mappingId = mapping.effectiveId,
+                sourceBaseDir = mapping.localDir,
+                remoteBaseDir = mapping.remoteDir,
+                relativePath = resolved.relativePath,
                 excludePatterns = mapping.exclude,
-                preCommand = if (mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
-                postCommand = if (mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
+                preCommand = if (serverSelectionDialog.executePreCommand && mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
+                postCommand = if (serverSelectionDialog.executePostCommand && mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
             )
         }
 
-        val skipped = files.size - requests.size
+        val skipped = files.size - items.size
         val panel = FileSyncToolWindowPanel.activePanel
         if (panel != null) {
             if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
-            panel.executeDeployBatch(requests)
+            panel.executeUploadBatch(items)
         } else {
             showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
+        }
+    }
+
+    private fun buildCommandAvailability(resolvedMappings: List<MappingManager.ResolvedMapping>): Map<String, ServerSelectionDialog.CommandAvailability> {
+        return resolvedMappings.groupBy { it.mapping.serverId }.mapValues { (_, values) ->
+            ServerSelectionDialog.CommandAvailability(
+                hasPreCommand = values.any { it.mapping.effectivePreCommandEnabled && it.mapping.preCommand.isNotBlank() },
+                hasPostCommand = values.any { it.mapping.effectivePostCommandEnabled && it.mapping.postCommand.isNotBlank() }
+            )
         }
     }
 

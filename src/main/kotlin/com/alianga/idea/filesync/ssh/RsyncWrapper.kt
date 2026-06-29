@@ -8,6 +8,7 @@ import com.intellij.openapi.diagnostic.Logger
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.nio.charset.StandardCharsets
 
 /**
  * rsync 命令封装 - 基于系统 rsync 实现增量同步
@@ -150,6 +151,101 @@ class RsyncWrapper {
     }
 
     /**
+     * 使用 rsync --files-from 执行批量上传。
+     * relativePaths 必须是 sourceBaseDir 下的相对路径；目录项建议以 / 结尾。
+     */
+    fun syncFilesFrom(
+        sourceBaseDir: String,
+        remoteBaseDir: String,
+        relativePaths: List<String>,
+        serverConfig: ServerConfig,
+        options: SyncOptions = SyncOptions(),
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((SyncProgress) -> Unit)? = null
+    ): SyncResult {
+        val startTime = System.currentTimeMillis()
+        if (relativePaths.isEmpty()) {
+            return SyncResult(false, error = "files-from 列表为空")
+        }
+
+        try {
+            val sourceBase = sourceBaseDir.trimEnd('/') + "/"
+            val remoteBase = remoteBaseDir.trimEnd('/') + "/"
+            val baseDir = File(sourceBase)
+            if (!baseDir.exists()) {
+                val msg = "本地映射根目录不存在: $sourceBase"
+                logCallback?.invoke("[ERROR] $msg")
+                return SyncResult(false, error = msg)
+            }
+
+            val cmd = buildRsyncFilesFromCommand(sourceBase, remoteBase, serverConfig, options)
+            val cmdStr = maskPassword(cmd).joinToString(" ")
+            LOG.info("Executing rsync files-from: $cmdStr")
+            logCallback?.invoke("[CMD] $cmdStr")
+            logCallback?.invoke("[FILES-FROM]")
+            relativePaths.forEach { logCallback?.invoke("  $it") }
+
+            val process = ProcessBuilder(cmd)
+                .redirectErrorStream(true)
+                .start()
+
+            process.outputStream.use { output ->
+                relativePaths.forEach { path ->
+                    output.write(path.toByteArray(StandardCharsets.UTF_8))
+                    output.write(0)
+                }
+                output.flush()
+            }
+
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val outputBuilder = StringBuilder()
+            var totalSize = 0L
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val currentLine = line ?: continue
+                outputBuilder.appendLine(currentLine)
+                logCallback?.invoke(currentLine)
+
+                val progress = parseProgressLine(currentLine)
+                if (progress != null) {
+                    progressCallback?.invoke(progress)
+                }
+
+                if (currentLine.contains("sent ") && currentLine.contains("received ") && currentLine.contains("bytes")) {
+                    val sentMatch = Regex("sent (\\d+) bytes").find(currentLine)
+                    val receivedMatch = Regex("received (\\d+) bytes").find(currentLine)
+                    if (sentMatch != null && receivedMatch != null) {
+                        totalSize = (sentMatch.groupValues[1].toLongOrNull() ?: 0L) +
+                                (receivedMatch.groupValues[1].toLongOrNull() ?: 0L)
+                    }
+                }
+            }
+
+            val exitCode = process.waitFor()
+            val duration = System.currentTimeMillis() - startTime
+            return if (exitCode == 0) {
+                logCallback?.invoke("[OK] rsync files-from 完成 (exit code: 0, 耗时: ${duration}ms)")
+                SyncResult(
+                    success = true,
+                    transferredFiles = relativePaths.size,
+                    totalSize = totalSize,
+                    duration = duration,
+                    output = outputBuilder.toString()
+                )
+            } else {
+                val errMsg = "rsync files-from 执行失败 (exit code: $exitCode)"
+                logCallback?.invoke("[ERROR] $errMsg")
+                SyncResult(false, duration = duration, error = errMsg, output = outputBuilder.toString())
+            }
+        } catch (e: Exception) {
+            LOG.error("rsync files-from execution failed", e)
+            val errMsg = "rsync files-from 执行异常: ${e.message}"
+            logCallback?.invoke("[ERROR] $errMsg")
+            return SyncResult(false, duration = System.currentTimeMillis() - startTime, error = errMsg)
+        }
+    }
+
+    /**
      * 构建 rsync 命令参数
      */
     private fun buildRsyncCommand(
@@ -218,6 +314,68 @@ class RsyncWrapper {
         cmd.add("${serverConfig.user}@${serverConfig.host}:$remotePath")
 
         return cmd
+    }
+
+    /**
+     * 构建 --files-from 模式的 rsync 命令参数
+     */
+    private fun buildRsyncFilesFromCommand(
+        sourceBaseDir: String,
+        remoteBaseDir: String,
+        serverConfig: ServerConfig,
+        options: SyncOptions
+    ): List<String> {
+        val settings = FileSyncSettings.getInstance()
+        val rsyncPath = settings.rsyncPath.ifEmpty { "rsync" }
+        val useSshpass = serverConfig.authType == ServerConfig.AuthType.PASSWORD &&
+                serverConfig.password.isNotEmpty() &&
+                settings.sshpassAvailable
+
+        val cmd = mutableListOf<String>()
+        if (useSshpass) {
+            cmd.add("sshpass")
+            cmd.add("-p")
+            cmd.add(serverConfig.password)
+        }
+        cmd.add(rsyncPath)
+
+        val userOptions = settings.rsyncOptions.trim()
+        if (userOptions.isNotEmpty()) {
+            cmd.addAll(userOptions.split("\\s+".toRegex()).filter { it.isNotEmpty() })
+        } else {
+            cmd.add("-avz")
+            if (settings.showProgress) cmd.add("--progress")
+            cmd.add("--stats")
+        }
+
+        // files-from 模式显式启用递归，并用 NUL 分隔路径
+        if (!hasRecursiveOption(cmd)) {
+            cmd.add("-r")
+        }
+        cmd.add("--files-from=-")
+        cmd.add("--from0")
+
+        val sshOpts = buildSshOptions(serverConfig)
+        cmd.add("-e")
+        cmd.add(sshOpts)
+
+        for (pattern in options.excludePatterns) {
+            cmd.add("--exclude=$pattern")
+        }
+        if (options.dryRun) cmd.add("--dry-run")
+        if (options.deleteRemote) cmd.add("--delete")
+
+        cmd.add(sourceBaseDir.trimEnd('/') + "/")
+        cmd.add("${serverConfig.user}@${serverConfig.host}:${remoteBaseDir.trimEnd('/')}/")
+        return cmd
+    }
+
+    private fun hasRecursiveOption(cmd: List<String>): Boolean {
+        return cmd.any { arg ->
+            arg == "-r" || arg == "--recursive" ||
+                    (arg.startsWith("-") && !arg.startsWith("--") && arg.drop(1).contains('r')) ||
+                    (arg.startsWith("-") && !arg.startsWith("--") && arg.drop(1).contains('a'))
+        }
     }
 
     /**

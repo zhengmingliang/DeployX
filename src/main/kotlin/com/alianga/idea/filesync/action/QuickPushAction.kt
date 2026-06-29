@@ -1,6 +1,7 @@
 package com.alianga.idea.filesync.action
 
-import com.alianga.idea.filesync.model.DeployRequest
+import com.alianga.idea.filesync.model.ServerConfig
+import com.alianga.idea.filesync.model.UploadItem
 import com.alianga.idea.filesync.service.MappingManager
 import com.alianga.idea.filesync.service.ServerManager
 import com.alianga.idea.filesync.ui.dialog.ServerSelectionDialog
@@ -15,8 +16,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 
 /**
- * 快速推送 Action - 右键菜单 "Quick Push to Server"
- * 支持多文件/目录批量推送
+ * 快速推送 Action - upload-only，支持多文件/目录批量上传
  */
 class QuickPushAction : AnAction() {
 
@@ -42,40 +42,75 @@ class QuickPushAction : AnAction() {
             .distinct()
             .mapNotNull { ServerManager.getInstance().getServer(it) }
 
-        val targetServerId = if (availableServers.size > 1) {
-            val dialog = ServerSelectionDialog(availableServers, "选择推送目标", "快速推送到哪个服务器？")
-            if (!dialog.showAndGet()) return
-            dialog.selectedServer?.id ?: return
-        } else {
-            availableServers.firstOrNull()?.id ?: resolvedByFile.values.first().first().mapping.serverId
-        }
+        val commandAvailability = buildCommandAvailability(resolvedByFile.values.flatten())
+        val hasAnyCommand = commandAvailability.values.any { it.hasPreCommand || it.hasPostCommand }
+        val selection = selectServer(availableServers, commandAvailability, hasAnyCommand, files.size) ?: return
+        val targetServer = selection.server
 
         ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
 
-        val requests = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
-            val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServerId }
+        val items = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
+            val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
                 ?: return@mapNotNull null
             val mapping = resolved.mapping
-            DeployRequest(
+            UploadItem(
                 localPath = file.path,
-                serverId = targetServerId,
-                remotePath = resolved.resolvedRemoteDir,
-                backupDir = if (mapping.backupEnabled) mapping.backupDir.ifBlank { null } else null,
-                backupSource = if (mapping.backupEnabled) mapping.backupSource.ifBlank { null } else null,
-                unzipDest = if (mapping.unzipEnabled) mapping.unzipDest.ifBlank { null } else null,
+                isDirectory = file.isDirectory,
+                serverId = targetServer.id,
+                mappingId = mapping.effectiveId,
+                sourceBaseDir = mapping.localDir,
+                remoteBaseDir = mapping.remoteDir,
+                relativePath = resolved.relativePath,
                 excludePatterns = mapping.exclude,
-                preCommand = if (mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
-                postCommand = if (mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
+                preCommand = if (selection.executePreCommand && mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
+                postCommand = if (selection.executePostCommand && mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
             )
         }
 
-        val skipped = files.size - requests.size
+        val skipped = files.size - items.size
         val panel = FileSyncToolWindowPanel.activePanel
         if (panel != null) {
-            if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 $targetServerId 的映射，已跳过")
-            panel.executeDeployBatch(requests)
+            if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
+            panel.executeUploadBatch(items)
         } else {
             showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
+        }
+    }
+
+    private data class ServerSelection(
+        val server: ServerConfig,
+        val executePreCommand: Boolean,
+        val executePostCommand: Boolean
+    )
+
+    private fun selectServer(
+        servers: List<ServerConfig>,
+        commandAvailability: Map<String, ServerSelectionDialog.CommandAvailability>,
+        hasAnyCommand: Boolean,
+        selectedCount: Int
+    ): ServerSelection? {
+        if (servers.isEmpty()) return null
+        if (servers.size == 1 && !hasAnyCommand) {
+            return ServerSelection(servers.first(), executePreCommand = false, executePostCommand = false)
+        }
+        val dialog = ServerSelectionDialog(
+            servers,
+            "选择推送目标",
+            "已选择 $selectedCount 个文件/目录，请选择快速推送目标：",
+            showCommandOptions = hasAnyCommand,
+            commandAvailabilityByServerId = commandAvailability
+        )
+        if (!dialog.showAndGet()) return null
+        val server = dialog.selectedServer ?: return null
+        return ServerSelection(server, dialog.executePreCommand, dialog.executePostCommand)
+    }
+
+    private fun buildCommandAvailability(resolvedMappings: List<MappingManager.ResolvedMapping>): Map<String, ServerSelectionDialog.CommandAvailability> {
+        return resolvedMappings.groupBy { it.mapping.serverId }.mapValues { (_, values) ->
+            ServerSelectionDialog.CommandAvailability(
+                hasPreCommand = values.any { it.mapping.effectivePreCommandEnabled && it.mapping.preCommand.isNotBlank() },
+                hasPostCommand = values.any { it.mapping.effectivePostCommandEnabled && it.mapping.postCommand.isNotBlank() }
+            )
         }
     }
 
