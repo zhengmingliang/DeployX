@@ -1,5 +1,6 @@
 package com.alianga.idea.filesync.action
 
+import com.alianga.idea.filesync.model.UploadItem
 import com.alianga.idea.filesync.service.MappingManager
 import com.alianga.idea.filesync.ui.toolwindow.FileSyncToolWindowPanel
 import com.intellij.notification.NotificationGroupManager
@@ -12,8 +13,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 
 /**
- * 预览同步 Action - 右键菜单 "Preview Sync"
- * 通过工具窗口面板执行，日志实时显示在日志 tab 中
+ * 预览同步 Action - 使用与实际 upload-only 相同的 --files-from dry-run 逻辑
  */
 class PreviewSyncAction : AnAction() {
 
@@ -28,7 +28,17 @@ class PreviewSyncAction : AnAction() {
         val previewItems = files.mapNotNull { file ->
             val resolved = mappingManager.resolveMappingByLocalPath(file.path, file.isDirectory)
                 ?: return@mapNotNull null
-            Triple(file.path, resolved.resolvedRemoteDir, resolved.mapping.serverId)
+            val mapping = resolved.mapping
+            UploadItem(
+                localPath = file.path,
+                isDirectory = file.isDirectory,
+                serverId = mapping.serverId,
+                mappingId = mapping.effectiveId,
+                sourceBaseDir = mapping.localDir,
+                remoteBaseDir = mapping.remoteDir,
+                relativePath = resolved.relativePath,
+                excludePatterns = mapping.exclude
+            )
         }
 
         if (previewItems.isEmpty()) {

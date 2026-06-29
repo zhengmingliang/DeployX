@@ -40,6 +40,7 @@ class DeployService {
      */
     fun uploadBatch(
         items: List<UploadItem>,
+        dryRun: Boolean = false,
         logCallback: ((String) -> Unit)? = null,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
     ): List<SyncResult> {
@@ -67,13 +68,13 @@ class DeployService {
                 return@forEach
             }
 
-            logCallback?.invoke("========== 上传分组 ==========")
+            logCallback?.invoke("========== ${if (dryRun) "预览" else "上传"}分组 ==========")
             logCallback?.invoke("服务器: ${server.displayAddress}")
             logCallback?.invoke("本地根目录: ${key.sourceBaseDir}")
             logCallback?.invoke("远程根目录: ${key.remoteBaseDir}")
             logCallback?.invoke("文件数: ${groupItems.size}")
 
-            val sshConnection = if (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank()) {
+            val sshConnection = if (!dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
                 SshConnection(server)
             } else null
 
@@ -88,7 +89,7 @@ class DeployService {
                     }
                 }
 
-                if (!key.preCommand.isNullOrBlank()) {
+                if (!dryRun && !key.preCommand.isNullOrBlank()) {
                     logCallback?.invoke("[PRE] 执行上传前命令: ${key.preCommand}")
                     val preResult = sshConnection!!.executeCommand(key.preCommand)
                     if (preResult.output.isNotBlank()) logCallback?.invoke("[PRE] 输出: ${preResult.output.trim()}")
@@ -104,13 +105,13 @@ class DeployService {
                     remoteBaseDir = key.remoteBaseDir,
                     relativePaths = relativePaths,
                     serverConfig = server,
-                    options = SyncOptions(excludePatterns = key.excludePatterns),
+                    options = SyncOptions(excludePatterns = key.excludePatterns, dryRun = dryRun),
                     logCallback = logCallback,
                     progressCallback = progressCallback
                 )
                 results.add(result)
 
-                if (!key.postCommand.isNullOrBlank()) {
+                if (!dryRun && !key.postCommand.isNullOrBlank()) {
                     logCallback?.invoke("[POST] 执行上传后命令: ${key.postCommand}")
                     val postResult = sshConnection!!.executeCommand(key.postCommand)
                     if (postResult.output.isNotBlank()) logCallback?.invoke("[POST] 输出: ${postResult.output.trim()}")

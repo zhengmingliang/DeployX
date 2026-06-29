@@ -394,9 +394,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     /**
-     * 公开方法：供右键菜单 Action 调用批量预览
+     * 公开方法：供右键菜单 Action 调用 files-from 批量预览。
      */
-    fun executePreviewBatch(items: List<Triple<String, String, String>>) {
+    fun executePreviewBatch(items: List<UploadItem>) {
         if (items.isEmpty()) {
             appendLog("[WARN] 没有可预览的同步项")
             return
@@ -407,22 +407,22 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Previewing...", true) {
             override fun run(indicator: ProgressIndicator) {
-                var successCount = 0
-                items.forEachIndexed { index, (localPath, remotePath, serverId) ->
-                    if (indicator.isCanceled) return@forEachIndexed
-                    appendLog("[${index + 1}/${items.size}] 预览 $localPath -> $serverId:$remotePath")
-                    indicator.text = "Previewing ${index + 1}/${items.size}: ${java.io.File(localPath).name}"
-                    indicator.fraction = index.toDouble() / items.size
-                    val result = SyncService.getInstance().previewSync(localPath, remotePath, serverId) { line ->
-                        appendLog(line)
+                indicator.text = "Batch previewing ${items.size} item(s)..."
+                val results = deployService.uploadBatch(
+                    items,
+                    dryRun = true,
+                    logCallback = { line -> appendLog(line) },
+                    progressCallback = { progress ->
+                        SwingUtilities.invokeLater {
+                            progressBar.value = progress.percentage.coerceIn(0, 100)
+                            progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
+                        }
                     }
-                    if (result.success) successCount++ else appendLog("[ERROR] ${result.error}")
-                    SwingUtilities.invokeLater {
-                        progressBar.value = (((index + 1) * 100) / items.size).coerceIn(0, 100)
-                    }
-                }
+                )
                 SwingUtilities.invokeLater {
-                    progressLabel.text = "批量预览完成：$successCount/${items.size} 成功"
+                    val successCount = results.count { it.success }
+                    progressBar.value = 100
+                    progressLabel.text = "批量预览完成：$successCount/${results.size} 组成功"
                 }
             }
         })
