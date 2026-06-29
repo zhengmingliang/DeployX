@@ -1,6 +1,6 @@
 package com.alianga.idea.filesync.action
 
-import com.alianga.idea.filesync.model.DeployRequest
+import com.alianga.idea.filesync.model.DeployItem
 import com.alianga.idea.filesync.service.MappingManager
 import com.alianga.idea.filesync.service.ServerManager
 import com.alianga.idea.filesync.ui.dialog.ServerSelectionDialog
@@ -16,7 +16,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 
 /**
  * 完整部署 Action - 右键菜单 "Deploy (Backup + Upload + Unzip)"
- * 支持多文件/目录批量部署
+ * 支持多文件/目录按分组完整部署：pre/backup/upload/unzip/post 每组执行一次。
  */
 class DeployAction : AnAction() {
 
@@ -52,28 +52,32 @@ class DeployAction : AnAction() {
 
         ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
 
-        val requests = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
+        val items = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
             val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
                 ?: return@mapNotNull null
             val mapping = resolved.mapping
-            DeployRequest(
+            DeployItem(
                 localPath = file.path,
+                isDirectory = file.isDirectory,
                 serverId = targetServer.id,
-                remotePath = resolved.resolvedRemoteDir,
+                mappingId = mapping.effectiveId,
+                sourceBaseDir = mapping.localDir,
+                remoteBaseDir = mapping.remoteDir,
+                relativePath = resolved.relativePath,
+                excludePatterns = mapping.exclude,
                 backupDir = if (mapping.backupEnabled) mapping.backupDir.ifBlank { null } else null,
                 backupSource = if (mapping.backupEnabled) mapping.backupSource.ifBlank { null } else null,
                 unzipDest = if (mapping.unzipEnabled) mapping.unzipDest.ifBlank { null } else null,
-                excludePatterns = mapping.exclude,
                 preCommand = if (mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
                 postCommand = if (mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
             )
         }
 
-        val skipped = files.size - requests.size
+        val skipped = files.size - items.size
         val panel = FileSyncToolWindowPanel.activePanel
         if (panel != null) {
             if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
-            panel.executeDeployBatch(requests)
+            panel.executeDeployBatch(items)
         } else {
             showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
         }

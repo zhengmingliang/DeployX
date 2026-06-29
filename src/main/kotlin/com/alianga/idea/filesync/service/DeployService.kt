@@ -33,6 +33,19 @@ class DeployService {
         val postCommand: String?
     )
 
+    data class DeployGroupKey(
+        val serverId: String,
+        val mappingId: String,
+        val sourceBaseDir: String,
+        val remoteBaseDir: String,
+        val excludePatterns: List<String>,
+        val backupDir: String?,
+        val backupSource: String?,
+        val unzipDest: String?,
+        val preCommand: String?,
+        val postCommand: String?
+    )
+
     private val rsyncWrapper = RsyncWrapper()
 
     /**
@@ -119,6 +132,195 @@ class DeployService {
                 }
             } finally {
                 sshConnection?.disconnect()
+            }
+        }
+
+        return results
+    }
+
+    /**
+     * 完整部署的批量分组执行：每组 pre/backup/upload/unzip/post 各执行一次。
+     */
+    fun deployBatch(
+        items: List<DeployItem>,
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+    ): List<DeployResult> {
+        if (items.isEmpty()) return emptyList()
+        val groups = items.groupBy {
+            DeployGroupKey(
+                serverId = it.serverId,
+                mappingId = it.mappingId,
+                sourceBaseDir = it.sourceBaseDir.trimEnd('/'),
+                remoteBaseDir = it.remoteBaseDir.trimEnd('/'),
+                excludePatterns = it.excludePatterns,
+                backupDir = it.backupDir?.trimEnd('/'),
+                backupSource = it.backupSource?.trimEnd('/'),
+                unzipDest = it.unzipDest?.trimEnd('/'),
+                preCommand = it.preCommand?.ifBlank { null },
+                postCommand = it.postCommand?.ifBlank { null }
+            )
+        }
+
+        val results = mutableListOf<DeployResult>()
+        groups.forEach { (key, groupItems) ->
+            val startTime = System.currentTimeMillis()
+            val taskId = UUID.randomUUID().toString().substring(0, 8)
+            val server = ServerManager.getInstance().getServer(key.serverId)
+            if (server == null) {
+                val result = DeployResult(false, taskId = taskId, error = "服务器不存在: ${key.serverId}")
+                results.add(result)
+                logCallback?.invoke("[ERROR] ${result.error}")
+                return@forEach
+            }
+
+            logCallback?.invoke("========== 部署分组 $taskId ==========")
+            logCallback?.invoke("服务器: ${server.displayAddress}")
+            logCallback?.invoke("本地根目录: ${key.sourceBaseDir}")
+            logCallback?.invoke("远程根目录: ${key.remoteBaseDir}")
+            logCallback?.invoke("文件数: ${groupItems.size}")
+
+            val sshConnection = SshConnection(server)
+            try {
+                logCallback?.invoke("正在连接服务器 ${server.displayAddress}...")
+                if (!sshConnection.connect()) {
+                    val result = DeployResult(false, taskId = taskId, error = "无法连接到服务器: ${server.displayAddress}")
+                    results.add(result)
+                    logCallback?.invoke("[ERROR] ${result.error}")
+                    return@forEach
+                }
+                logCallback?.invoke("SSH 连接成功")
+
+                if (!key.preCommand.isNullOrBlank()) {
+                    logCallback?.invoke("[PRE] 执行上传前命令: ${key.preCommand}")
+                    val preResult = sshConnection.executeCommand(key.preCommand)
+                    if (preResult.output.isNotBlank()) logCallback?.invoke("[PRE] 输出: ${preResult.output.trim()}")
+                    if (!preResult.success) logCallback?.invoke("[WARN] 上传前命令执行失败 (${preResult.exitCode}): ${preResult.error}")
+                    else logCallback?.invoke("[PRE] 命令执行成功")
+                }
+
+                val backupPath = if (!key.backupDir.isNullOrBlank()) {
+                    val backupResult = if (!key.backupSource.isNullOrBlank()) {
+                        logCallback?.invoke("[1/3] 备份配置源: ${key.backupSource} → ${key.backupDir}")
+                        doBackup(sshConnection, key.backupSource, key.backupDir, logCallback)
+                    } else {
+                        logCallback?.invoke("[1/3] 备份本次选择的远程文件 → ${key.backupDir}")
+                        doBackupSelected(sshConnection, key.remoteBaseDir, groupItems.map { it.relativePath }, key.backupDir, logCallback)
+                    }
+                    if (!backupResult.success) {
+                        val result = DeployResult(
+                            false,
+                            taskId = taskId,
+                            error = "备份失败: ${backupResult.error}",
+                            duration = System.currentTimeMillis() - startTime
+                        )
+                        results.add(result)
+                        logCallback?.invoke("[ERROR] ${result.error}")
+                        return@forEach
+                    }
+                    backupResult.path
+                } else {
+                    logCallback?.invoke("[1/3] 跳过备份（未配置备份目录）")
+                    null
+                }
+
+                logCallback?.invoke("[2/3] 批量上传文件...")
+                val relativePaths = groupItems.map { item ->
+                    if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
+                }.filter { it.isNotBlank() }
+                val syncResult = rsyncWrapper.syncFilesFrom(
+                    sourceBaseDir = key.sourceBaseDir,
+                    remoteBaseDir = key.remoteBaseDir,
+                    relativePaths = relativePaths,
+                    serverConfig = server,
+                    options = SyncOptions(excludePatterns = key.excludePatterns),
+                    logCallback = logCallback,
+                    progressCallback = progressCallback
+                )
+                if (!syncResult.success) {
+                    val result = DeployResult(
+                        false,
+                        taskId = taskId,
+                        backupPath = backupPath,
+                        error = "上传失败: ${syncResult.error}",
+                        duration = System.currentTimeMillis() - startTime
+                    )
+                    results.add(result)
+                    logCallback?.invoke("[ERROR] ${result.error}")
+                    return@forEach
+                }
+                logCallback?.invoke("上传完成")
+
+                if (!key.unzipDest.isNullOrBlank()) {
+                    val zipItems = groupItems.filter { it.relativePath.endsWith(".zip", ignoreCase = true) }
+                    when {
+                        zipItems.isEmpty() -> logCallback?.invoke("[3/3] 已配置解压，但本组没有 zip 文件，跳过解压")
+                        zipItems.size == 1 -> {
+                            val remoteZip = joinRemotePath(key.remoteBaseDir, zipItems.first().relativePath)
+                            logCallback?.invoke("[3/3] 解压远程文件: $remoteZip → ${key.unzipDest}")
+                            val unzipResult = doUnzip(sshConnection, remoteZip, key.unzipDest)
+                            if (!unzipResult.success) {
+                                val result = DeployResult(
+                                    false,
+                                    taskId = taskId,
+                                    backupPath = backupPath,
+                                    transferredFiles = syncResult.transferredFiles,
+                                    totalSize = syncResult.totalSize,
+                                    error = "解压失败: ${unzipResult.error}",
+                                    duration = System.currentTimeMillis() - startTime
+                                )
+                                results.add(result)
+                                logCallback?.invoke("[ERROR] ${result.error}")
+                                return@forEach
+                            }
+                            logCallback?.invoke("解压成功: ${key.unzipDest}")
+                        }
+                        else -> {
+                            val result = DeployResult(
+                                false,
+                                taskId = taskId,
+                                backupPath = backupPath,
+                                transferredFiles = syncResult.transferredFiles,
+                                totalSize = syncResult.totalSize,
+                                error = "本组包含多个 zip 文件，无法安全执行单次解压，请单独部署或关闭解压",
+                                duration = System.currentTimeMillis() - startTime
+                            )
+                            results.add(result)
+                            logCallback?.invoke("[ERROR] ${result.error}")
+                            return@forEach
+                        }
+                    }
+                } else {
+                    logCallback?.invoke("[3/3] 跳过解压（未配置解压目标）")
+                }
+
+                if (!key.postCommand.isNullOrBlank()) {
+                    logCallback?.invoke("[POST] 执行上传后命令: ${key.postCommand}")
+                    val postResult = sshConnection.executeCommand(key.postCommand)
+                    if (postResult.output.isNotBlank()) logCallback?.invoke("[POST] 输出: ${postResult.output.trim()}")
+                    if (!postResult.success) logCallback?.invoke("[WARN] 上传后命令执行失败 (${postResult.exitCode}): ${postResult.error}")
+                    else logCallback?.invoke("[POST] 命令执行成功")
+                }
+
+                val duration = System.currentTimeMillis() - startTime
+                logCallback?.invoke("========== 部署分组完成！耗时: ${duration}ms ==========")
+                val result = DeployResult(
+                    success = true,
+                    taskId = taskId,
+                    backupPath = backupPath,
+                    transferredFiles = syncResult.transferredFiles,
+                    totalSize = syncResult.totalSize,
+                    duration = duration
+                )
+                results.add(result)
+                saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS)
+            } catch (e: Exception) {
+                LOG.error("Batch deploy group failed", e)
+                val result = DeployResult(false, taskId = taskId, error = "部署异常: ${e.message}", duration = System.currentTimeMillis() - startTime)
+                results.add(result)
+                logCallback?.invoke("[ERROR] ${result.error}")
+            } finally {
+                sshConnection.disconnect()
             }
         }
 
@@ -365,6 +567,32 @@ class DeployService {
         return deploy(record.toDeployRequest(), logCallback, progressCallback)
     }
 
+    private fun saveGroupHistory(
+        key: DeployGroupKey,
+        items: List<DeployItem>,
+        syncResult: SyncResult,
+        duration: Long,
+        status: HistoryRecord.OperationStatus
+    ) {
+        HistoryManager.getInstance().addRecord(
+            HistoryRecord(
+                type = HistoryRecord.OperationType.DEPLOY,
+                sourcePath = key.sourceBaseDir,
+                serverId = key.serverId,
+                targetPath = key.remoteBaseDir,
+                fileCount = items.size,
+                fileSize = syncResult.totalSize,
+                duration = duration,
+                status = status,
+                backupDir = key.backupDir ?: "",
+                unzipDest = key.unzipDest ?: "",
+                excludePatterns = key.excludePatterns,
+                preCommand = key.preCommand ?: "",
+                postCommand = key.postCommand ?: ""
+            )
+        )
+    }
+
     /**
      * 保存历史记录
      */
@@ -394,6 +622,44 @@ class DeployService {
     }
 
     /**
+     * 将本次选择的多个远程文件/目录打成一个 tar.gz 备份包。
+     */
+    private fun doBackupSelected(
+        sshConnection: SshConnection,
+        remoteBaseDir: String,
+        relativePaths: List<String>,
+        backupDir: String,
+        logCallback: ((String) -> Unit)? = null
+    ): BackupResult {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
+        val backupFile = "${backupDir.trimEnd('/')}/backup_${timestamp}.tar.gz"
+        sshConnection.executeCommand("mkdir -p ${shellQuote(backupDir)}")
+
+        val existingPaths = relativePaths.map { it.trim('/') }.filter { it.isNotBlank() }.filter { relativePath ->
+            val remotePath = joinRemotePath(remoteBaseDir, relativePath)
+            sshConnection.executeCommand("test -e ${shellQuote(remotePath)}").success
+        }
+
+        if (existingPaths.isEmpty()) {
+            logCallback?.invoke("远程文件均不存在，首次部署，跳过备份")
+            return BackupResult(true, null)
+        }
+
+        logCallback?.invoke("正在压缩备份 ${existingPaths.size} 个远程文件/目录 → $backupFile")
+        existingPaths.forEach { logCallback?.invoke("  $it") }
+        val quotedPaths = existingPaths.joinToString(" ") { shellQuote(it) }
+        val result = sshConnection.executeCommand(
+            "tar -czf ${shellQuote(backupFile)} -C ${shellQuote(remoteBaseDir)} $quotedPaths"
+        )
+        return if (result.success) {
+            logCallback?.invoke("备份完成: $backupFile")
+            BackupResult(true, backupFile)
+        } else {
+            BackupResult(false, error = result.error)
+        }
+    }
+
+    /**
      * 执行备份
      * - 压缩包文件 → 加日期后缀直接复制到备份目录
      * - 目录或非压缩文件 → 压缩为 tar.gz（名称+日期），移动到备份目录
@@ -408,14 +674,14 @@ class DeployService {
         logCallback: ((String) -> Unit)? = null
     ): BackupResult {
         // 检查源文件/目录是否存在
-        val checkResult = sshConnection.executeCommand("test -e $backupSource")
+        val checkResult = sshConnection.executeCommand("test -e ${shellQuote(backupSource)}")
         if (!checkResult.success) {
             logCallback?.invoke("远程文件不存在，首次部署，跳过备份: $backupSource")
             return BackupResult(true, null)
         }
 
         // 确保备份目录存在
-        sshConnection.executeCommand("mkdir -p $backupDir")
+        sshConnection.executeCommand("mkdir -p ${shellQuote(backupDir)}")
 
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
         val sourceName = File(backupSource).name
@@ -432,7 +698,7 @@ class DeployService {
             val ext = sourceName.substringAfterLast(".")
             val backupFile = "$backupDir/${baseName}_bak_${timestamp}.$ext"
             logCallback?.invoke("压缩包备份: $backupSource → $backupFile")
-            sshConnection.executeCommand("cp $backupSource $backupFile")
+            sshConnection.executeCommand("cp ${shellQuote(backupSource)} ${shellQuote(backupFile)}")
         } else {
             // 目录或非压缩文件：压缩为 tar.gz
             val tarName = "${sourceName}_${timestamp}.tar.gz"
@@ -440,7 +706,7 @@ class DeployService {
             val sourceParent = File(backupSource).parent
             logCallback?.invoke("压缩备份: $backupSource → $tarPath")
             sshConnection.executeCommand(
-                "tar -czf $tarPath -C $sourceParent $sourceName"
+                "tar -czf ${shellQuote(tarPath)} -C ${shellQuote(sourceParent ?: ".")} ${shellQuote(sourceName)}"
             )
         }
 
@@ -461,20 +727,28 @@ class DeployService {
         zipPath: String,
         destDir: String
     ): UnzipResult {
-        val checkResult = sshConnection.executeCommand("test -f $zipPath")
+        val checkResult = sshConnection.executeCommand("test -f ${shellQuote(zipPath)}")
         if (!checkResult.success) {
             return UnzipResult(false, error = "文件不存在: $zipPath")
         }
 
-        sshConnection.executeCommand("mkdir -p $destDir")
+        sshConnection.executeCommand("mkdir -p ${shellQuote(destDir)}")
 
-        val result = sshConnection.executeCommand("unzip -o $zipPath -d $destDir")
+        val result = sshConnection.executeCommand("unzip -o ${shellQuote(zipPath)} -d ${shellQuote(destDir)}")
         return if (result.success) {
             UnzipResult(true)
         } else {
             UnzipResult(false, error = result.error)
         }
     }
+
+    private fun joinRemotePath(base: String, relativePath: String): String {
+        val normalizedBase = base.trimEnd('/')
+        val normalizedRelative = relativePath.trim('/')
+        return if (normalizedRelative.isBlank()) normalizedBase else "$normalizedBase/$normalizedRelative"
+    }
+
+    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
     private data class BackupResult(val success: Boolean, val path: String? = null, val error: String? = null)
     private data class UnzipResult(val success: Boolean, val error: String? = null)

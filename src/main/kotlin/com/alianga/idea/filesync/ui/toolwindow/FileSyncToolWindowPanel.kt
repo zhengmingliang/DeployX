@@ -1,5 +1,6 @@
 package com.alianga.idea.filesync.ui.toolwindow
 
+import com.alianga.idea.filesync.model.DeployItem
 import com.alianga.idea.filesync.model.DeployRequest
 import com.alianga.idea.filesync.model.HistoryRecord
 import com.alianga.idea.filesync.model.MappingConfig
@@ -353,40 +354,32 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     /**
      * 公开方法：供右键菜单 Action 调用批量部署
      */
-    fun executeDeployBatch(requests: List<DeployRequest>) {
-        if (requests.isEmpty()) {
-            appendLog("[WARN] 没有可执行的部署请求")
+    fun executeDeployBatch(items: List<DeployItem>) {
+        if (items.isEmpty()) {
+            appendLog("[WARN] 没有可执行的部署项")
             return
         }
-        appendLog("========== 批量部署，共 ${requests.size} 个 ==========")
+        appendLog("========== 批量部署，共 ${items.size} 个 ==========")
         progressBar.value = 0
         progressLabel.text = "批量部署中..."
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Deploying...", true) {
             override fun run(indicator: ProgressIndicator) {
-                var successCount = 0
-                requests.forEachIndexed { index, request ->
-                    if (indicator.isCanceled) return@forEachIndexed
-                    appendLog("[${index + 1}/${requests.size}] ${request.localPath} -> ${request.serverId}:${request.remotePath}")
-                    indicator.text = "Deploying ${index + 1}/${requests.size}: ${java.io.File(request.localPath).name}"
-                    indicator.fraction = index.toDouble() / requests.size
-
-                    val result = deployService.deploy(
-                        request,
-                        logCallback = { line -> appendLog(line) },
-                        progressCallback = { progress ->
-                            SwingUtilities.invokeLater {
-                                val totalPercent = ((index * 100) + progress.percentage) / requests.size
-                                progressBar.value = totalPercent.coerceIn(0, 100)
-                                progressLabel.text = "${index + 1}/${requests.size} ${progress.currentFile} ${progress.percentage}% ${progress.speed}"
-                            }
+                indicator.text = "Batch deploying ${items.size} item(s)..."
+                val results = deployService.deployBatch(
+                    items,
+                    logCallback = { line -> appendLog(line) },
+                    progressCallback = { progress ->
+                        SwingUtilities.invokeLater {
+                            progressBar.value = progress.percentage.coerceIn(0, 100)
+                            progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    )
-                    if (result.success) successCount++
-                }
+                    }
+                )
                 SwingUtilities.invokeLater {
+                    val successCount = results.count { it.success }
                     progressBar.value = 100
-                    progressLabel.text = "批量部署完成：$successCount/${requests.size} 成功"
+                    progressLabel.text = "批量部署完成：$successCount/${results.size} 组成功"
                     refreshHistory()
                 }
             }
