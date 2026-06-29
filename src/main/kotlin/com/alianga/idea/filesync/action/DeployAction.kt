@@ -16,6 +16,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 
 /**
  * 完整部署 Action - 右键菜单 "Deploy (Backup + Upload + Unzip)"
+ * 支持多文件/目录批量部署
  */
 class DeployAction : AnAction() {
 
@@ -26,45 +27,53 @@ class DeployAction : AnAction() {
         val files = getSelectedFiles(e)
         if (files.isEmpty()) return
 
-        val firstFile = files.first()
-        val localPath = firstFile.path
+        val mappingManager = MappingManager.getInstance()
+        val resolvedByFile = files.associateWith { file ->
+            mappingManager.resolveMappingsByLocalPath(file.path, file.isDirectory)
+        }.filterValues { it.isNotEmpty() }
 
-        val resolvedMappings = MappingManager.getInstance().resolveMappingsByLocalPath(localPath, firstFile.isDirectory)
-
-        if (resolvedMappings.isEmpty()) {
+        if (resolvedByFile.isEmpty()) {
             showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
             return
         }
 
-        val availableServers = resolvedMappings.map { it.mapping.serverId }.distinct()
+        val availableServers = resolvedByFile.values.flatten()
+            .map { it.mapping.serverId }
+            .distinct()
             .mapNotNull { ServerManager.getInstance().getServer(it) }
 
         val serverSelectionDialog = ServerSelectionDialog(
-            availableServers, "选择部署目标", "部署到哪个服务器？"
+            availableServers,
+            "选择部署目标",
+            "已选择 ${files.size} 个文件/目录，请选择部署目标服务器："
         )
         if (!serverSelectionDialog.showAndGet()) return
         val targetServer = serverSelectionDialog.selectedServer ?: return
 
-        val targetResolvedMapping = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
-            ?: resolvedMappings.first()
-        val targetMapping = targetResolvedMapping.mapping
-
         ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
 
+        val requests = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
+            val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
+                ?: return@mapNotNull null
+            val mapping = resolved.mapping
+            DeployRequest(
+                localPath = file.path,
+                serverId = targetServer.id,
+                remotePath = resolved.resolvedRemoteDir,
+                backupDir = if (mapping.backupEnabled) mapping.backupDir.ifBlank { null } else null,
+                backupSource = if (mapping.backupEnabled) mapping.backupSource.ifBlank { null } else null,
+                unzipDest = if (mapping.unzipEnabled) mapping.unzipDest.ifBlank { null } else null,
+                excludePatterns = mapping.exclude,
+                preCommand = if (mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
+                postCommand = if (mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
+            )
+        }
+
+        val skipped = files.size - requests.size
         val panel = FileSyncToolWindowPanel.activePanel
         if (panel != null) {
-            val request = DeployRequest(
-                localPath = localPath,
-                serverId = targetServer.id,
-                remotePath = targetResolvedMapping.resolvedRemoteDir,
-                backupDir = if (targetMapping.backupEnabled) targetMapping.backupDir.ifBlank { null } else null,
-                backupSource = if (targetMapping.backupEnabled) targetMapping.backupSource.ifBlank { null } else null,
-                unzipDest = if (targetMapping.unzipEnabled) targetMapping.unzipDest.ifBlank { null } else null,
-                excludePatterns = targetMapping.exclude,
-                preCommand = targetMapping.preCommand.ifBlank { null },
-                postCommand = targetMapping.postCommand.ifBlank { null }
-            )
-            panel.executeDeploy(request)
+            if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
+            panel.executeDeployBatch(requests)
         } else {
             showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
         }

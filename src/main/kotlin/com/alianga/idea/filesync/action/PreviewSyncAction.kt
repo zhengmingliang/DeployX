@@ -24,11 +24,14 @@ class PreviewSyncAction : AnAction() {
         val files = getSelectedFiles(e)
         if (files.isEmpty()) return
 
-        val firstFile = files.first()
-        val localPath = firstFile.path
+        val mappingManager = MappingManager.getInstance()
+        val previewItems = files.mapNotNull { file ->
+            val resolved = mappingManager.resolveMappingByLocalPath(file.path, file.isDirectory)
+                ?: return@mapNotNull null
+            Triple(file.path, resolved.resolvedRemoteDir, resolved.mapping.serverId)
+        }
 
-        val resolvedMapping = MappingManager.getInstance().resolveMappingByLocalPath(localPath, firstFile.isDirectory)
-        if (resolvedMapping == null) {
+        if (previewItems.isEmpty()) {
             showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
             return
         }
@@ -37,7 +40,8 @@ class PreviewSyncAction : AnAction() {
 
         val panel = FileSyncToolWindowPanel.activePanel
         if (panel != null) {
-            panel.executePreview(localPath, resolvedMapping.resolvedRemoteDir, resolvedMapping.mapping.serverId)
+            if (previewItems.size < files.size) panel.appendLog("[WARN] 有 ${files.size - previewItems.size} 个文件未匹配到映射，已跳过")
+            panel.executePreviewBatch(previewItems)
         } else {
             showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
         }

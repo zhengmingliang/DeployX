@@ -32,7 +32,9 @@ class MappingEditDialog(
     private val unzipEnabledCheck = JBCheckBox("启用上传后解压")
     private val unzipDestField = JBTextField()
     private val excludeField = JBTextField()
+    private val preCommandEnabledCheck = JBCheckBox("启用上传前命令")
     private val preCommandField = JBTextField()
+    private val postCommandEnabledCheck = JBCheckBox("启用上传后命令")
     private val postCommandField = JBTextField()
     private val autoCdCheck = JBCheckBox("命令自动切换到远程目录 (cd <远程目录> && ...)", false)
 
@@ -66,9 +68,17 @@ class MappingEditDialog(
         unzipEnabledCheck.addChangeListener {
             unzipDestField.isEnabled = unzipEnabledCheck.isSelected
         }
+        preCommandEnabledCheck.addChangeListener {
+            preCommandField.isEnabled = preCommandEnabledCheck.isSelected
+        }
+        postCommandEnabledCheck.addChangeListener {
+            postCommandField.isEnabled = postCommandEnabledCheck.isSelected
+        }
         backupDirField.isEnabled = false
         backupSourceField.isEnabled = false
         unzipDestField.isEnabled = false
+        preCommandField.isEnabled = false
+        postCommandField.isEnabled = false
 
         when {
             prefillData != null -> fillData(prefillData, nameEditable = true)
@@ -112,6 +122,12 @@ class MappingEditDialog(
 
         excludeField.text = mapping.exclude.joinToString(", ")
 
+        // 上传前/后命令启用状态（兼容旧配置）
+        preCommandEnabledCheck.isSelected = mapping.effectivePreCommandEnabled
+        postCommandEnabledCheck.isSelected = mapping.effectivePostCommandEnabled
+        preCommandField.isEnabled = mapping.effectivePreCommandEnabled
+        postCommandField.isEnabled = mapping.effectivePostCommandEnabled
+
         // 检测自动 cd 模式
         val remoteDir = mapping.remoteDir
         val cdPrefix = "cd $remoteDir && "
@@ -151,7 +167,9 @@ class MappingEditDialog(
             .addLabeledComponent("解压目标:", unzipDestField)
             .addLabeledComponent("排除规则 (逗号分隔):", excludeField)
             .addVerticalGap(8)
+            .addComponent(preCommandEnabledCheck)
             .addLabeledComponent("上传前命令:", preCommandField)
+            .addComponent(postCommandEnabledCheck)
             .addLabeledComponent("上传后命令:", postCommandField)
             .addComponent(autoCdCheck)
             .panel
@@ -204,7 +222,9 @@ class MappingEditDialog(
             unzipEnabled = unzipEnabledCheck.isSelected,
             unzipDest = unzipDestField.text.trim(),
             exclude = excludeField.text.split(",").map { it.trim() }.filter { it.isNotEmpty() },
+            preCommandEnabled = preCommandEnabledCheck.isSelected,
             preCommand = preCommand,
+            postCommandEnabled = postCommandEnabledCheck.isSelected,
             postCommand = postCommand
         )
     }

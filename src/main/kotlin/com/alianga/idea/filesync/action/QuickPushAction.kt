@@ -1,5 +1,6 @@
 package com.alianga.idea.filesync.action
 
+import com.alianga.idea.filesync.model.DeployRequest
 import com.alianga.idea.filesync.service.MappingManager
 import com.alianga.idea.filesync.service.ServerManager
 import com.alianga.idea.filesync.ui.dialog.ServerSelectionDialog
@@ -15,6 +16,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 
 /**
  * 快速推送 Action - 右键菜单 "Quick Push to Server"
+ * 支持多文件/目录批量推送
  */
 class QuickPushAction : AnAction() {
 
@@ -25,17 +27,19 @@ class QuickPushAction : AnAction() {
         val files = getSelectedFiles(e)
         if (files.isEmpty()) return
 
-        val firstFile = files.first()
-        val localPath = firstFile.path
+        val mappingManager = MappingManager.getInstance()
+        val resolvedByFile = files.associateWith { file ->
+            mappingManager.resolveMappingsByLocalPath(file.path, file.isDirectory)
+        }.filterValues { it.isNotEmpty() }
 
-        val resolvedMappings = MappingManager.getInstance().resolveMappingsByLocalPath(localPath, firstFile.isDirectory)
-
-        if (resolvedMappings.isEmpty()) {
+        if (resolvedByFile.isEmpty()) {
             showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
             return
         }
 
-        val availableServers = resolvedMappings.map { it.mapping.serverId }.distinct()
+        val availableServers = resolvedByFile.values.flatten()
+            .map { it.mapping.serverId }
+            .distinct()
             .mapNotNull { ServerManager.getInstance().getServer(it) }
 
         val targetServerId = if (availableServers.size > 1) {
@@ -43,14 +47,33 @@ class QuickPushAction : AnAction() {
             if (!dialog.showAndGet()) return
             dialog.selectedServer?.id ?: return
         } else {
-            availableServers.firstOrNull()?.id ?: resolvedMappings.first().mapping.serverId
+            availableServers.firstOrNull()?.id ?: resolvedByFile.values.first().first().mapping.serverId
         }
 
         ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
 
+        val requests = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
+            val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServerId }
+                ?: return@mapNotNull null
+            val mapping = resolved.mapping
+            DeployRequest(
+                localPath = file.path,
+                serverId = targetServerId,
+                remotePath = resolved.resolvedRemoteDir,
+                backupDir = if (mapping.backupEnabled) mapping.backupDir.ifBlank { null } else null,
+                backupSource = if (mapping.backupEnabled) mapping.backupSource.ifBlank { null } else null,
+                unzipDest = if (mapping.unzipEnabled) mapping.unzipDest.ifBlank { null } else null,
+                excludePatterns = mapping.exclude,
+                preCommand = if (mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
+                postCommand = if (mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
+            )
+        }
+
+        val skipped = files.size - requests.size
         val panel = FileSyncToolWindowPanel.activePanel
         if (panel != null) {
-            panel.executePush(localPath, targetServerId)
+            if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 $targetServerId 的映射，已跳过")
+            panel.executeDeployBatch(requests)
         } else {
             showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
         }

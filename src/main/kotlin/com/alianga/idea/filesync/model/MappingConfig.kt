@@ -44,9 +44,17 @@ data class MappingConfig(
     @SerializedName("exclude")
     val exclude: List<String> = emptyList(),
 
+    /** 是否启用上传前命令，null 表示旧配置：按命令是否为空决定 */
+    @SerializedName("pre_command_enabled")
+    val preCommandEnabled: Boolean? = null,
+
     /** 上传前在远程服务器执行的命令 */
     @SerializedName("pre_command")
     val preCommand: String = "",
+
+    /** 是否启用上传后命令，null 表示旧配置：按命令是否为空决定 */
+    @SerializedName("post_command_enabled")
+    val postCommandEnabled: Boolean? = null,
 
     /** 上传后在远程服务器执行的命令 */
     @SerializedName("post_command")
@@ -71,4 +79,12 @@ data class MappingConfig(
     /** 获取有效ID（兼容旧数据） */
     val effectiveId: String
         get() = if (id.isBlank()) "legacy_${name.hashCode().toString(16)}" else id
+
+    /** 兼容旧配置：旧配置没有启用字段时，命令非空即视为启用 */
+    val effectivePreCommandEnabled: Boolean
+        get() = preCommandEnabled ?: preCommand.isNotBlank()
+
+    /** 兼容旧配置：旧配置没有启用字段时，命令非空即视为启用 */
+    val effectivePostCommandEnabled: Boolean
+        get() = postCommandEnabled ?: postCommand.isNotBlank()
 }

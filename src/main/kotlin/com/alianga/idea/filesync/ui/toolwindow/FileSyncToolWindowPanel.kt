@@ -315,6 +315,84 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     /**
+     * 公开方法：供右键菜单 Action 调用批量部署
+     */
+    fun executeDeployBatch(requests: List<DeployRequest>) {
+        if (requests.isEmpty()) {
+            appendLog("[WARN] 没有可执行的部署请求")
+            return
+        }
+        appendLog("========== 批量部署，共 ${requests.size} 个 ==========")
+        progressBar.value = 0
+        progressLabel.text = "批量部署中..."
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Deploying...", true) {
+            override fun run(indicator: ProgressIndicator) {
+                var successCount = 0
+                requests.forEachIndexed { index, request ->
+                    if (indicator.isCanceled) return@forEachIndexed
+                    appendLog("[${index + 1}/${requests.size}] ${request.localPath} -> ${request.serverId}:${request.remotePath}")
+                    indicator.text = "Deploying ${index + 1}/${requests.size}: ${java.io.File(request.localPath).name}"
+                    indicator.fraction = index.toDouble() / requests.size
+
+                    val result = deployService.deploy(
+                        request,
+                        logCallback = { line -> appendLog(line) },
+                        progressCallback = { progress ->
+                            SwingUtilities.invokeLater {
+                                val totalPercent = ((index * 100) + progress.percentage) / requests.size
+                                progressBar.value = totalPercent.coerceIn(0, 100)
+                                progressLabel.text = "${index + 1}/${requests.size} ${progress.currentFile} ${progress.percentage}% ${progress.speed}"
+                            }
+                        }
+                    )
+                    if (result.success) successCount++
+                }
+                SwingUtilities.invokeLater {
+                    progressBar.value = 100
+                    progressLabel.text = "批量部署完成：$successCount/${requests.size} 成功"
+                    refreshHistory()
+                }
+            }
+        })
+    }
+
+    /**
+     * 公开方法：供右键菜单 Action 调用批量预览
+     */
+    fun executePreviewBatch(items: List<Triple<String, String, String>>) {
+        if (items.isEmpty()) {
+            appendLog("[WARN] 没有可预览的同步项")
+            return
+        }
+        appendLog("========== 批量预览，共 ${items.size} 个 ==========")
+        progressBar.value = 0
+        progressLabel.text = "批量预览中..."
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Previewing...", true) {
+            override fun run(indicator: ProgressIndicator) {
+                var successCount = 0
+                items.forEachIndexed { index, (localPath, remotePath, serverId) ->
+                    if (indicator.isCanceled) return@forEachIndexed
+                    appendLog("[${index + 1}/${items.size}] 预览 $localPath -> $serverId:$remotePath")
+                    indicator.text = "Previewing ${index + 1}/${items.size}: ${java.io.File(localPath).name}"
+                    indicator.fraction = index.toDouble() / items.size
+                    val result = SyncService.getInstance().previewSync(localPath, remotePath, serverId) { line ->
+                        appendLog(line)
+                    }
+                    if (result.success) successCount++ else appendLog("[ERROR] ${result.error}")
+                    SwingUtilities.invokeLater {
+                        progressBar.value = (((index + 1) * 100) / items.size).coerceIn(0, 100)
+                    }
+                }
+                SwingUtilities.invokeLater {
+                    progressLabel.text = "批量预览完成：$successCount/${items.size} 成功"
+                }
+            }
+        })
+    }
+
+    /**
      * 公开方法：供右键菜单 Action 调用部署
      */
     fun executeDeploy(request: DeployRequest) {
@@ -538,9 +616,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             localDir = localPath,
             serverId = serverId,
             remoteDir = remotePath,
+            backupEnabled = backupCheck.isSelected,
             backupDir = if (backupCheck.isSelected) backupDirField.text.trim() else "",
+            unzipEnabled = unzipCheck.isSelected,
             unzipDest = if (unzipCheck.isSelected) unzipDestField.text.trim() else "",
+            preCommandEnabled = preCommandField.text.trim().isNotBlank(),
             preCommand = preCommandField.text.trim(),
+            postCommandEnabled = postCommandField.text.trim().isNotBlank(),
             postCommand = postCommandField.text.trim()
         )
 

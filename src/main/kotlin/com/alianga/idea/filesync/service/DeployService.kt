@@ -243,8 +243,8 @@ class DeployService {
             backupSource = if (mapping.backupEnabled) mapping.backupSource.ifBlank { null } else null,
             unzipDest = if (mapping.unzipEnabled) mapping.unzipDest.ifBlank { null } else null,
             excludePatterns = mapping.exclude,
-            preCommand = mapping.preCommand.ifBlank { null },
-            postCommand = mapping.postCommand.ifBlank { null }
+            preCommand = if (mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
+            postCommand = if (mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
         )
 
         return deploy(request, logCallback, progressCallback)

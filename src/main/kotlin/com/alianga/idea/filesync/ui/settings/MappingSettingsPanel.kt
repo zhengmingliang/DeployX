@@ -102,7 +102,7 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private class MappingTableModel : AbstractTableModel() {
-        private val columns = arrayOf("Name", "Local Dir", "Server", "Remote Dir", "Backup", "Unzip")
+        private val columns = arrayOf("Name", "Local Dir", "Server", "Remote Dir", "Backup", "Unzip", "Pre Cmd", "Post Cmd")
         private var mappings = listOf<MappingConfig>()
 
         fun setData(mappings: List<MappingConfig>) {
@@ -125,6 +125,8 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
                 3 -> mapping.remoteDir
                 4 -> if (mapping.backupEnabled) "✓ ${mapping.backupDir}" else ""
                 5 -> if (mapping.unzipEnabled) "✓ ${mapping.unzipDest}" else ""
+                6 -> if (mapping.effectivePreCommandEnabled) "✓" else ""
+                7 -> if (mapping.effectivePostCommandEnabled) "✓" else ""
                 else -> ""
             }
         }

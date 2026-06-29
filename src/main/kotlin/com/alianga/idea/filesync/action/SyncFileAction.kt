@@ -16,7 +16,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 
 /**
  * 同步文件 Action - 右键菜单 "Sync to Server"
- * 支持多服务器映射时弹出选择对话框
+ * 支持多文件/目录批量同步
  */
 class SyncFileAction : AnAction() {
 
@@ -27,52 +27,53 @@ class SyncFileAction : AnAction() {
         val files = getSelectedFiles(e)
         if (files.isEmpty()) return
 
-        val firstFile = files.first()
-        val localPath = firstFile.path
+        val mappingManager = MappingManager.getInstance()
+        val resolvedByFile = files.associateWith { file ->
+            mappingManager.resolveMappingsByLocalPath(file.path, file.isDirectory)
+        }.filterValues { it.isNotEmpty() }
 
-        // 查找所有匹配的映射，并解析远程目标目录
-        val resolvedMappings = MappingManager.getInstance().resolveMappingsByLocalPath(localPath, firstFile.isDirectory)
-
-        if (resolvedMappings.isEmpty()) {
+        if (resolvedByFile.isEmpty()) {
             showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
             return
         }
 
-        // 收集所有可用的服务器（去重）
-        val availableServers = resolvedMappings.map { it.mapping.serverId }.distinct()
+        val availableServers = resolvedByFile.values.flatten()
+            .map { it.mapping.serverId }
+            .distinct()
             .mapNotNull { ServerManager.getInstance().getServer(it) }
 
-        // 弹出服务器选择（无论几个都弹，让用户确认）
         val serverSelectionDialog = ServerSelectionDialog(
             availableServers,
             "选择目标服务器",
-            "文件 ${firstFile.name} 匹配到 ${availableServers.size} 个服务器，请选择："
+            "已选择 ${files.size} 个文件/目录，请选择上传目标服务器："
         )
         if (!serverSelectionDialog.showAndGet()) return
         val targetServer = serverSelectionDialog.selectedServer ?: return
 
-        // 使用选中服务器对应的映射配置
-        val targetResolvedMapping = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
-            ?: resolvedMappings.first()
-        val targetMapping = targetResolvedMapping.mapping
-
-        // 打开工具窗口
         ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
 
+        val requests = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
+            val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
+                ?: return@mapNotNull null
+            val mapping = resolved.mapping
+            DeployRequest(
+                localPath = file.path,
+                serverId = targetServer.id,
+                remotePath = resolved.resolvedRemoteDir,
+                backupDir = if (mapping.backupEnabled) mapping.backupDir.ifBlank { null } else null,
+                backupSource = if (mapping.backupEnabled) mapping.backupSource.ifBlank { null } else null,
+                unzipDest = if (mapping.unzipEnabled) mapping.unzipDest.ifBlank { null } else null,
+                excludePatterns = mapping.exclude,
+                preCommand = if (mapping.effectivePreCommandEnabled) mapping.preCommand.ifBlank { null } else null,
+                postCommand = if (mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
+            )
+        }
+
+        val skipped = files.size - requests.size
         val panel = FileSyncToolWindowPanel.activePanel
         if (panel != null) {
-            val request = DeployRequest(
-                localPath = localPath,
-                serverId = targetServer.id,
-                remotePath = targetResolvedMapping.resolvedRemoteDir,
-                backupDir = if (targetMapping.backupEnabled) targetMapping.backupDir.ifBlank { null } else null,
-                backupSource = if (targetMapping.backupEnabled) targetMapping.backupSource.ifBlank { null } else null,
-                unzipDest = if (targetMapping.unzipEnabled) targetMapping.unzipDest.ifBlank { null } else null,
-                excludePatterns = targetMapping.exclude,
-                preCommand = targetMapping.preCommand.ifBlank { null },
-                postCommand = targetMapping.postCommand.ifBlank { null }
-            )
-            panel.executeDeploy(request)
+            if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
+            panel.executeDeployBatch(requests)
         } else {
             showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
         }
