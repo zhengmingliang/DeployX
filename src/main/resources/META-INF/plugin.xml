@@ -1,5 +1,5 @@
 <idea-plugin>
-    <id>com.alianga.idea.filesync</id>
+    <id>com.alianga.idea.deploy</id>
     <name>DeployX</name>
     <vendor email="alianga@example.com" url="https://github.com/alianga">alianga</vendor>
 

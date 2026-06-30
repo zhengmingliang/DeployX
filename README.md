@@ -261,7 +261,7 @@ IDE 持久化设置会写入 IntelliJ 配置目录中的 `FileSyncTool.xml`。
 - Debug 日志设置：`Help → Diagnostic Tools → Debug Log Settings`，添加：
 
 ```text
-#com.alianga.idea.filesync
+#com.alianga.idea.deploy
 ```
 
 ## 开发说明

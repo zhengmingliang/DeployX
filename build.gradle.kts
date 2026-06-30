@@ -4,7 +4,7 @@ plugins {
     id("org.jetbrains.intellij") version "1.16.0"
 }
 
-group = "com.alianga.idea.filesync"
+group = "com.alianga.idea.deploy"
 version = "1.0.0"
 
 // 本地 IDEA 安装路径（与 localPath 保持一致）
