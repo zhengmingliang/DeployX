@@ -30,34 +30,34 @@
 
         <!-- Application Services -->
         <applicationService
-            serviceImplementation="com.alianga.idea.filesync.config.ConfigManager"/>
+            serviceImplementation="com.alianga.idea.deploy.config.ConfigManager"/>
         <applicationService
-            serviceImplementation="com.alianga.idea.filesync.config.FileSyncSettings"/>
+            serviceImplementation="com.alianga.idea.deploy.config.FileSyncSettings"/>
         <applicationService
-            serviceImplementation="com.alianga.idea.filesync.service.ServerManager"/>
+            serviceImplementation="com.alianga.idea.deploy.service.ServerManager"/>
         <applicationService
-            serviceImplementation="com.alianga.idea.filesync.service.MappingManager"/>
+            serviceImplementation="com.alianga.idea.deploy.service.MappingManager"/>
         <applicationService
-            serviceImplementation="com.alianga.idea.filesync.service.SyncService"/>
+            serviceImplementation="com.alianga.idea.deploy.service.SyncService"/>
         <applicationService
-            serviceImplementation="com.alianga.idea.filesync.service.DeployService"/>
+            serviceImplementation="com.alianga.idea.deploy.service.DeployService"/>
         <applicationService
-            serviceImplementation="com.alianga.idea.filesync.service.HistoryManager"/>
+            serviceImplementation="com.alianga.idea.deploy.service.HistoryManager"/>
         <applicationService
-            serviceImplementation="com.alianga.idea.filesync.service.TerminalService"/>
+            serviceImplementation="com.alianga.idea.deploy.service.TerminalService"/>
 
         <!-- Settings Page -->
         <applicationConfigurable
             parentId="tools"
-            instance="com.alianga.idea.filesync.ui.settings.FileSyncSettingsConfigurable"
-            id="com.alianga.idea.filesync.settings"
+            instance="com.alianga.idea.deploy.ui.settings.FileSyncSettingsConfigurable"
+            id="com.alianga.idea.deploy.settings"
             displayName="DeployX"/>
 
         <!-- Tool Window -->
         <toolWindow
             id="DeployX"
             icon="/icons/toolWindow.svg"
-            factoryClass="com.alianga.idea.filesync.ui.toolwindow.FileSyncToolWindowFactory"
+            factoryClass="com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowFactory"
             anchor="right"/>
 
         <!-- Notification Group -->
@@ -73,7 +73,7 @@
     <actions>
         <!-- Sync File Action -->
         <action id="FileSync.SyncFile"
-                class="com.alianga.idea.filesync.action.SyncFileAction"
+                class="com.alianga.idea.deploy.action.SyncFileAction"
                 text="Sync to Server"
                 description="Sync selected file(s) to remote server"
                 icon="/icons/toolWindow.svg">
@@ -84,7 +84,7 @@
 
         <!-- Quick Push Action -->
         <action id="FileSync.QuickPush"
-                class="com.alianga.idea.filesync.action.QuickPushAction"
+                class="com.alianga.idea.deploy.action.QuickPushAction"
                 text="Quick Push to Server"
                 description="Quickly push selected file(s) to the matched server"
                 icon="/icons/toolWindow.svg">
@@ -95,7 +95,7 @@
 
         <!-- Deploy Action -->
         <action id="FileSync.Deploy"
-                class="com.alianga.idea.filesync.action.DeployAction"
+                class="com.alianga.idea.deploy.action.DeployAction"
                 text="Deploy (Backup + Upload + Unzip)"
                 description="Full deployment workflow"
                 icon="/icons/toolWindow.svg">
@@ -104,7 +104,7 @@
 
         <!-- Preview Sync Action -->
         <action id="FileSync.PreviewSync"
-                class="com.alianga.idea.filesync.action.PreviewSyncAction"
+                class="com.alianga.idea.deploy.action.PreviewSyncAction"
                 text="Preview Sync"
                 description="Preview which files would be transferred"
                 icon="/icons/toolWindow.svg">
@@ -130,7 +130,7 @@
 
         <!-- Open SSH Terminal Action -->
         <action id="FileSync.OpenSshTerminal"
-                class="com.alianga.idea.filesync.action.OpenSshTerminalAction"
+                class="com.alianga.idea.deploy.action.OpenSshTerminalAction"
                 text="Open SSH Terminal"
                 description="Open SSH terminal to remote server"
                 icon="/icons/toolWindow.svg">

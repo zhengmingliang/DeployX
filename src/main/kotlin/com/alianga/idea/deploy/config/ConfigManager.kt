@@ -13,14 +13,14 @@ import java.io.File
 
 /**
  * 配置管理器 - 负责 JSON 配置文件的读写
- * 配置存储目录: ~/.file-sync-tool/
+ * 配置存储目录: ~/.deploy-x/
  */
 @Service
 class ConfigManager {
 
     companion object {
         private val LOG = Logger.getInstance(ConfigManager::class.java)
-        private val CONFIG_DIR = File(System.getProperty("user.home"), ".file-sync-tool")
+        private val CONFIG_DIR = File(System.getProperty("user.home"), ".deploy-x")
         private val SERVERS_FILE = File(CONFIG_DIR, "servers.json")
         private val MAPPINGS_FILE = File(CONFIG_DIR, "mappings.json")
         private val HISTORY_FILE = File(CONFIG_DIR, "history.json")

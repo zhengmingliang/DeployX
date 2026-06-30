@@ -1,5 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <path fill="#6B7280" d="M2 2h5v2H4v8h8V9h2v5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/>
-  <path fill="#3B82F6" d="M7 2h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/>
-  <path fill="#FFFFFF" d="M9 5.5L11.5 8 9 10.5V8.5H6V7.5H9V5.5z" transform="rotate(90 9.5 8)"/>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景 -->
+  <rect width="128" height="128" rx="24" ry="24" fill="#134e4a"/>
+  
+  <!-- 云底部 -->
+  <ellipse cx="64" cy="68" rx="40" ry="24" fill="#0d9488" opacity="0.3"/>
+  
+  <!-- 云主体 -->
+  <path d="M40 60c0-12 10-22 22-22s22 10 22 22c8 0 14 6 14 14s-6 14-14 14H34c-8 0-14-6-14-14s6-14 14-14z" fill="#14b8a6"/>
+  
+  <!-- 云高光 -->
+  <path d="M52 44c-6 4-10 12-10 18 0 4 2 6 6 8 2-4 4-10 4-14 0-6-2-12-2-12z" fill="#5eead4" opacity="0.5"/>
+  
+  <!-- 向上箭头 - 表示部署 -->
+  <g transform="translate(64, 28)">
+    <path d="M0 0l-12 16h8v20h8V16h8L0 0z" fill="#fbbf24"/>
+    <path d="M0 4l-8 10h4v6h8v-6h4L0 4z" fill="#fde047" opacity="0.7"/>
+  </g>
+  
+  <!-- 装饰圆点 - 代表文件/数据 -->
+  <circle cx="36" cy="76" r="3" fill="#22d3ee"/>
+  <circle cx="56" cy="80" r="2.5" fill="#22d3ee" opacity="0.8"/>
+  <circle cx="80" cy="78" r="2" fill="#22d3ee" opacity="0.7"/>
+  <circle cx="96" cy="72" r="2.5" fill="#22d3ee" opacity="0.9"/>
+  
+  <!-- 内圈装饰 -->
+  <circle cx="64" cy="64" r="52" fill="none" stroke="#0f766e" stroke-width="2" opacity="0.4"/>
 </svg>

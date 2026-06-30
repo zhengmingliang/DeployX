@@ -1,1 +1,1 @@
-rootProject.name = "file-sync-tool"
+rootProject.name = "DeployX"
