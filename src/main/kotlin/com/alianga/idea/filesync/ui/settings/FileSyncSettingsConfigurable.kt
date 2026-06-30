@@ -5,7 +5,7 @@ import com.intellij.ui.components.JBTabbedPane
 import javax.swing.JComponent
 
 /**
- * 文件同步工具设置页面 - 注册在 Settings > Tools > File Sync Tool
+ * 文件同步工具设置页面 - 注册在 Settings > Tools > DeployX
  */
 class FileSyncSettingsConfigurable : Configurable {
 
@@ -14,7 +14,7 @@ class FileSyncSettingsConfigurable : Configurable {
     private val mappingPanel = MappingSettingsPanel()
     private val rsyncPanel = RsyncSettingsPanel()
 
-    override fun getDisplayName(): String = "File Sync Tool"
+    override fun getDisplayName(): String = "DeployX"
 
     override fun createComponent(): JComponent {
         if (mainPanel == null) {

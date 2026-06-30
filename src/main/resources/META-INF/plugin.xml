@@ -1,20 +1,20 @@
 <idea-plugin>
     <id>com.alianga.idea.filesync</id>
-    <name>File Sync Tool</name>
+    <name>DeployX</name>
     <vendor email="alianga@example.com" url="https://github.com/alianga">alianga</vendor>
 
     <description><![CDATA[
-        <p>一键式文件同步部署工具，支持目录映射、跨平台传输、批量上传/部署、自动备份、远程解压和更新报告。</p>
+        <p>全能型远程部署工具 - DeployX：一站式远程部署、自动备份、远程解压、文件同步、SSH 终端集成。</p>
         <ul>
             <li>🖥️ 服务器管理：支持密码/密钥 SSH 认证，支持连接测试与配置复制</li>
             <li>📁 目录映射：本地/远程目录映射，唯一 ID 管理，名称允许重复</li>
-            <li>🔄 传输模式：rsync 优先，支持 AUTO / RSYNC_ONLY / SFTP_ONLY；rsync 不可用或 sshpass 缺失时可自动降级 SFTP</li>
-            <li>📤 批量上传：多文件使用 rsync --files-from 合并传输，保持相对路径</li>
-            <li>🚀 部署流程：Deploy 支持按分组执行一次备份、上传、解压和前后置命令</li>
-            <li>💾 智能备份：支持备份源配置、压缩包备份和选择文件打包备份</li>
-            <li>📦 智能解压：上传后可按配置解压压缩包</li>
-            <li>📜 日志/历史/报告：按服务器拆分日志 Tab，支持历史记录、重新部署、复制/导出更新报告</li>
-            <li>🖥️ SSH 终端：一键打开远程服务器 SSH 终端，支持密码和密钥认证</li>
+            <li>🔄 智能传输：rsync 优先，支持 AUTO / RSYNC_ONLY / SFTP_ONLY；自动降级 SFTP</li>
+            <li>📤 批量上传：多文件合并传输，保持相对路径</li>
+            <li>🚀 一键部署：自动执行备份、上传、解压和前后置命令</li>
+            <li>💾 智能备份：部署前自动备份，支持选择文件打包备份</li>
+            <li>📦 自动解压：上传后可按配置自动解压压缩包</li>
+            <li>📜 日志历史：按服务器拆分日志，历史记录可回溯、重新部署</li>
+            <li>🖥️ SSH 终端：一键打开远程服务器终端，协议层认证真正免密登录</li>
         </ul>
     ]]></description>
 
@@ -51,17 +51,17 @@
             parentId="tools"
             instance="com.alianga.idea.filesync.ui.settings.FileSyncSettingsConfigurable"
             id="com.alianga.idea.filesync.settings"
-            displayName="File Sync Tool"/>
+            displayName="DeployX"/>
 
         <!-- Tool Window -->
         <toolWindow
-            id="File Sync"
+            id="DeployX"
             icon="/icons/toolWindow.svg"
             factoryClass="com.alianga.idea.filesync.ui.toolwindow.FileSyncToolWindowFactory"
             anchor="right"/>
 
         <!-- Notification Group -->
-        <notificationGroup id="File Sync Tool"
+        <notificationGroup id="DeployX"
                            displayType="BALLOON"
                            isLogByDefault="true"/>
 
@@ -111,9 +111,9 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
 
-        <!-- File Sync Submenu -->
+        <!-- DeployX Submenu -->
         <group id="FileSync.MenuGroup"
-               text="File Sync Tool"
+               text="DeployX"
                description="File sync operations"
                popup="true"
                icon="/icons/toolWindow.svg">

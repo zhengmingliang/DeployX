@@ -27,7 +27,7 @@ class OpenSshTerminalAction : AnAction("Open SSH Terminal", "Open SSH terminal t
         when {
             servers.isEmpty() -> {
                 showNotification(project, "请先在设置中配置服务器", NotificationType.WARNING)
-                ShowSettingsUtil.getInstance().showSettingsDialog(project, "File Sync Tool")
+                ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX")
             }
             servers.size == 1 -> {
                 // 只有一个服务器，直接连接
@@ -73,7 +73,7 @@ class OpenSshTerminalAction : AnAction("Open SSH Terminal", "Open SSH terminal t
     }
 
     private fun showNotification(project: Project, content: String, type: NotificationType) {
-        NotificationGroupManager.getInstance().getNotificationGroup("File Sync Tool")
+        NotificationGroupManager.getInstance().getNotificationGroup("DeployX")
             .createNotification(content, type)
             .notify(project)
     }

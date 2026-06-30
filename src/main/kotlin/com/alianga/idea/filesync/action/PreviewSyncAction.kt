@@ -46,14 +46,14 @@ class PreviewSyncAction : AnAction() {
             return
         }
 
-        ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
+        ToolWindowManager.getInstance(project).getToolWindow("DeployX")?.show()
 
         val panel = FileSyncToolWindowPanel.getPanel(project)
         if (panel != null) {
             if (previewItems.size < files.size) panel.appendLog("[WARN] 有 ${files.size - previewItems.size} 个文件未匹配到映射，已跳过")
             panel.executePreviewBatch(previewItems)
         } else {
-            showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
+            showNotification(project, "工具窗口未打开，请先打开 DeployX 工具窗口", NotificationType.WARNING)
         }
     }
 
@@ -66,6 +66,6 @@ class PreviewSyncAction : AnAction() {
     }
 
     private fun showNotification(project: com.intellij.openapi.project.Project, content: String, type: NotificationType) {
-        NotificationGroupManager.getInstance().getNotificationGroup("File Sync Tool").createNotification(content, type).notify(project)
+        NotificationGroupManager.getInstance().getNotificationGroup("DeployX").createNotification(content, type).notify(project)
     }
 }

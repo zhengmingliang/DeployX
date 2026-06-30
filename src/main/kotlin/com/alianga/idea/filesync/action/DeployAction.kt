@@ -50,7 +50,7 @@ class DeployAction : AnAction() {
         if (!serverSelectionDialog.showAndGet()) return
         val targetServer = serverSelectionDialog.selectedServer ?: return
 
-        ToolWindowManager.getInstance(project).getToolWindow("File Sync")?.show()
+        ToolWindowManager.getInstance(project).getToolWindow("DeployX")?.show()
 
         val items = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
             val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
@@ -79,7 +79,7 @@ class DeployAction : AnAction() {
             if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
             panel.executeDeployBatch(items)
         } else {
-            showNotification(project, "工具窗口未打开，请先打开 File Sync 工具窗口", NotificationType.WARNING)
+            showNotification(project, "工具窗口未打开，请先打开 DeployX 工具窗口", NotificationType.WARNING)
         }
     }
 
@@ -92,6 +92,6 @@ class DeployAction : AnAction() {
     }
 
     private fun showNotification(project: com.intellij.openapi.project.Project, content: String, type: NotificationType) {
-        NotificationGroupManager.getInstance().getNotificationGroup("File Sync Tool").createNotification(content, type).notify(project)
+        NotificationGroupManager.getInstance().getNotificationGroup("DeployX").createNotification(content, type).notify(project)
     }
 }

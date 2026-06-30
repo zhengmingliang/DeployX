@@ -109,7 +109,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private fun setupUI() {
         val actionGroup = DefaultActionGroup().apply {
             add(createAction("Settings", AllIcons.General.Settings) {
-                ShowSettingsUtil.getInstance().showSettingsDialog(project, "File Sync Tool")
+                ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX")
             })
             add(createAction("Refresh", AllIcons.Actions.Refresh) {
                 refreshServerCombo()

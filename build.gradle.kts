@@ -34,7 +34,7 @@ intellij {
     localPath.set(ideaHome)
     // 依赖 terminal 插件，使其核心类在编译时可用（TerminalView/AbstractTerminalRunner 等）
     plugins.set(listOf("org.jetbrains.plugins.terminal"))
-    pluginName.set("File Sync Tool")
+    pluginName.set("DeployX")
     updateSinceUntilBuild.set(true)
 }
 
