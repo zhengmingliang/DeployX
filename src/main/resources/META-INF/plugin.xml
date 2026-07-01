@@ -4,6 +4,21 @@
     <vendor email="alianga@example.com" url="https://github.com/alianga">alianga</vendor>
 
     <description><![CDATA[
+        <p>DeployX - All-in-one remote deployment tool with SSH server management, file sync, auto backup, remote extraction, command execution and terminal integration.</p>
+        <ul>
+            <li>🖥️ Server management: password/key SSH authentication, connection test, config cloning
+            <li>📁 Directory mapping: local/remote mapping with unique IDs
+            <li>🔄 Smart transfer: rsync first with AUTO/RSYNC_ONLY/SFTP_ONLY; auto fall back to SFTP
+            <li>📤 Batch upload: multi-file merged transfer with relative paths
+            <li>🚀 One-click deploy: auto backup, upload, extract, execute commands
+            <li>💾 Auto backup: backup before deployment, selective file package
+            <li>📦 Auto extract: unzip remote files after upload
+            <li>📜 History: per-server logs, history rollback and redeploy
+            <li>🖥️ SSH terminal: protocol-level auth opens remote terminal
+            <li>📚 Script library: reusable remote SSH commands with parameters, context interpolation and safety checks
+        </ul>
+
+        <br>
         <p>全能型远程部署工具 - DeployX：一站式远程部署、自动备份、远程解压、文件同步、SSH 终端集成。</p>
         <ul>
             <li>🖥️ 服务器管理：支持密码/密钥 SSH 认证，支持连接测试与配置复制</li>
@@ -14,11 +29,12 @@
             <li>💾 智能备份：部署前自动备份，支持选择文件打包备份</li>
             <li>📦 自动解压：上传后可按配置自动解压压缩包</li>
             <li>📜 日志历史：按服务器拆分日志，历史记录可回溯、重新部署</li>
+            <li>📚 脚本库：可复用的远程命令片段，支持参数化、上下文插值与危险确认</li>
             <li>🖥️ SSH 终端：一键打开远程服务器终端，协议层认证真正免密登录</li>
         </ul>
     ]]></description>
 
-    <idea-version since-build="223" until-build=""/>
+    <idea-version since-build="223" until-build="261.*"/>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
@@ -37,6 +53,8 @@
             serviceImplementation="com.alianga.idea.deploy.service.ServerManager"/>
         <applicationService
             serviceImplementation="com.alianga.idea.deploy.service.MappingManager"/>
+        <applicationService
+            serviceImplementation="com.alianga.idea.deploy.service.ScriptManager"/>
         <applicationService
             serviceImplementation="com.alianga.idea.deploy.service.SyncService"/>
         <applicationService
@@ -126,6 +144,9 @@
             <reference id="FileSync.PreviewSync"/>
             <separator/>
             <reference id="FileSync.OpenSshTerminal"/>
+            <separator/>
+            <reference id="FileSync.OpenScriptLibrary"/>
+            <reference id="FileSync.RunScriptOnSelection"/>
         </group>
 
         <!-- Open SSH Terminal Action -->
@@ -137,6 +158,26 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt T"/>
+        </action>
+
+        <!-- Open Script Library Action -->
+        <action id="FileSync.OpenScriptLibrary"
+                class="com.alianga.idea.deploy.action.OpenScriptLibraryAction"
+                text="Script Library"
+                description="Open the DeployX script library"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+
+        <!-- Run Script From Selection Action -->
+        <action id="FileSync.RunScriptOnSelection"
+                class="com.alianga.idea.deploy.action.RunScriptOnSelectionAction"
+                text="Run Script on Selection"
+                description="Pick a script from library and run on selection context"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
     </actions>
 

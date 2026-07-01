@@ -56,7 +56,7 @@ kotlin {
 tasks {
     patchPluginXml {
         sinceBuild.set("223")
-        untilBuild.set("")
+        untilBuild.set("261.*")
         changeNotes.set(
             """
             <![CDATA[
