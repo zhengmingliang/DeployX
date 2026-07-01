@@ -78,7 +78,10 @@ data class HistoryRecord(
         DEPLOY("deploy"),
 
         @SerializedName("backup")
-        BACKUP("backup");
+        BACKUP("backup"),
+
+        @SerializedName("script")
+        SCRIPT("script");
 
         companion object {
             fun fromValue(value: String): OperationType =

@@ -13,6 +13,7 @@ class FileSyncSettingsConfigurable : Configurable {
     private val serverPanel = ServerSettingsPanel()
     private val mappingPanel = MappingSettingsPanel()
     private val rsyncPanel = RsyncSettingsPanel()
+    private val scriptPanel = ScriptSettingsPanel()
 
     override fun getDisplayName(): String = "DeployX"
 
@@ -22,25 +23,28 @@ class FileSyncSettingsConfigurable : Configurable {
                 addTab("服务器管理", serverPanel)
                 addTab("目录映射", mappingPanel)
                 addTab("rsync 配置", rsyncPanel)
+                addTab("脚本库", scriptPanel)
             }
         }
         return mainPanel!!
     }
 
     override fun isModified(): Boolean {
-        return serverPanel.isModified() || mappingPanel.isModified() || rsyncPanel.isModified()
+        return serverPanel.isModified() || mappingPanel.isModified() || rsyncPanel.isModified() || scriptPanel.isModified()
     }
 
     override fun apply() {
         serverPanel.apply()
         mappingPanel.apply()
         rsyncPanel.apply()
+        scriptPanel.apply()
     }
 
     override fun reset() {
         serverPanel.reset()
         mappingPanel.reset()
         rsyncPanel.reset()
+        scriptPanel.reset()
     }
 
     override fun disposeUIResources() {

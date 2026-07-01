@@ -2,6 +2,7 @@ package com.alianga.idea.deploy.config
 
 import com.alianga.idea.deploy.model.HistoryRecord
 import com.alianga.idea.deploy.model.MappingConfig
+import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ServerConfig
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
@@ -24,6 +25,7 @@ class ConfigManager {
         private val SERVERS_FILE = File(CONFIG_DIR, "servers.json")
         private val MAPPINGS_FILE = File(CONFIG_DIR, "mappings.json")
         private val HISTORY_FILE = File(CONFIG_DIR, "history.json")
+        private val SCRIPTS_FILE = File(CONFIG_DIR, "scripts.json")
 
         private val GSON: Gson = GsonBuilder()
             .setPrettyPrinting()
@@ -129,6 +131,34 @@ class ConfigManager {
             LOG.info("Saved ${records.size} history records")
         } catch (e: Exception) {
             LOG.error("Failed to save history", e)
+        }
+    }
+
+    // ==================== 脚本配置 ====================
+
+    /**
+     * 读取所有脚本配置
+     */
+    fun loadScripts(): List<ScriptConfig> {
+        if (!SCRIPTS_FILE.exists()) return emptyList()
+        return try {
+            val type = object : TypeToken<List<ScriptConfig>>() {}.type
+            GSON.fromJson(SCRIPTS_FILE.readText(), type) ?: emptyList()
+        } catch (e: Exception) {
+            LOG.warn("Failed to load scripts config", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * 保存所有脚本配置
+     */
+    fun saveScripts(scripts: List<ScriptConfig>) {
+        try {
+            SCRIPTS_FILE.writeText(GSON.toJson(scripts))
+            LOG.info("Saved ${scripts.size} scripts to config")
+        } catch (e: Exception) {
+            LOG.error("Failed to save scripts config", e)
         }
     }
 

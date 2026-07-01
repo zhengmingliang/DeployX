@@ -4,6 +4,7 @@ import com.alianga.idea.deploy.model.DeployItem
 import com.alianga.idea.deploy.model.DeployRequest
 import com.alianga.idea.deploy.model.HistoryRecord
 import com.alianga.idea.deploy.model.MappingConfig
+import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.model.UploadItem
 import com.alianga.idea.deploy.model.UpdateReport
 import com.alianga.idea.deploy.model.UpdateReportGroup
@@ -15,6 +16,7 @@ import com.alianga.idea.deploy.service.SyncService
 import com.alianga.idea.deploy.service.TerminalService
 import com.alianga.idea.deploy.service.UpdateReportFormatter
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
+import com.alianga.idea.deploy.ui.script.ScriptTabPanel
 import com.alianga.idea.deploy.ui.settings.MappingEditDialog
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.*
@@ -36,6 +38,7 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.util.ui.FormBuilder
 import java.awt.BorderLayout
+import java.awt.Dimension
 import java.awt.Font
 import java.awt.datatransfer.StringSelection
 import java.time.LocalTime
@@ -74,8 +77,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val backupDirField = JBTextField()
     private val unzipCheck = JBCheckBox("上传后解压")
     private val unzipDestField = JBTextField()
-    private val preCommandField = JBTextField()
-    private val postCommandField = JBTextField()
+    private val preCommandField = JBTextArea(3, 60)
+    private val postCommandField = JBTextArea(3, 60)
 
     // 进度
     private val progressBar = JProgressBar(0, 100)
@@ -90,6 +93,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val historyListModel = DefaultListModel<String>()
     private val historyList = JBList(historyListModel)
     private var historyRecords = listOf<HistoryRecord>()
+    private val scriptTabPanel = ScriptTabPanel(project)
 
     // Tab 面板
     private val tabbedPane = JBTabbedPane()
@@ -143,14 +147,21 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             .addLabeledComponent("远程路径:", remotePathField)
             .panel
 
+        preCommandField.font = Font("Monospaced", Font.PLAIN, 12)
+        postCommandField.font = Font("Monospaced", Font.PLAIN, 12)
+        preCommandField.lineWrap = true
+        postCommandField.lineWrap = true
+        preCommandField.wrapStyleWord = true
+        postCommandField.wrapStyleWord = true
+
         val deployPanel = FormBuilder.createFormBuilder()
             .addComponent(backupCheck)
             .addLabeledComponent("备份目录:", backupDirField)
             .addComponent(unzipCheck)
             .addLabeledComponent("解压目录:", unzipDestField)
             .addVerticalGap(8)
-            .addLabeledComponent("上传前命令:", preCommandField)
-            .addLabeledComponent("上传后命令:", postCommandField)
+            .addLabeledComponent("上传前命令:", JBScrollPane(preCommandField).apply { preferredSize = Dimension(600, 72) })
+            .addLabeledComponent("上传后命令:", JBScrollPane(postCommandField).apply { preferredSize = Dimension(600, 72) })
             .panel
 
         val buttonPanel = JPanel().apply {
@@ -216,10 +227,16 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(JBScrollPane(historyList), BorderLayout.CENTER)
         }
 
+        // ===== 脚本面板 =====
+        scriptTabPanel.setContextProvider { buildScriptRunContext() }
+        scriptTabPanel.setLogAppender { serverId, line -> appendLog(serverId, line) }
+        scriptTabPanel.setCommandFiller { preCommand, command -> fillCommandFromScript(preCommand, command) }
+
         // ===== Tab 面板 =====
         tabbedPane.addTab("操作", AllIcons.Actions.Execute, JBScrollPane(operationPanel))
         tabbedPane.addTab("日志", AllIcons.Nodes.LogFolder, logTabbedPane)
         tabbedPane.addTab("历史", AllIcons.Vcs.History, historyPanel)
+        tabbedPane.addTab("脚本", AllIcons.FileTypes.Xml, scriptTabPanel)
 
         setContent(tabbedPane)
         setToolbar(toolbar.component)
@@ -355,6 +372,35 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private fun getSelectedServerId(): String? {
         val selected = serverCombo.selectedItem?.toString() ?: return null
         return selected.substringBefore(" - ")
+    }
+
+    fun selectScriptTab() {
+        tabbedPane.selectedComponent = scriptTabPanel
+        scriptTabPanel.refreshAll()
+    }
+
+    private fun buildScriptRunContext(): ScriptRunContext {
+        val serverId = getSelectedServerId()
+        val server = serverId?.let { serverManager.getServer(it) }
+        val localPath = localPathField.text.trim()
+        val resolved = localPath.takeIf { it.isNotBlank() }?.let { MappingManager.getInstance().resolveMappingByLocalPath(it) }
+        return ScriptRunContext(
+            server = server,
+            mapping = resolved?.mapping,
+            remoteDir = remotePathField.text.trim().ifBlank { resolved?.resolvedRemoteDir },
+            localSelectedPaths = localPath.takeIf { it.isNotBlank() }?.let { listOf(it) } ?: emptyList(),
+            projectBasePath = project.basePath
+        )
+    }
+
+    private fun fillCommandFromScript(preCommand: Boolean, command: String) {
+        val target = if (preCommand) preCommandField else postCommandField
+        target.text = if (target.text.isBlank()) {
+            command.trim()
+        } else {
+            target.text.trimEnd() + "\n" + command.trim()
+        }
+        tabbedPane.selectedIndex = 0
     }
 
     /**
