@@ -13,7 +13,7 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import org.jetbrains.plugins.terminal.TerminalTabState
-import org.jetbrains.plugins.terminal.TerminalView
+import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
 /**
  * 终端服务 - 通过建立真实的 SSH 连接（协议层认证，免密）打开 IDEA 终端。
@@ -112,11 +112,11 @@ class TerminalService : Disposable {
         title: String
     ) {
         try {
-            val terminalView = TerminalView.getInstance(project)
+            val manager = TerminalToolWindowManager.getInstance(project)
             val tabState = TerminalTabState().apply {
                 myTabName = title
             }
-            terminalView.createNewSession(runner, tabState)
+            manager.createNewSession(runner, tabState)
             LOG.info("✅ Terminal session created: $title")
         } catch (e: Exception) {
             LOG.error("❌ Failed to create terminal session", e)

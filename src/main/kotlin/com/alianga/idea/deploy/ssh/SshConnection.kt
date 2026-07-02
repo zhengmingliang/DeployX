@@ -52,7 +52,7 @@ class SshConnection(private val serverConfig: ServerConfig) {
                 // 配置认证方式
                 when (serverConfig.authType) {
                     ServerConfig.AuthType.PASSWORD -> {
-                        session.setPassword(serverConfig.password)
+                        session.setPassword(serverConfig.password?.toByteArray(charset("UTF-8")))
                     }
                     ServerConfig.AuthType.KEY -> {
                         if (serverConfig.keyFile.isNotEmpty()) {

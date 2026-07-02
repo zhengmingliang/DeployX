@@ -97,10 +97,9 @@ class MappingEditDialog(
 
     private fun setupLocalDirBrowser() {
         localDirField.addBrowseFolderListener(
-            "选择本地目录",
-            "选择要同步的本地目录",
             null,
-            FileChooserDescriptorFactory.createSingleFolderDescriptor()
+            FileChooserDescriptorFactory.createSingleFolderDescriptor().withTitle("选择本地目录").withDescription
+                ("选择要同步的本地目录")
         )
     }
 
