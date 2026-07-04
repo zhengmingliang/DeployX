@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.script
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.service.ScriptManager
@@ -49,8 +50,15 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
     private val countLabel = JBLabel()
     private val tableModel = ScriptTableModel()
     private val table = JBTable(tableModel)
-    private val previewTitle = JBLabel("请选择脚本")
+    private val previewTitle = JBLabel(DeployXBundle.message("script.tab.preview.selectFirst"))
     private val previewArea = JBTextArea(8, 80)
+
+    // 按钮引用（保留以便语言切换时刷新文案）
+    private val refreshFilterButton = JButton(AllIcons.Actions.Refresh)
+    private val runButton = JButton(DeployXBundle.message("script.tab.button.run"), AllIcons.Actions.Execute)
+    private val previewButton = JButton(DeployXBundle.message("script.tab.button.preview"), AllIcons.Actions.Preview)
+    private val moreButton = JButton(DeployXBundle.message("script.tab.button.more"), AllIcons.Actions.More)
+    private val copyTemplateButton = JButton(DeployXBundle.message("script.tab.button.copyTemplate"), AllIcons.Actions.Copy)
 
     private var contextProvider: (() -> ScriptRunContext)? = null
     private var logAppender: ((String?, String) -> Unit)? = null
@@ -99,7 +107,7 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
     }
 
     private fun setupFilters() {
-        searchField.emptyText.text = "搜索名称、描述、标签或命令"
+        searchField.emptyText.text = DeployXBundle.message("script.tab.search.placeholder")
         searchField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent?) = refreshTable()
             override fun removeUpdate(e: DocumentEvent?) = refreshTable()
@@ -115,8 +123,7 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
             add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
                 add(groupCombo)
                 add(tagCombo)
-                add(JButton(AllIcons.Actions.Refresh).apply {
-                    toolTipText = "刷新脚本库"
+                add(refreshFilterButton.apply {
                     isFocusable = false
                     addActionListener { refreshAll() }
                 })
@@ -127,16 +134,16 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
 
     private fun createToolbar(): JComponent {
         return JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
-            add(JButton("运行", AllIcons.Actions.Execute).apply { addActionListener { onRun() } })
-            add(JButton("预览", AllIcons.Actions.Preview).apply { addActionListener { onDryRun() } })
-            add(JButton("更多", AllIcons.Actions.More).apply { addActionListener { showMoreMenu(this) } })
+            add(runButton.apply { addActionListener { onRun() } })
+            add(previewButton.apply { addActionListener { onDryRun() } })
+            add(moreButton.apply { addActionListener { showMoreMenu(this) } })
         }
     }
 
     private fun setupTable() {
         table.selectionModel.selectionMode = ListSelectionModel.SINGLE_SELECTION
         table.autoCreateRowSorter = true
-        table.emptyText.text = "暂无脚本"
+        table.emptyText.text = DeployXBundle.message("script.tab.noScripts")
         table.selectionModel.addListSelectionListener { event ->
             if (!event.valueIsAdjusting) showSelectedPreview()
         }
@@ -169,7 +176,7 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
         val header = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.emptyBottom(4)
             add(previewTitle, BorderLayout.WEST)
-            add(JButton("复制模板", AllIcons.Actions.Copy).apply { addActionListener { onCopy() } }, BorderLayout.EAST)
+            add(copyTemplateButton.apply { addActionListener { onCopy() } }, BorderLayout.EAST)
         }
         return JPanel(BorderLayout(4, 4)).apply {
             border = JBUI.Borders.emptyTop(8)
@@ -180,47 +187,72 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
         }
     }
 
+    /**
+     * 语言切换后刷新所有已构建组件的本地化文案。在 EDT 上由父面板触发。
+     */
+    fun relocalize() {
+        searchField.emptyText.text = DeployXBundle.message("script.tab.search.placeholder")
+        refreshFilterButton.toolTipText = DeployXBundle.message("script.tab.refresh.tooltip")
+        runButton.text = DeployXBundle.message("script.tab.button.run")
+        previewButton.text = DeployXBundle.message("script.tab.button.preview")
+        moreButton.text = DeployXBundle.message("script.tab.button.more")
+        copyTemplateButton.text = DeployXBundle.message("script.tab.button.copyTemplate")
+        table.emptyText.text = DeployXBundle.message("script.tab.noScripts")
+        // 表格列名刷新并重绘
+        tableModel.relocalizeColumns()
+        // 过滤器下拉项（"全部分组/全部标签"）刷新
+        refreshFilters()
+        // 预览标题按当前选中状态刷新
+        if (selectedScript() == null) clearPreview() else showSelectedPreview()
+        revalidate()
+        repaint()
+    }
+
     private fun showMoreMenu(invoker: JComponent) {
         val menu = JPopupMenu()
-        menu.add(JMenuItem("复制命令模板", AllIcons.Actions.Copy).apply { addActionListener { onCopy() } })
-        menu.add(JMenuItem("插入到上传前命令", AllIcons.Actions.Edit).apply { addActionListener { onFill(true) } })
-        menu.add(JMenuItem("插入到上传后命令", AllIcons.Actions.Edit).apply { addActionListener { onFill(false) } })
+        menu.add(JMenuItem(DeployXBundle.message("script.tab.menu.copyCommand"), AllIcons.Actions.Copy).apply { addActionListener { onCopy() } })
+        menu.add(JMenuItem(DeployXBundle.message("script.tab.menu.insertPreCommand"), AllIcons.Actions.Edit).apply { addActionListener { onFill(true) } })
+        menu.add(JMenuItem(DeployXBundle.message("script.tab.menu.insertPostCommand"), AllIcons.Actions.Edit).apply { addActionListener { onFill(false) } })
         menu.addSeparator()
-        menu.add(JMenuItem("新建脚本", AllIcons.General.Add).apply { addActionListener { onCreate() } })
-        menu.add(JMenuItem("编辑脚本", AllIcons.Actions.Edit).apply { addActionListener { onEdit() } })
-        menu.add(JMenuItem("复制脚本", AllIcons.Actions.Copy).apply { addActionListener { onDuplicate() } })
-        menu.add(JMenuItem("删除脚本", AllIcons.Actions.DeleteTag).apply { addActionListener { onDelete() } })
+        menu.add(JMenuItem(DeployXBundle.message("script.tab.menu.newScript"), AllIcons.General.Add).apply { addActionListener { onCreate() } })
+        menu.add(JMenuItem(DeployXBundle.message("script.tab.menu.editScript"), AllIcons.Actions.Edit).apply { addActionListener { onEdit() } })
+        menu.add(JMenuItem(DeployXBundle.message("script.tab.menu.copyScript"), AllIcons.Actions.Copy).apply { addActionListener { onDuplicate() } })
+        menu.add(JMenuItem(DeployXBundle.message("script.tab.menu.deleteScript"), AllIcons.Actions.DeleteTag).apply { addActionListener { onDelete() } })
         menu.addSeparator()
-        menu.add(JMenuItem("打开脚本库设置", AllIcons.General.Settings).apply {
+        menu.add(JMenuItem(DeployXBundle.message("script.tab.menu.openSettings"), AllIcons.General.Settings).apply {
             addActionListener { ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX") }
         })
         menu.show(invoker, 0, invoker.height)
     }
 
     private fun refreshFilters() {
-        val selectedGroup = groupCombo.selectedItem?.toString() ?: "全部分组"
-        val selectedTag = tagCombo.selectedItem?.toString() ?: "全部标签"
+        val allGroups = DeployXBundle.message("script.tab.filter.allGroups")
+        val allTags = DeployXBundle.message("script.tab.filter.allTags")
+        val selectedGroup = groupCombo.selectedItem?.toString() ?: allGroups
+        val selectedTag = tagCombo.selectedItem?.toString() ?: allTags
         groupCombo.removeAllItems()
-        groupCombo.addItem("全部分组")
+        groupCombo.addItem(allGroups)
         scriptManager.getGroups().forEach { groupCombo.addItem(it) }
         tagCombo.removeAllItems()
-        tagCombo.addItem("全部标签")
+        tagCombo.addItem(allTags)
         scriptManager.getAllTags().forEach { tagCombo.addItem(it) }
         groupCombo.selectedItem = selectedGroup
         tagCombo.selectedItem = selectedTag
     }
 
     private fun refreshTable() {
+        val allGroups = DeployXBundle.message("script.tab.filter.allGroups")
+        val allTags = DeployXBundle.message("script.tab.filter.allTags")
         val selectedId = selectedScript()?.id
-        val group = groupCombo.selectedItem?.toString().orEmpty().takeUnless { it == "全部分组" }.orEmpty()
-        val tag = tagCombo.selectedItem?.toString().orEmpty().takeUnless { it == "全部标签" }.orEmpty()
+        val group = groupCombo.selectedItem?.toString().orEmpty().takeUnless { it == allGroups }.orEmpty()
+        val tag = tagCombo.selectedItem?.toString().orEmpty().takeUnless { it == allTags }.orEmpty()
         val scripts = scriptManager.searchScripts(
             keyword = searchField.text.trim(),
             group = group,
             tag = tag
         )
         tableModel.setData(scripts)
-        countLabel.text = "${scripts.size} 个脚本"
+        countLabel.text = DeployXBundle.message("script.tab.count", scripts.size)
 
         if (scripts.isEmpty()) {
             clearPreview()
@@ -242,12 +274,12 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
 
     private fun showSelectedPreview() {
         val script = selectedScript() ?: return clearPreview()
-        previewTitle.text = "命令预览 - ${script.name.ifBlank { "未命名脚本" }}"
+        previewTitle.text = DeployXBundle.message("script.tab.preview.command", script.name.ifBlank { DeployXBundle.message("script.unnamed") })
         previewArea.text = script.command
     }
 
     private fun clearPreview() {
-        previewTitle.text = "暂无脚本"
+        previewTitle.text = DeployXBundle.message("script.tab.preview.none")
         previewArea.text = ""
     }
 
@@ -268,14 +300,14 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
         if (dialog.showAndGet()) {
             val command = dialog.getResultCommand()
             CopyPasteManager.getInstance().setContents(StringSelection(command))
-            Messages.showInfoMessage("命令已生成并复制到剪贴板", "预览脚本")
+            Messages.showInfoMessage(DeployXBundle.message("script.tab.preview.generated"), DeployXBundle.message("script.tab.preview.title"))
         }
     }
 
     private fun onCopy() {
         val script = selectedScript() ?: return
         CopyPasteManager.getInstance().setContents(StringSelection(script.command))
-        Messages.showInfoMessage("脚本模板已复制", "复制命令")
+        Messages.showInfoMessage(DeployXBundle.message("script.tab.copy.success"), DeployXBundle.message("script.tab.copy.title"))
     }
 
     private fun onFill(pre: Boolean) {
@@ -283,7 +315,7 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
         val dialog = ScriptPickerDialog(project, context(), initialScriptId = script?.id)
         if (dialog.showAndGet()) {
             commandFiller?.invoke(pre, dialog.getResultCommand())
-            logAppender?.invoke(null, "已插入${if (pre) "上传前" else "上传后"}命令")
+            logAppender?.invoke(null, if (pre) DeployXBundle.message("script.tab.inserted.preCommand") else DeployXBundle.message("script.tab.inserted.postCommand"))
         }
     }
 
@@ -312,7 +344,13 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
 
     private fun onDelete() {
         val script = selectedScript() ?: return
-        val result = Messages.showYesNoDialog("确定要删除脚本 '${script.name}' 吗？", "删除脚本", "删除", "取消", Messages.getQuestionIcon())
+        val result = Messages.showYesNoDialog(
+            DeployXBundle.message("settings.script.confirm.delete", script.name),
+            DeployXBundle.message("settings.script.confirm.delete.title"),
+            DeployXBundle.message("settings.script.confirm.delete.yes"),
+            DeployXBundle.message("common.cancel"),
+            Messages.getQuestionIcon()
+        )
         if (result == Messages.YES) {
             scriptManager.deleteScript(script.id)
             refreshAll()
@@ -320,9 +358,33 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
     }
 
     private class ScriptTableModel : AbstractTableModel() {
-        private val columns = arrayOf("Name", "Group", "Server", "Params", "Tags", "Run Count", "Last Run", "Status")
+        private var columns = arrayOf(
+            DeployXBundle.message("script.tab.table.name"),
+            DeployXBundle.message("script.tab.table.group"),
+            DeployXBundle.message("script.tab.table.server"),
+            DeployXBundle.message("script.tab.table.params"),
+            DeployXBundle.message("script.tab.table.tags"),
+            DeployXBundle.message("script.tab.table.runCount"),
+            DeployXBundle.message("script.tab.table.lastRun"),
+            DeployXBundle.message("script.tab.table.status")
+        )
         private var scripts = listOf<ScriptConfig>()
         private val sdf = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+
+        /** 语言切换后刷新列名并触发表头重绘。 */
+        fun relocalizeColumns() {
+            columns = arrayOf(
+                DeployXBundle.message("script.tab.table.name"),
+                DeployXBundle.message("script.tab.table.group"),
+                DeployXBundle.message("script.tab.table.server"),
+                DeployXBundle.message("script.tab.table.params"),
+                DeployXBundle.message("script.tab.table.tags"),
+                DeployXBundle.message("script.tab.table.runCount"),
+                DeployXBundle.message("script.tab.table.lastRun"),
+                DeployXBundle.message("script.tab.table.status")
+            )
+            fireTableStructureChanged()
+        }
 
         fun setData(data: List<ScriptConfig>) {
             scripts = data
@@ -338,14 +400,14 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
         override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
             val script = scripts[rowIndex]
             return when (columnIndex) {
-                0 -> script.name.ifBlank { "未命名脚本" }
-                1 -> script.group.ifBlank { "默认" }
-                2 -> script.serverId.ifBlank { "运行时选择" }
+                0 -> script.name.ifBlank { DeployXBundle.message("script.unnamed") }
+                1 -> script.group.ifBlank { DeployXBundle.message("script.defaultGroup") }
+                2 -> script.serverId.ifBlank { DeployXBundle.message("script.selectAtRuntime") }
                 3 -> script.params.size
                 4 -> script.tags.joinToString(", ")
                 5 -> script.runCount
                 6 -> if (script.lastRunAt > 0) sdf.format(Date(script.lastRunAt)) else ""
-                7 -> script.lastRunStatus.ifBlank { "未运行" }
+                7 -> script.lastRunStatus.ifBlank { DeployXBundle.message("script.status.notRun") }
                 else -> ""
             }
         }

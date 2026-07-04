@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.settings
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.service.ScriptManager
 import com.google.gson.GsonBuilder
@@ -37,7 +38,7 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun setupUI() {
-        searchField.emptyText.text = "搜索脚本名称、描述、标签或命令"
+        searchField.emptyText.text = DeployXBundle.message("settings.script.search.placeholder")
         searchField.addActionListener { refreshTable() }
         add(searchField, BorderLayout.NORTH)
 
@@ -45,18 +46,26 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
             .setAddAction { addScript() }
             .setEditAction { editScript() }
             .setRemoveAction { removeScript() }
-            .addExtraAction(object : AnAction("Copy", "Copy selected script", AllIcons.Actions.Copy) {
-                override fun actionPerformed(e: AnActionEvent) { copyScript() }
-            })
-            .addExtraAction(object : AnAction("Import", "Import scripts from JSON", AllIcons.ToolbarDecorator.Import) {
-                override fun actionPerformed(e: AnActionEvent) { importScripts() }
-            })
-            .addExtraAction(object : AnAction("Export", "Export selected script", AllIcons.ToolbarDecorator.Export) {
-                override fun actionPerformed(e: AnActionEvent) { exportSelected() }
-            })
-            .addExtraAction(object : AnAction("Refresh", "Refresh scripts", AllIcons.Actions.Refresh) {
-                override fun actionPerformed(e: AnActionEvent) { refreshTable() }
-            })
+            .addExtraAction(object : AnAction(
+                DeployXBundle.lazyMessage("settings.script.action.copy"),
+                DeployXBundle.lazyMessage("settings.script.action.copy.desc"),
+                AllIcons.Actions.Copy
+            ) { override fun actionPerformed(e: AnActionEvent) { copyScript() } })
+            .addExtraAction(object : AnAction(
+                DeployXBundle.lazyMessage("settings.script.action.import"),
+                DeployXBundle.lazyMessage("settings.script.action.import.desc"),
+                AllIcons.ToolbarDecorator.Import
+            ) { override fun actionPerformed(e: AnActionEvent) { importScripts() } })
+            .addExtraAction(object : AnAction(
+                DeployXBundle.lazyMessage("settings.script.action.export"),
+                DeployXBundle.lazyMessage("settings.script.action.export.desc"),
+                AllIcons.ToolbarDecorator.Export
+            ) { override fun actionPerformed(e: AnActionEvent) { exportSelected() } })
+            .addExtraAction(object : AnAction(
+                DeployXBundle.lazyMessage("settings.script.action.refresh"),
+                DeployXBundle.lazyMessage("settings.script.action.refresh.desc"),
+                AllIcons.Actions.Refresh
+            ) { override fun actionPerformed(e: AnActionEvent) { refreshTable() } })
 
         add(decorator.createPanel(), BorderLayout.CENTER)
     }
@@ -91,10 +100,10 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
     private fun removeScript() {
         val script = selectedScript() ?: return
         val result = Messages.showYesNoDialog(
-            "确定要删除脚本 '${script.name}' 吗？",
-            "删除脚本",
-            "删除",
-            "取消",
+            DeployXBundle.message("settings.script.confirm.delete", script.name),
+            DeployXBundle.message("settings.script.confirm.delete.title"),
+            DeployXBundle.message("settings.script.confirm.delete.yes"),
+            DeployXBundle.message("common.cancel"),
             Messages.getQuestionIcon()
         )
         if (result == Messages.YES) {
@@ -116,9 +125,9 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
             }
             val count = scriptManager.importScripts(imported.filterNotNull())
             refreshTable()
-            Messages.showInfoMessage("已导入 $count 个脚本", "导入完成")
+            Messages.showInfoMessage(DeployXBundle.message("settings.script.imported", count), DeployXBundle.message("settings.script.import.complete"))
         } catch (e: Exception) {
-            Messages.showErrorDialog("导入失败: ${e.message}", "导入脚本")
+            Messages.showErrorDialog(DeployXBundle.message("settings.script.import.failed", e.message ?: ""), DeployXBundle.message("settings.script.import.failed.title"))
         }
     }
 
@@ -129,7 +138,7 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
         }
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return
         chooser.selectedFile.writeText(gson.toJson(script))
-        Messages.showInfoMessage("脚本已导出: ${chooser.selectedFile.absolutePath}", "导出完成")
+        Messages.showInfoMessage(DeployXBundle.message("settings.script.exported", chooser.selectedFile.absolutePath), DeployXBundle.message("settings.script.export.complete"))
     }
 
     private fun selectedScript(): ScriptConfig? {
@@ -143,7 +152,15 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
     fun reset() = refreshTable()
 
     private class ScriptTableModel : AbstractTableModel() {
-        private val columns = arrayOf("Name", "Group", "Server", "Params", "Tags", "Last Run", "Status")
+        private val columns = arrayOf(
+            DeployXBundle.message("settings.script.table.name"),
+            DeployXBundle.message("settings.script.table.group"),
+            DeployXBundle.message("settings.script.table.server"),
+            DeployXBundle.message("settings.script.table.params"),
+            DeployXBundle.message("settings.script.table.tags"),
+            DeployXBundle.message("settings.script.table.lastRun"),
+            DeployXBundle.message("settings.script.table.status")
+        )
         private var scripts = listOf<ScriptConfig>()
         private val sdf = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
 
@@ -162,7 +179,7 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
             return when (columnIndex) {
                 0 -> script.name
                 1 -> script.group
-                2 -> script.serverId.ifBlank { "运行时选择" }
+                2 -> script.serverId.ifBlank { DeployXBundle.message("settings.script.server.selectAtRuntime") }
                 3 -> script.params.size
                 4 -> script.tags.joinToString(", ")
                 5 -> if (script.lastRunAt > 0) sdf.format(Date(script.lastRunAt)) else ""

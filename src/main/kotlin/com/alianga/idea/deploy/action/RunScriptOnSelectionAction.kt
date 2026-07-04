@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.action
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.service.MappingManager
 import com.alianga.idea.deploy.service.ServerManager
@@ -19,7 +20,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 /**
  * 从当前选中文件构建上下文并运行脚本。
  */
-class RunScriptOnSelectionAction : AnAction("Run Script on Selection", "Run a DeployX script with selected file context", null) {
+class RunScriptOnSelectionAction : AnAction() {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
@@ -41,10 +42,12 @@ class RunScriptOnSelectionAction : AnAction("Run Script on Selection", "Run a De
                 }
                 runDialog.show()
             }
-        } ?: showNotification(project, "无法打开 DeployX 工具窗口", NotificationType.WARNING)
+        } ?: showNotification(project, DeployXBundle.message("notification.cannotOpenToolWindow"), NotificationType.WARNING)
     }
 
     override fun update(e: AnActionEvent) {
+        e.presentation.text = DeployXBundle.message("action.runScriptOnSelection.text")
+        e.presentation.description = DeployXBundle.message("action.runScriptOnSelection.description")
         e.presentation.isEnabledAndVisible = e.project != null && getSelectedFiles(e).isNotEmpty()
     }
 

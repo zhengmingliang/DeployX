@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.dialog
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBCheckBox
@@ -16,8 +17,8 @@ import javax.swing.ListSelectionModel
  */
 class ServerSelectionDialog(
     private val servers: List<ServerConfig>,
-    private val titleText: String = "选择目标服务器",
-    private val messageText: String = "请选择要上传到的服务器：",
+    private val titleText: String = DeployXBundle.message("dialog.server.select.title"),
+    private val messageText: String = DeployXBundle.message("dialog.server.select.message"),
     private val showCommandOptions: Boolean = false,
     private val commandAvailabilityByServerId: Map<String, CommandAvailability> = emptyMap()
 ) : DialogWrapper(null) {
@@ -28,8 +29,8 @@ class ServerSelectionDialog(
     )
 
     private val serverList = JBList(servers.map { "${it.id} - ${it.name} (${it.displayAddress})" })
-    private val executePreCommandCheck = JBCheckBox("执行映射中的上传前命令", false)
-    private val executePostCommandCheck = JBCheckBox("执行映射中的上传后命令", false)
+    private val executePreCommandCheck = JBCheckBox(DeployXBundle.message("dialog.server.select.executePreCommand"), false)
+    private val executePostCommandCheck = JBCheckBox(DeployXBundle.message("dialog.server.select.executePostCommand"), false)
 
     var selectedServer: ServerConfig? = null
         private set

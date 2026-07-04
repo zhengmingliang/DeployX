@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.dialog
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -23,7 +24,7 @@ class ProgressDialog(
 
     init {
         setTitle(dialogTitle)
-        setCancelButtonText("取消")
+        setCancelButtonText(DeployXBundle.message("dialog.progress.button.cancel"))
         isModal = false
         init()
     }
@@ -33,10 +34,10 @@ class ProgressDialog(
         logArea.font = java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12)
 
         val infoPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent("当前文件:", currentFileLabel)
-            .addLabeledComponent("传输速度:", speedLabel)
-            .addLabeledComponent("预计剩余:", etaLabel)
-            .addLabeledComponent("已传输:", transferredLabel)
+            .addLabeledComponent(DeployXBundle.message("dialog.progress.label.currentFile"), currentFileLabel)
+            .addLabeledComponent(DeployXBundle.message("dialog.progress.label.transferSpeed"), speedLabel)
+            .addLabeledComponent(DeployXBundle.message("dialog.progress.label.estimatedRemaining"), etaLabel)
+            .addLabeledComponent(DeployXBundle.message("dialog.progress.label.transferred"), transferredLabel)
             .panel
 
         val mainPanel = JPanel()
@@ -45,7 +46,7 @@ class ProgressDialog(
         mainPanel.add(Box.createVerticalStrut(8))
         mainPanel.add(infoPanel)
         mainPanel.add(Box.createVerticalStrut(8))
-        mainPanel.add(JBLabel("日志:"))
+        mainPanel.add(JBLabel(DeployXBundle.message("dialog.progress.label.log")))
         mainPanel.add(JBScrollPane(logArea).apply {
             preferredSize = Dimension(0, 150)
         })

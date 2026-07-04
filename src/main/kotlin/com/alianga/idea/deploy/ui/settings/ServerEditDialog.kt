@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.settings
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
@@ -29,13 +30,13 @@ class ServerEditDialog(
     private val authTypeCombo = JComboBox(ServerConfig.AuthType.entries.toTypedArray())
     private val passwordField = JBPasswordField()
     private val keyFileField = JBTextField()
-    private val isDefaultCheck = JBCheckBox("设为默认服务器")
+    private val isDefaultCheck = JBCheckBox(DeployXBundle.message("dialog.server.checkbox.setAsDefault"))
 
     init {
         title = when {
-            isCopyMode -> "复制服务器"
-            existingServer != null -> "编辑服务器"
-            else -> "添加服务器"
+            isCopyMode -> DeployXBundle.message("dialog.server.copy.title")
+            existingServer != null -> DeployXBundle.message("dialog.server.edit.title")
+            else -> DeployXBundle.message("dialog.server.add.title")
         }
         init()
 
@@ -52,7 +53,7 @@ class ServerEditDialog(
             idField.text = server.id
             idField.isEnabled = false
         }
-        nameField.text = if (copyMode) "${server.name} (副本)" else server.name
+        nameField.text = if (copyMode) "${server.name} ${DeployXBundle.message("dialog.server.copy.suffix")}" else server.name
         hostField.text = server.host
         portField.text = server.port.toString()
         userField.text = server.user
@@ -64,14 +65,14 @@ class ServerEditDialog(
 
     override fun createCenterPanel(): JComponent {
         val panel = FormBuilder.createFormBuilder()
-            .addLabeledComponent("ID:", idField)
-            .addLabeledComponent("Name:", nameField)
-            .addLabeledComponent("Host:", hostField)
-            .addLabeledComponent("Port:", portField)
-            .addLabeledComponent("User:", userField)
-            .addLabeledComponent("Auth Type:", authTypeCombo)
-            .addLabeledComponent("Password:", passwordField)
-            .addLabeledComponent("Key File:", keyFileField)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.id"), idField)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.name"), nameField)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.host"), hostField)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.port"), portField)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.user"), userField)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.authType"), authTypeCombo)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.password"), passwordField)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.keyFile"), keyFileField)
             .addComponent(isDefaultCheck)
             .panel
 
@@ -80,12 +81,12 @@ class ServerEditDialog(
     }
 
     override fun doValidate(): ValidationInfo? {
-        if (idField.text.isBlank()) return ValidationInfo("ID 不能为空", idField)
-        if (nameField.text.isBlank()) return ValidationInfo("名称不能为空", nameField)
-        if (hostField.text.isBlank()) return ValidationInfo("主机地址不能为空", hostField)
-        if (userField.text.isBlank()) return ValidationInfo("用户名不能为空", userField)
+        if (idField.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.server.validation.idRequired"), idField)
+        if (nameField.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.server.validation.nameRequired"), nameField)
+        if (hostField.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.server.validation.hostRequired"), hostField)
+        if (userField.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.server.validation.userRequired"), userField)
         val port = portField.text.toIntOrNull()
-        if (port == null || port < 1 || port > 65535) return ValidationInfo("端口必须是 1-65535 之间的数字", portField)
+        if (port == null || port < 1 || port > 65535) return ValidationInfo(DeployXBundle.message("dialog.server.validation.portInvalid"), portField)
         return null
     }
 

@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.action
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.UploadItem
 import com.alianga.idea.deploy.service.MappingManager
 import com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowPanel
@@ -42,7 +43,7 @@ class PreviewSyncAction : AnAction() {
         }
 
         if (previewItems.isEmpty()) {
-            showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
+            showNotification(project, DeployXBundle.message("notification.noMappingFound"), NotificationType.WARNING)
             return
         }
 
@@ -50,14 +51,16 @@ class PreviewSyncAction : AnAction() {
 
         val panel = FileSyncToolWindowPanel.getPanel(project)
         if (panel != null) {
-            if (previewItems.size < files.size) panel.appendLog("[WARN] 有 ${files.size - previewItems.size} 个文件未匹配到映射，已跳过")
+            if (previewItems.size < files.size) panel.appendLog(DeployXBundle.message("toolwindow.log.someFilesNotMapped", files.size - previewItems.size))
             panel.executePreviewBatch(previewItems)
         } else {
-            showNotification(project, "工具窗口未打开，请先打开 DeployX 工具窗口", NotificationType.WARNING)
+            showNotification(project, DeployXBundle.message("notification.toolWindowNotOpen"), NotificationType.WARNING)
         }
     }
 
     override fun update(e: AnActionEvent) {
+        e.presentation.text = DeployXBundle.message("action.previewSync.text")
+        e.presentation.description = DeployXBundle.message("action.previewSync.description")
         e.presentation.isEnabledAndVisible = getSelectedFiles(e).isNotEmpty()
     }
 

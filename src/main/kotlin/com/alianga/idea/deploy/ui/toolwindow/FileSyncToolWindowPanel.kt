@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.toolwindow
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.DeployItem
 import com.alianga.idea.deploy.model.DeployRequest
 import com.alianga.idea.deploy.model.HistoryRecord
@@ -58,11 +59,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         fun getPanel(project: Project): FileSyncToolWindowPanel? {
             return panelByProject[project.hashCode().toString()]
         }
-
-        /** 供兼容旧代码使用，建议使用 getPanel(project) */
-        @Deprecated("请使用 getPanel(Project) 方法", ReplaceWith("getPanel(project)"))
-        val activePanel: FileSyncToolWindowPanel?
-            get() = panelByProject.values.lastOrNull()
     }
 
     private val serverManager = ServerManager.getInstance()
@@ -73,16 +69,35 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val serverCombo = JComboBox<String>()
     private val localPathField = JBTextField()
     private val remotePathField = TextFieldWithBrowseButton()
-    private val backupCheck = JBCheckBox("部署前备份")
+    private val backupCheck = JBCheckBox(DeployXBundle.message("toolwindow.checkbox.backupBeforeDeploy"))
     private val backupDirField = JBTextField()
-    private val unzipCheck = JBCheckBox("上传后解压")
+    private val unzipCheck = JBCheckBox(DeployXBundle.message("toolwindow.checkbox.unzipAfterUpload"))
     private val unzipDestField = JBTextField()
     private val preCommandField = JBTextArea(3, 60)
     private val postCommandField = JBTextArea(3, 60)
 
+    // 操作面板标签（保留引用以便语言切换时刷新文案）
+    private val targetServerLabel = JBLabel(DeployXBundle.message("toolwindow.label.targetServer"))
+    private val localFileLabel = JBLabel(DeployXBundle.message("toolwindow.label.localFile"))
+    private val remotePathLabel = JBLabel(DeployXBundle.message("toolwindow.label.remotePath"))
+    private val backupDirLabel = JBLabel(DeployXBundle.message("toolwindow.label.backupDirectory"))
+    private val unzipDirLabel = JBLabel(DeployXBundle.message("toolwindow.label.unzipDirectory"))
+    private val preCommandLabel = JBLabel(DeployXBundle.message("toolwindow.label.preUploadCommand"))
+    private val postCommandLabel = JBLabel(DeployXBundle.message("toolwindow.label.postUploadCommand"))
+
+    // 操作面板按钮（保留引用以便语言切换时刷新文案）
+    private val openTerminalButton = createIconButton(DeployXBundle.message("toolwindow.button.openTerminal"), AllIcons.Nodes.Console) { openTerminal() }
+    private val previewButton = createActionButton(DeployXBundle.message("toolwindow.button.preview"), AllIcons.Actions.Preview) { previewSync() }
+    private val startDeployButton = createActionButton(DeployXBundle.message("toolwindow.button.startDeploy"), AllIcons.Actions.Execute) { startDeploy() }
+    private val quickPushButton = createActionButton(DeployXBundle.message("toolwindow.button.quickPush"), AllIcons.Actions.Upload) { quickPush() }
+    private val saveAsMappingButton = createActionButton(DeployXBundle.message("toolwindow.button.saveAsMapping"), AllIcons.Actions.MenuSaveall) { saveAsMapping() }
+
+    // 工具栏（保留引用以便语言切换后刷新 Action 显示文本）
+    private var toolbar: com.intellij.openapi.actionSystem.ActionToolbar? = null
+
     // 进度
     private val progressBar = JProgressBar(0, 100)
-    private val progressLabel = JBLabel("就绪")
+    private val progressLabel = JBLabel(DeployXBundle.message("toolwindow.progress.ready"))
 
     // 日志 tab
     private val logArea = JBTextArea()
@@ -95,12 +110,22 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private var historyRecords = listOf<HistoryRecord>()
     private val scriptTabPanel = ScriptTabPanel(project)
 
+    // 历史按钮（保留引用以便语言切换时刷新文案）
+    private val historyRefreshButton = JButton(DeployXBundle.message("toolwindow.history.refresh"), AllIcons.Actions.Refresh)
+    private val historyRedeployButton = JButton(DeployXBundle.message("toolwindow.history.redeploy"), AllIcons.Actions.Execute)
+    private val historyFillConfigButton = JButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit)
+    private val historyClearButton = JButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Vcs.History)
+
     // Tab 面板
     private val tabbedPane = JBTabbedPane()
 
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
     private var lastUpdateReport: UpdateReport? = null
     private var lastUpdateReportText: String = ""
+
+    /** 语言变更监听器注销回调，dispose 时调用以避免内存泄漏。 */
+    private val languageChangeUnsubscribe: () -> Unit =
+        DeployXBundle.addLanguageChangeListener { relocalize() }
 
     init {
         panelByProject[project.hashCode().toString()] = this
@@ -111,40 +136,43 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     private fun setupUI() {
+        // 工具栏 Actions（文案通过 bundle key 动态获取，语言切换后由 update() 自动刷新）
+        val settingsAction = createLocalizedAction("toolwindow.action.settings", AllIcons.General.Settings) {
+            ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX")
+        }
+        val refreshAction = createLocalizedAction("toolwindow.action.refresh", AllIcons.Actions.Refresh) {
+            refreshServerCombo()
+            refreshHistory()
+        }
+        val copyReportAction = createLocalizedAction("toolwindow.action.copyReport", AllIcons.Actions.Copy) {
+            copyLastReport()
+        }
+        val exportReportAction = createLocalizedAction("toolwindow.action.exportReport", AllIcons.ToolbarDecorator.Export) {
+            exportLastReport()
+        }
+        val clearLogAction = createLocalizedAction("toolwindow.action.clearLog", AllIcons.Actions.ClearCash) {
+            logArea.text = ""
+            serverLogAreas.values.forEach { it.text = "" }
+        }
         val actionGroup = DefaultActionGroup().apply {
-            add(createAction("Settings", AllIcons.General.Settings) {
-                ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX")
-            })
-            add(createAction("Refresh", AllIcons.Actions.Refresh) {
-                refreshServerCombo()
-                refreshHistory()
-            })
-            add(createAction("Copy Report", AllIcons.Actions.Copy) {
-                copyLastReport()
-            })
-            add(createAction("Export Report", AllIcons.ToolbarDecorator.Export) {
-                exportLastReport()
-            })
-            add(createAction("Clear Log", AllIcons.Actions.ClearCash) {
-                logArea.text = ""
-                serverLogAreas.values.forEach { it.text = "" }
-            })
+            listOf(settingsAction, refreshAction, copyReportAction, exportReportAction, clearLogAction).forEach { add(it) }
         }
         val toolbar = ActionManager.getInstance().createActionToolbar("FileSyncToolbar", actionGroup, true)
         toolbar.targetComponent = this
+        this.toolbar = toolbar
 
         // ===== 操作面板 =====
         val serverWithTerminalPanel = JPanel(BorderLayout(6, 0)).apply {
             add(serverCombo, BorderLayout.CENTER)
-            add(createIconButton("打开终端", AllIcons.Nodes.Console) { openTerminal() }, BorderLayout.EAST)
+            add(openTerminalButton, BorderLayout.EAST)
         }
         val serverPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent("目标服务器:", serverWithTerminalPanel)
+            .addLabeledComponent(targetServerLabel, serverWithTerminalPanel)
             .panel
 
         val filePanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent("本地文件:", localPathField)
-            .addLabeledComponent("远程路径:", remotePathField)
+            .addLabeledComponent(localFileLabel, localPathField)
+            .addLabeledComponent(remotePathLabel, remotePathField)
             .panel
 
         preCommandField.font = Font("Monospaced", Font.PLAIN, 12)
@@ -156,23 +184,23 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         val deployPanel = FormBuilder.createFormBuilder()
             .addComponent(backupCheck)
-            .addLabeledComponent("备份目录:", backupDirField)
+            .addLabeledComponent(backupDirLabel, backupDirField)
             .addComponent(unzipCheck)
-            .addLabeledComponent("解压目录:", unzipDestField)
+            .addLabeledComponent(unzipDirLabel, unzipDestField)
             .addVerticalGap(8)
-            .addLabeledComponent("上传前命令:", JBScrollPane(preCommandField).apply { preferredSize = Dimension(600, 72) })
-            .addLabeledComponent("上传后命令:", JBScrollPane(postCommandField).apply { preferredSize = Dimension(600, 72) })
+            .addLabeledComponent(preCommandLabel, JBScrollPane(preCommandField).apply { preferredSize = Dimension(600, 72) })
+            .addLabeledComponent(postCommandLabel, JBScrollPane(postCommandField).apply { preferredSize = Dimension(600, 72) })
             .panel
 
         val buttonPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
-            add(createActionButton("预览", AllIcons.Actions.Preview) { previewSync() })
+            add(previewButton)
             add(Box.createHorizontalStrut(8))
-            add(createActionButton("开始部署", AllIcons.Actions.Execute) { startDeploy() })
+            add(startDeployButton)
             add(Box.createHorizontalStrut(8))
-            add(createActionButton("快速推送", AllIcons.Actions.Upload) { quickPush() })
+            add(quickPushButton)
             add(Box.createHorizontalStrut(8))
-            add(createActionButton("保存为映射", AllIcons.Actions.MenuSaveall) { saveAsMapping() })
+            add(saveAsMappingButton)
         }
 
         val progressPanel = JPanel(BorderLayout(8, 0)).apply {
@@ -195,7 +223,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // ===== 日志面板 =====
         configureLogArea(logArea)
-        logTabbedPane.addTab("全部", AllIcons.Nodes.LogFolder, JBScrollPane(logArea))
+        logTabbedPane.addTab(DeployXBundle.message("toolwindow.tab.all"), AllIcons.Nodes.LogFolder, JBScrollPane(logArea))
 
         // ===== 历史面板 =====
         historyList.addListSelectionListener { e ->
@@ -204,23 +232,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             }
         }
 
+        historyRefreshButton.addActionListener { refreshHistory() }
+        historyRedeployButton.addActionListener { redeployFromHistory() }
+        historyFillConfigButton.addActionListener { fillFromHistory() }
+        historyClearButton.addActionListener { clearHistory() }
+
         val historyButtonPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
-            add(JButton("刷新", AllIcons.Actions.Refresh).apply {
-                addActionListener { refreshHistory() }
-            })
+            add(historyRefreshButton)
             add(Box.createHorizontalStrut(4))
-            add(JButton("重新部署", AllIcons.Actions.Execute).apply {
-                addActionListener { redeployFromHistory() }
-            })
+            add(historyRedeployButton)
             add(Box.createHorizontalStrut(4))
-            add(JButton("填入配置", AllIcons.Actions.Edit).apply {
-                addActionListener { fillFromHistory() }
-            })
+            add(historyFillConfigButton)
             add(Box.createHorizontalStrut(8))
-            add(JButton("清空", AllIcons.Actions.GC).apply {
-                addActionListener { clearHistory() }
-            })
+            add(historyClearButton)
         }
         val historyPanel = JPanel(BorderLayout()).apply {
             add(historyButtonPanel, BorderLayout.NORTH)
@@ -233,13 +258,78 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         scriptTabPanel.setCommandFiller { preCommand, command -> fillCommandFromScript(preCommand, command) }
 
         // ===== Tab 面板 =====
-        tabbedPane.addTab("操作", AllIcons.Actions.Execute, JBScrollPane(operationPanel))
-        tabbedPane.addTab("日志", AllIcons.Nodes.LogFolder, logTabbedPane)
-        tabbedPane.addTab("历史", AllIcons.Vcs.History, historyPanel)
-        tabbedPane.addTab("脚本", AllIcons.FileTypes.Xml, scriptTabPanel)
+        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.operation"), AllIcons.Actions.Execute, JBScrollPane(operationPanel))
+        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.log"), AllIcons.Nodes.LogFolder, logTabbedPane)
+        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.history"), AllIcons.Vcs.History, historyPanel)
+        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.script"), AllIcons.FileTypes.Xml, scriptTabPanel)
 
         setContent(tabbedPane)
         setToolbar(toolbar.component)
+    }
+
+    /**
+     * 语言切换后刷新所有已构建组件的本地化文案。
+     *
+     * 业务状态（表单输入、选中项、历史记录等）保存在独立字段中，不受影响；
+     * 仅更新组件显示文本与 tab 标题。在 EDT 上由 DeployXBundle 监听器触发。
+     */
+    private fun relocalize() {
+        // 操作面板标签
+        targetServerLabel.text = DeployXBundle.message("toolwindow.label.targetServer")
+        localFileLabel.text = DeployXBundle.message("toolwindow.label.localFile")
+        remotePathLabel.text = DeployXBundle.message("toolwindow.label.remotePath")
+        backupDirLabel.text = DeployXBundle.message("toolwindow.label.backupDirectory")
+        unzipDirLabel.text = DeployXBundle.message("toolwindow.label.unzipDirectory")
+        preCommandLabel.text = DeployXBundle.message("toolwindow.label.preUploadCommand")
+        postCommandLabel.text = DeployXBundle.message("toolwindow.label.postUploadCommand")
+
+        // 复选框
+        backupCheck.text = DeployXBundle.message("toolwindow.checkbox.backupBeforeDeploy")
+        unzipCheck.text = DeployXBundle.message("toolwindow.checkbox.unzipAfterUpload")
+
+        // 操作面板按钮
+        previewButton.text = DeployXBundle.message("toolwindow.button.preview")
+        startDeployButton.text = DeployXBundle.message("toolwindow.button.startDeploy")
+        quickPushButton.text = DeployXBundle.message("toolwindow.button.quickPush")
+        saveAsMappingButton.text = DeployXBundle.message("toolwindow.button.saveAsMapping")
+        openTerminalButton.toolTipText = DeployXBundle.message("toolwindow.button.openTerminal")
+        remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
+
+        // 进度标签：处于空闲"就绪"态（英文 Ready 或中文 就绪）时刷新为新语言文案；
+        // 运行中或完成态的动态文案不覆盖，下次操作会重新设置。
+        val currentProgressText = progressLabel.text
+        if (currentProgressText.isNullOrBlank() || currentProgressText == "Ready" || currentProgressText == "就绪") {
+            progressLabel.text = DeployXBundle.message("toolwindow.progress.ready")
+        }
+
+        // 工具栏 Actions：每个 Action 在 update() 中按当前语言取文案，
+        // 这里触发工具栏刷新即可应用新语言文本。
+        toolbar?.updateActionsImmediately()
+
+        // 历史按钮
+        historyRefreshButton.text = DeployXBundle.message("toolwindow.history.refresh")
+        historyRedeployButton.text = DeployXBundle.message("toolwindow.history.redeploy")
+        historyFillConfigButton.text = DeployXBundle.message("toolwindow.history.fillConfig")
+        historyClearButton.text = DeployXBundle.message("toolwindow.history.clear")
+
+        // Tab 标题（operation=0, log=1, history=2, script=3）
+        if (tabbedPane.tabCount >= 4) {
+            tabbedPane.setTitleAt(0, DeployXBundle.message("toolwindow.tab.operation"))
+            tabbedPane.setTitleAt(1, DeployXBundle.message("toolwindow.tab.log"))
+            tabbedPane.setTitleAt(2, DeployXBundle.message("toolwindow.tab.history"))
+            tabbedPane.setTitleAt(3, DeployXBundle.message("toolwindow.tab.script"))
+        }
+        // 日志 tab 内的 "All" 子 tab
+        if (logTabbedPane.tabCount >= 1) {
+            logTabbedPane.setTitleAt(0, DeployXBundle.message("toolwindow.tab.all"))
+        }
+
+        // 脚本子面板刷新文案
+        scriptTabPanel.relocalize()
+
+        // 刷新工具栏渲染
+        revalidate()
+        repaint()
     }
 
     private fun setupActions() {
@@ -260,7 +350,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 remotePathField.text = dialog.getSelectedPath()
             }
         }
-        remotePathField.toolTipText = "点击右侧按钮浏览远程服务器目录，或直接输入路径"
+        remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
     }
 
     private fun refreshServerCombo() {
@@ -288,29 +378,29 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val idx = historyList.selectedIndex
         if (idx < 0 || idx >= historyRecords.size) return
         val record = historyRecords[idx]
-        appendLog("选中历史: ${record.summary}")
-        appendLog("  服务器: ${record.serverId}  备份: ${record.backupDir.ifBlank { "无" }}")
-        if (record.preCommand.isNotBlank()) appendLog("  上传前命令: ${record.preCommand}")
-        if (record.postCommand.isNotBlank()) appendLog("  上传后命令: ${record.postCommand}")
+        appendLog(DeployXBundle.message("toolwindow.log.historySelected", record.summary))
+        appendLog(DeployXBundle.message("toolwindow.log.historyServer", record.serverId, record.backupDir.ifBlank { DeployXBundle.message("toolwindow.log.historyNoBackup") }))
+        if (record.preCommand.isNotBlank()) appendLog(DeployXBundle.message("toolwindow.log.historyPreCommand", record.preCommand))
+        if (record.postCommand.isNotBlank()) appendLog(DeployXBundle.message("toolwindow.log.historyPostCommand", record.postCommand))
     }
 
     /** 从历史记录重新部署 */
     private fun redeployFromHistory() {
         val idx = historyList.selectedIndex
         if (idx < 0 || idx >= historyRecords.size) {
-            Messages.showWarningDialog("请先在历史列表中选择一条记录", "重新部署")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.log.selectHistoryFirst"), DeployXBundle.message("toolwindow.log.redeployTitle"))
             return
         }
         val record = historyRecords[idx]
         val file = java.io.File(record.sourcePath)
         if (!file.exists()) {
-            Messages.showWarningDialog("本地文件不存在: ${record.sourcePath}", "重新部署")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.log.localFileNotFound", record.sourcePath), DeployXBundle.message("toolwindow.log.redeployTitle"))
             return
         }
 
-        appendLog("========== 重新部署 ==========")
+        appendLog(DeployXBundle.message("toolwindow.log.redeploy"))
         progressBar.value = 0
-        progressLabel.text = "部署中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.deploying")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Redeploying...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -326,7 +416,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 )
                 SwingUtilities.invokeLater {
                     progressBar.value = if (result.success) 100 else progressBar.value
-                    progressLabel.text = if (result.success) "部署完成" else "部署失败"
+                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.deployComplete") else DeployXBundle.message("toolwindow.progress.deployFailed")
                     refreshHistory()
                 }
             }
@@ -337,7 +427,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private fun fillFromHistory() {
         val idx = historyList.selectedIndex
         if (idx < 0 || idx >= historyRecords.size) {
-            Messages.showWarningDialog("请先在历史列表中选择一条记录", "填入配置")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.log.selectHistoryFirst"), DeployXBundle.message("toolwindow.log.fillConfigTitle"))
             return
         }
         val record = historyRecords[idx]
@@ -361,7 +451,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         if (idx2 >= 0) serverCombo.selectedIndex = idx2
 
         tabbedPane.selectedIndex = 0 // 切换到操作 tab
-        appendLog("已从历史记录填入配置")
+        appendLog(DeployXBundle.message("toolwindow.log.configFilled"))
     }
 
     private fun clearHistory() {
@@ -408,12 +498,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      */
     fun executeUploadBatch(items: List<UploadItem>) {
         if (items.isEmpty()) {
-            appendLog("[WARN] 没有可上传的文件")
+            appendLog(DeployXBundle.message("toolwindow.log.noFilesToUpload"))
             return
         }
-        appendLog("========== 批量上传，共 ${items.size} 个 ==========")
+        appendLog(DeployXBundle.message("toolwindow.log.batchUploadStart", items.size))
         progressBar.value = 0
-        progressLabel.text = "批量上传中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.uploading")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Uploading...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -432,7 +522,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     val successCount = results.count { it.success }
                     updateLastReport("UPLOAD", results.mapNotNull { it.reportGroup })
                     progressBar.value = 100
-                    progressLabel.text = "批量上传完成：$successCount/${results.size} 组成功"
+                    progressLabel.text = DeployXBundle.message("toolwindow.progress.uploadComplete", successCount, results.size)
                     refreshHistory()
                 }
             }
@@ -444,12 +534,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      */
     fun executeDeployBatch(items: List<DeployItem>) {
         if (items.isEmpty()) {
-            appendLog("[WARN] 没有可执行的部署项")
+            appendLog(DeployXBundle.message("toolwindow.log.noItemsToDeploy"))
             return
         }
-        appendLog("========== 批量部署，共 ${items.size} 个 ==========")
+        appendLog(DeployXBundle.message("toolwindow.log.batchDeployStart", items.size))
         progressBar.value = 0
-        progressLabel.text = "批量部署中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDeploying")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Deploying...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -468,7 +558,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     val successCount = results.count { it.success }
                     updateLastReport("DEPLOY", results.mapNotNull { it.reportGroup })
                     progressBar.value = 100
-                    progressLabel.text = "批量部署完成：$successCount/${results.size} 组成功"
+                    progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDeployComplete", successCount, results.size)
                     refreshHistory()
                 }
             }
@@ -480,12 +570,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      */
     fun executePreviewBatch(items: List<UploadItem>) {
         if (items.isEmpty()) {
-            appendLog("[WARN] 没有可预览的同步项")
+            appendLog(DeployXBundle.message("toolwindow.log.noPreviewItems"))
             return
         }
-        appendLog("========== 批量预览，共 ${items.size} 个 ==========")
+        appendLog(DeployXBundle.message("toolwindow.log.batchPreviewStart", items.size))
         progressBar.value = 0
-        progressLabel.text = "批量预览中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.batchPreviewing")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Previewing...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -504,7 +594,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 SwingUtilities.invokeLater {
                     val successCount = results.count { it.success }
                     progressBar.value = 100
-                    progressLabel.text = "批量预览完成：$successCount/${results.size} 组成功"
+                    progressLabel.text = DeployXBundle.message("toolwindow.progress.batchPreviewComplete", successCount, results.size)
                 }
             }
         })
@@ -514,11 +604,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      * 公开方法：供右键菜单 Action 调用部署
      */
     fun executeDeploy(request: DeployRequest) {
-        appendLog("========== 开始部署 ==========")
-        appendLog("本地: ${request.localPath}")
-        appendLog("远程: ${request.serverId}:${request.remotePath}")
+        appendLog(DeployXBundle.message("toolwindow.log.startDeploy"))
+        appendLog(DeployXBundle.message("toolwindow.log.local", request.localPath))
+        appendLog(DeployXBundle.message("toolwindow.log.remote", request.serverId, request.remotePath))
         progressBar.value = 0
-        progressLabel.text = "部署中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.deploying")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Deploying...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -535,7 +625,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 SwingUtilities.invokeLater {
                     progressBar.value = if (result.success) 100 else progressBar.value
                     updateLastReport("DEPLOY", listOfNotNull(result.reportGroup))
-                    progressLabel.text = if (result.success) "部署完成" else "部署失败: ${result.error ?: ""}"
+                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.deployComplete") else DeployXBundle.message("toolwindow.progress.deployFailedWithError", result.error ?: "")
                     refreshHistory()
                 }
             }
@@ -546,10 +636,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      * 公开方法：供右键菜单 Action 调用快速推送
      */
     fun executePush(localPath: String, serverId: String?) {
-        appendLog("========== 快速推送 ==========")
-        appendLog("本地: $localPath")
+        appendLog(DeployXBundle.message("toolwindow.log.quickPush"))
+        appendLog(DeployXBundle.message("toolwindow.log.local", localPath))
         progressBar.value = 0
-        progressLabel.text = "推送中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.pushing")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Quick Push...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -567,7 +657,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 SwingUtilities.invokeLater {
                     progressBar.value = if (result.success) 100 else progressBar.value
                     updateLastReport("QUICK_PUSH", listOfNotNull(result.reportGroup))
-                    progressLabel.text = if (result.success) "推送完成" else "推送失败: ${result.error ?: ""}"
+                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.pushComplete") else DeployXBundle.message("toolwindow.progress.pushFailedWithError", result.error ?: "")
                     refreshHistory()
                 }
             }
@@ -578,9 +668,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      * 公开方法：供右键菜单 Action 调用预览
      */
     fun executePreview(localPath: String, remotePath: String, serverId: String) {
-        appendLog("========== 预览同步 ==========")
+        appendLog(DeployXBundle.message("toolwindow.log.previewSync"))
         progressBar.value = 0
-        progressLabel.text = "预览中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.previewing")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Previewing Sync...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -588,7 +678,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     appendLog(serverId, line)
                 }
                 SwingUtilities.invokeLater {
-                    progressLabel.text = if (result.success) "预览完成" else "预览失败"
+                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.previewComplete") else DeployXBundle.message("toolwindow.progress.previewFailed")
                     if (!result.success) appendLog("[ERROR] ${result.error}")
                 }
             }
@@ -600,21 +690,21 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val report = UpdateReport(operationType = operationType, groups = groups)
         lastUpdateReport = report
         lastUpdateReportText = UpdateReportFormatter.format(report)
-        appendLog("[REPORT] 已生成更新报告，可复制或导出")
+        appendLog(DeployXBundle.message("toolwindow.report.generated"))
     }
 
     private fun copyLastReport() {
         if (lastUpdateReportText.isBlank()) {
-            Messages.showWarningDialog("当前还没有可复制的更新报告", "Copy Report")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.report.noReportToCopy"), DeployXBundle.message("toolwindow.report.copy.title"))
             return
         }
         CopyPasteManager.getInstance().setContents(StringSelection(lastUpdateReportText))
-        Messages.showInfoMessage("更新报告已复制到剪贴板", "Copy Report")
+        Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.copied"), DeployXBundle.message("toolwindow.report.copy.title"))
     }
 
     private fun exportLastReport() {
         if (lastUpdateReportText.isBlank()) {
-            Messages.showWarningDialog("当前还没有可导出的更新报告", "Export Report")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.report.noReportToExport"), DeployXBundle.message("toolwindow.report.export.title"))
             return
         }
         val chooser = JFileChooser().apply {
@@ -623,7 +713,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val result = chooser.showSaveDialog(this)
         if (result == JFileChooser.APPROVE_OPTION) {
             chooser.selectedFile.writeText(lastUpdateReportText)
-            Messages.showInfoMessage("更新报告已导出: ${chooser.selectedFile.absolutePath}", "Export Report")
+            Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.exported", chooser.selectedFile.absolutePath), DeployXBundle.message("toolwindow.report.export.title"))
         }
     }
 
@@ -671,22 +761,22 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val serverId = getSelectedServerId()
 
         if (localPath.isEmpty() || remotePath.isEmpty() || serverId == null) {
-            Messages.showWarningDialog("请填写完整的同步信息", "Preview Sync")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.validation.fillSyncInfo"), "Preview Sync")
             return
         }
 
-        appendLog("========== 预览同步 ==========")
+        appendLog(DeployXBundle.message("toolwindow.log.previewSync"))
         progressBar.value = 0
-        progressLabel.text = "预览中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.previewing")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Previewing Sync...", true) {
             override fun run(indicator: ProgressIndicator) {
-                indicator.text = "正在预览同步..."
+                indicator.text = DeployXBundle.message("toolwindow.progress.previewing")
                 val result = SyncService.getInstance().previewSync(localPath, remotePath, serverId) { line ->
                     appendLog(serverId, line)
                 }
                 SwingUtilities.invokeLater {
-                    progressLabel.text = if (result.success) "预览完成" else "预览失败"
+                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.previewComplete") else DeployXBundle.message("toolwindow.progress.previewFailed")
                     if (!result.success) appendLog("[ERROR] ${result.error}")
                 }
             }
@@ -699,7 +789,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val serverId = getSelectedServerId()
 
         if (localPath.isEmpty() || remotePath.isEmpty() || serverId == null) {
-            Messages.showWarningDialog("请填写完整的部署信息", "Deploy")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.validation.fillDeployInfo"), "Deploy")
             return
         }
 
@@ -713,9 +803,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             postCommand = postCommandField.text.trim().ifBlank { null }
         )
 
-        appendLog("========== 开始部署 ==========")
+        appendLog(DeployXBundle.message("toolwindow.log.startDeploy"))
         progressBar.value = 0
-        progressLabel.text = "部署中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.deploying")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Deploying...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -732,7 +822,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 SwingUtilities.invokeLater {
                     progressBar.value = if (result.success) 100 else progressBar.value
                     updateLastReport("MANUAL_DEPLOY", listOfNotNull(result.reportGroup))
-                    progressLabel.text = if (result.success) "部署完成" else "部署失败"
+                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.deployComplete") else DeployXBundle.message("toolwindow.progress.deployFailed")
                     refreshHistory()
                 }
             }
@@ -744,13 +834,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val serverId = getSelectedServerId()
 
         if (localPath.isEmpty()) {
-            Messages.showWarningDialog("请填写本地文件路径", "Quick Push")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.validation.fillLocalPath"), "Quick Push")
             return
         }
 
-        appendLog("========== 快速推送 ==========")
+        appendLog(DeployXBundle.message("toolwindow.log.quickPush"))
         progressBar.value = 0
-        progressLabel.text = "推送中..."
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.pushing")
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Quick Push...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -768,7 +858,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 SwingUtilities.invokeLater {
                     progressBar.value = if (result.success) 100 else progressBar.value
                     updateLastReport("QUICK_PUSH", listOfNotNull(result.reportGroup))
-                    progressLabel.text = if (result.success) "推送完成" else "推送失败"
+                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.pushComplete") else DeployXBundle.message("toolwindow.progress.pushFailed")
                     refreshHistory()
                 }
             }
@@ -781,18 +871,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private fun openTerminal() {
         val serverId = getSelectedServerId()
         if (serverId == null) {
-            Messages.showWarningDialog("请先选择目标服务器", "打开终端")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.validation.selectServerFirst"), DeployXBundle.message("toolwindow.log.openTerminalTitle"))
             return
         }
 
         val server = serverManager.getServer(serverId)
         if (server == null) {
-            Messages.showErrorDialog("找不到服务器配置", "打开终端")
+            Messages.showErrorDialog(DeployXBundle.message("toolwindow.validation.serverNotFound"), DeployXBundle.message("toolwindow.log.openTerminalTitle"))
             return
         }
 
         if (!TerminalService.getInstance().openTerminal(project, server)) {
-            Messages.showErrorDialog("无法打开 SSH 终端，请确保 Terminal 插件已启用", "打开终端")
+            Messages.showErrorDialog(DeployXBundle.message("toolwindow.validation.cannotOpenTerminal"), DeployXBundle.message("toolwindow.log.openTerminalTitle"))
         }
     }
 
@@ -802,13 +892,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private fun saveAsMapping() {
         val serverId = getSelectedServerId()
         if (serverId == null) {
-            Messages.showWarningDialog("请先选择目标服务器", "保存为映射")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.validation.selectServerFirst"), DeployXBundle.message("toolwindow.log.saveAsMappingTitle"))
             return
         }
         val localPath = localPathField.text.trim()
         val remotePath = remotePathField.text.trim()
         if (localPath.isBlank() || remotePath.isBlank()) {
-            Messages.showWarningDialog("请填写本地文件和远程路径", "保存为映射")
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.validation.fillLocalAndRemote"), DeployXBundle.message("toolwindow.log.saveAsMappingTitle"))
             return
         }
 
@@ -833,14 +923,28 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val dialog = MappingEditDialog(null, prefillData = prefill)
         if (dialog.showAndGet()) {
             MappingManager.getInstance().addMapping(dialog.getMappingConfig())
-            appendLog("已保存映射: ${dialog.getMappingConfig().name}")
-            Messages.showInfoMessage("映射已保存", "保存成功")
+            appendLog(DeployXBundle.message("toolwindow.log.mappedSaved", dialog.getMappingConfig().name))
+            Messages.showInfoMessage(DeployXBundle.message("toolwindow.validation.mappingSaved"), DeployXBundle.message("toolwindow.validation.saveSuccess"))
         }
     }
 
     private fun createAction(text: String, icon: Icon, handler: () -> Unit): AnAction {
         return object : AnAction(text, text, icon) {
             override fun actionPerformed(e: AnActionEvent) { handler() }
+        }
+    }
+
+    /**
+     * 创建工具栏 Action，文案通过 bundle key 在 [update] 中动态获取，
+     * 使语言切换后无需重建即可刷新显示文本。
+     */
+    private fun createLocalizedAction(textKey: String, icon: Icon, handler: () -> Unit): AnAction {
+        return object : AnAction(DeployXBundle.message(textKey), DeployXBundle.message(textKey), icon) {
+            override fun actionPerformed(e: AnActionEvent) { handler() }
+            override fun update(e: AnActionEvent) {
+                e.presentation.text = DeployXBundle.message(textKey)
+                e.presentation.description = DeployXBundle.message(textKey)
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.dialog
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.ssh.SshConnection
 import com.intellij.icons.AllIcons
@@ -33,8 +34,8 @@ class RemotePathChooserDialog(
     private val pathField = JBTextField(initialPath)
     private val directoryList = JBList<String>()
     private val listModel = DefaultListModel<String>()
-    private val loadButton = JButton("加载目录")
-    private val upButton = JButton("上级目录")
+    private val loadButton = JButton(DeployXBundle.message("dialog.remote.path.button.loadDirectory"))
+    private val upButton = JButton(DeployXBundle.message("dialog.remote.path.button.parentDirectory"))
 
     private var currentPath: String = initialPath
     private var isLoading = false
@@ -44,7 +45,7 @@ class RemotePathChooserDialog(
         }
 
     init {
-        title = "选择远程路径 - ${server.name} (${server.displayAddress})"
+        title = DeployXBundle.message("dialog.remote.path.title", server.name, server.displayAddress)
         directoryList.model = listModel
         setupUI()
         init()
@@ -136,10 +137,10 @@ class RemotePathChooserDialog(
         upButton.isEnabled = !isLoading
         directoryList.isEnabled = !isLoading
         pathField.isEnabled = !isLoading
-        if (isLoading) {
-            loadButton.text = "加载中..."
+        loadButton.text = if (isLoading) {
+            DeployXBundle.message("dialog.remote.path.loading")
         } else {
-            loadButton.text = "加载目录"
+            DeployXBundle.message("dialog.remote.path.button.loadDirectory")
         }
     }
 
@@ -173,7 +174,7 @@ class RemotePathChooserDialog(
             try {
                 LOG.info("Connecting to ${server.displayAddress}...")
                 if (!connection.connect()) {
-                    error = "无法连接到服务器"
+                    error = DeployXBundle.message("dialog.remote.path.error.connectFailed")
                     LOG.warn("Failed to connect to ${server.displayAddress}")
                 } else {
                     LOG.info("Connected successfully, executing ls command...")
@@ -187,7 +188,7 @@ class RemotePathChooserDialog(
                     }
 
                     if (!lsResult.success) {
-                        error = "无法读取目录: ${lsResult.error}"
+                        error = DeployXBundle.message("dialog.remote.path.error.cannotReadDir", lsResult.error)
                     } else {
                         result = lsResult.output.split("\n")
                             .map { it.trim() }
@@ -199,7 +200,7 @@ class RemotePathChooserDialog(
                 }
             } catch (e: Exception) {
                 LOG.error("Failed to load remote directory", e)
-                error = e.message ?: "加载目录失败"
+                error = DeployXBundle.message("dialog.remote.path.error.loadFailed", e.message ?: "")
             } finally {
                 connection.disconnect()
             }
@@ -212,8 +213,8 @@ class RemotePathChooserDialog(
                 if (error != null) {
                     JOptionPane.showMessageDialog(
                         this@RemotePathChooserDialog.contentPanel,
-                        "加载目录失败: $error",
-                        "错误",
+                        error,
+                        DeployXBundle.message("dialog.remote.path.error.title"),
                         JOptionPane.ERROR_MESSAGE
                     )
                 } else {
@@ -235,12 +236,12 @@ class RemotePathChooserDialog(
             preferredSize = Dimension(500, 400)
         }
 
-        val hintLabel = JLabel("提示：双击目录进入，按 OK 确认当前路径").apply {
+        val hintLabel = JLabel(DeployXBundle.message("dialog.remote.path.hint")).apply {
             foreground = JBColor.GRAY
         }
 
         return FormBuilder.createFormBuilder()
-            .addLabeledComponent("远程路径:", pathField)
+            .addLabeledComponent(DeployXBundle.message("dialog.remote.path.label.remotePath"), pathField)
             .addComponent(buttonPanel)
             .addVerticalGap(8)
             .addComponent(scrollPane)
@@ -251,7 +252,7 @@ class RemotePathChooserDialog(
 
     override fun doValidate(): ValidationInfo? {
         if (pathField.text.isBlank()) {
-            return ValidationInfo("路径不能为空", pathField)
+            return ValidationInfo(DeployXBundle.message("dialog.remote.path.validation.pathRequired"), pathField)
         }
         return null
     }

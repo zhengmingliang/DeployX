@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.action
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.model.UploadItem
 import com.alianga.idea.deploy.service.MappingManager
@@ -33,7 +34,7 @@ class QuickPushAction : AnAction() {
         }.filterValues { it.isNotEmpty() }
 
         if (resolvedByFile.isEmpty()) {
-            showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
+            showNotification(project, DeployXBundle.message("notification.noMappingFound"), NotificationType.WARNING)
             return
         }
 
@@ -70,10 +71,10 @@ class QuickPushAction : AnAction() {
         val skipped = files.size - items.size
         val panel = FileSyncToolWindowPanel.getPanel(project)
         if (panel != null) {
-            if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
+            if (skipped > 0) panel.appendLog(DeployXBundle.message("toolwindow.log.skippedNoMapping", skipped, targetServer.id))
             panel.executeUploadBatch(items)
         } else {
-            showNotification(project, "工具窗口未打开，请先打开 DeployX 工具窗口", NotificationType.WARNING)
+            showNotification(project, DeployXBundle.message("notification.toolWindowNotOpen"), NotificationType.WARNING)
         }
     }
 
@@ -95,8 +96,8 @@ class QuickPushAction : AnAction() {
         }
         val dialog = ServerSelectionDialog(
             servers,
-            "选择推送目标",
-            "已选择 $selectedCount 个文件/目录，请选择快速推送目标：",
+            DeployXBundle.message("dialog.server.select.title.push"),
+            DeployXBundle.message("dialog.server.select.message.push", selectedCount),
             showCommandOptions = hasAnyCommand,
             commandAvailabilityByServerId = commandAvailability
         )
@@ -115,6 +116,8 @@ class QuickPushAction : AnAction() {
     }
 
     override fun update(e: AnActionEvent) {
+        e.presentation.text = DeployXBundle.message("action.quickPush.text")
+        e.presentation.description = DeployXBundle.message("action.quickPush.description")
         e.presentation.isEnabledAndVisible = getSelectedFiles(e).isNotEmpty()
     }
 

@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.service
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.ssh.SshCloudTerminalProcess
 import com.alianga.idea.deploy.ssh.SshCloudTerminalRunner
@@ -44,13 +45,13 @@ class TerminalService : Disposable {
         val pipeName = "${serverConfig.host}:${serverConfig.port}"
 
         // SSH 连接是阻塞操作，放在后台线程执行；createNewSession 必须在 EDT
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Opening SSH terminal to ${serverConfig.displayAddress}...", true) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, DeployXBundle.message("terminal.opening.title", serverConfig.displayAddress), true) {
             private var opened = false
             private var errorMessage: String? = null
 
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = false
-                indicator.text = "Connecting to ${serverConfig.displayAddress}..."
+                indicator.text = DeployXBundle.message("terminal.connecting", serverConfig.displayAddress)
 
                 try {
                     // 1. 建立 SSH 连接（密码/密钥认证在此完成 = 免密基础）
@@ -64,7 +65,7 @@ class TerminalService : Disposable {
                     indicator.fraction = 0.5
 
                     // 2. 打开 Shell channel（已启用 PTY）
-                    indicator.text = "Opening shell channel..."
+                    indicator.text = DeployXBundle.message("terminal.openingShell")
                     val channel = connection.openShellChannel()
                     indicator.fraction = 0.8
 
@@ -91,9 +92,9 @@ class TerminalService : Disposable {
                     LOG.info("✅ SSH terminal opened successfully for: ${serverConfig.displayAddress}")
                 } else {
                     LOG.warn("❌ SSH terminal opening failed")
-                    val msg = errorMessage ?: "无法连接到服务器 ${serverConfig.displayAddress}"
+                    val msg = errorMessage ?: DeployXBundle.message("notification.sshTerminalConnectFailed", serverConfig.displayAddress)
                     com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
-                        Messages.showErrorDialog(project, msg, "SSH 终端")
+                        Messages.showErrorDialog(project, msg, DeployXBundle.message("notification.sshTerminalTitle"))
                     }
                 }
                 LOG.info("========================================")

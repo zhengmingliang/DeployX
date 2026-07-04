@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.action
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowPanel
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -10,7 +11,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
 
 /** 打开 DeployX 脚本库。 */
-class OpenScriptLibraryAction : AnAction("Script Library", "Open DeployX script library", null) {
+class OpenScriptLibraryAction : AnAction() {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
@@ -21,12 +22,14 @@ class OpenScriptLibraryAction : AnAction("Script Library", "Open DeployX script 
             if (panel != null) {
                 panel.selectScriptTab()
             } else {
-                showNotification(project, "工具窗口未初始化，请稍后重试", NotificationType.WARNING)
+                showNotification(project, DeployXBundle.message("notification.toolWindowNotInitialized"), NotificationType.WARNING)
             }
         }
     }
 
     override fun update(e: AnActionEvent) {
+        e.presentation.text = DeployXBundle.message("action.openScriptLibrary.text")
+        e.presentation.description = DeployXBundle.message("action.openScriptLibrary.description")
         e.presentation.isEnabledAndVisible = e.project != null
     }
 

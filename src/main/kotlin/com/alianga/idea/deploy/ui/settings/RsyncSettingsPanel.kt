@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.settings
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.ssh.RsyncWrapper
 import com.alianga.idea.deploy.service.TransferService
@@ -25,8 +26,8 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
     private val transferModeCombo = JComboBox(arrayOf("AUTO", "RSYNC_ONLY", "SFTP_ONLY"))
     private val rsyncPathField = JBTextField(settings.rsyncPath)
     private val rsyncOptionsField = JBTextField(settings.rsyncOptions)
-    private val compressCheck = JBCheckBox("启用压缩传输 (-z)", settings.compress)
-    private val showProgressCheck = JBCheckBox("显示传输进度 (--progress)", settings.showProgress)
+    private val compressCheck = JBCheckBox(DeployXBundle.message("settings.rsync.compress"), settings.compress)
+    private val showProgressCheck = JBCheckBox(DeployXBundle.message("settings.rsync.showProgress"), settings.showProgress)
     private val connectTimeoutField = JBTextField(settings.connectTimeout.toString())
     private val rsyncStatusLabel = JBLabel("")
     private val sshpassStatusLabel = JBLabel("")
@@ -39,12 +40,12 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun setupUI() {
-        val infoLabel = JBLabel("<html><i>Transfer 配置。AUTO 模式优先 rsync，不可用时降级为 SFTP。</i></html>")
+        val infoLabel = JBLabel("<html><i>${DeployXBundle.message("settings.rsync.info")}</i></html>")
 
         val detectPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(rsyncStatusLabel)
-            add(JButton("检测工具").apply { addActionListener { checkTools() } })
+            add(JButton(DeployXBundle.message("settings.rsync.button.detectTools")).apply { addActionListener { checkTools() } })
         }
         val sshpassPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
@@ -54,17 +55,17 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
         val formPanel = FormBuilder.createFormBuilder()
             .addComponent(infoLabel)
             .addVerticalGap(8)
-            .addLabeledComponent("传输模式:", transferModeCombo)
-            .addLabeledComponent("rsync 路径:", rsyncPathField)
-            .addLabeledComponent("rsync 选项:", rsyncOptionsField)
+            .addLabeledComponent(DeployXBundle.message("settings.rsync.transferMode"), transferModeCombo)
+            .addLabeledComponent(DeployXBundle.message("settings.rsync.rsyncPath"), rsyncPathField)
+            .addLabeledComponent(DeployXBundle.message("settings.rsync.rsyncOptions"), rsyncOptionsField)
             .addVerticalGap(4)
             .addComponent(compressCheck)
             .addComponent(showProgressCheck)
             .addVerticalGap(8)
-            .addLabeledComponent("SSH 连接超时 (ms):", connectTimeoutField)
+            .addLabeledComponent(DeployXBundle.message("settings.rsync.connectTimeout"), connectTimeoutField)
             .addVerticalGap(8)
-            .addLabeledComponent("rsync 状态:", detectPanel)
-            .addLabeledComponent("sshpass 状态:", sshpassPanel)
+            .addLabeledComponent(DeployXBundle.message("settings.rsync.status.rsync"), detectPanel)
+            .addLabeledComponent(DeployXBundle.message("settings.rsync.status.sshpass"), sshpassPanel)
             .addVerticalGap(8)
             .addComponent(osHelpLabel)
             .panel
@@ -76,24 +77,24 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun checkTools() {
-        rsyncStatusLabel.text = "检测中..."
-        sshpassStatusLabel.text = "检测中..."
+        rsyncStatusLabel.text = DeployXBundle.message("settings.rsync.detecting")
+        sshpassStatusLabel.text = DeployXBundle.message("settings.rsync.detecting")
         Thread {
             val rsyncAvailable = RsyncWrapper.isRsyncAvailable()
             val sshpassAvailable = RsyncWrapper.isSshpassAvailable()
             SwingUtilities.invokeLater {
                 if (rsyncAvailable) {
-                    rsyncStatusLabel.text = "✓ rsync 可用"
+                    rsyncStatusLabel.text = DeployXBundle.message("settings.rsync.rsync.available")
                     rsyncStatusLabel.foreground = java.awt.Color(0, 128, 0)
                 } else {
-                    rsyncStatusLabel.text = "✗ rsync 不可用（AUTO 将使用 SFTP fallback）"
+                    rsyncStatusLabel.text = DeployXBundle.message("settings.rsync.rsync.unavailable")
                     rsyncStatusLabel.foreground = java.awt.Color(200, 0, 0)
                 }
                 if (sshpassAvailable) {
-                    sshpassStatusLabel.text = "✓ sshpass 可用（rsync 密码认证可用）"
+                    sshpassStatusLabel.text = DeployXBundle.message("settings.rsync.sshpass.available")
                     sshpassStatusLabel.foreground = java.awt.Color(0, 128, 0)
                 } else {
-                    sshpassStatusLabel.text = "✗ sshpass 不可用（密码认证下 AUTO 将使用 SFTP fallback）"
+                    sshpassStatusLabel.text = DeployXBundle.message("settings.rsync.sshpass.unavailable")
                     sshpassStatusLabel.foreground = java.awt.Color(200, 0, 0)
                 }
             }
@@ -102,11 +103,11 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
 
     private fun osHelpText(): String {
         val text = when {
-            SystemInfo.isWindows -> "Windows: 默认通常没有 rsync/sshpass。建议使用 AUTO/SFTP_ONLY；如需 rsync，请安装 MSYS2/cwRsync/Git Bash 并配置 rsync.exe 路径。"
-            SystemInfo.isMac -> "macOS: 密码认证通常没有 sshpass，AUTO 会降级 SFTP；如需新版 rsync 可 brew install rsync。"
-            else -> "Linux: 推荐安装 sudo apt install rsync sshpass；未安装时 AUTO 可降级为 SFTP。"
+            SystemInfo.isWindows -> DeployXBundle.message("settings.rsync.help.windows")
+            SystemInfo.isMac -> DeployXBundle.message("settings.rsync.help.macos")
+            else -> DeployXBundle.message("settings.rsync.help.linux")
         }
-        return "<html><body style='width:520px'>$text<br/>SFTP fallback 不支持 rsync 增量算法和精确 dry-run。</body></html>"
+        return "<html><body style='width:520px'>$text<br/>${DeployXBundle.message("settings.rsync.help.sftpNote")}</body></html>"
     }
 
     fun isModified(): Boolean {

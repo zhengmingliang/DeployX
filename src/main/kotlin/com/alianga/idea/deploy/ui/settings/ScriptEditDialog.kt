@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.settings
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ScriptParam
 import com.alianga.idea.deploy.service.ServerManager
@@ -34,13 +35,13 @@ class ScriptEditDialog(
 
     private val nameField = JBTextField()
     private val descriptionField = JBTextArea(3, 40)
-    private val groupField = JBTextField("默认")
+    private val groupField = JBTextField(DeployXBundle.message("dialog.script.defaultGroup"))
     private val tagsField = JBTextField()
     private val serverCombo = JComboBox<String>()
     private val commandArea = JBTextArea(14, 80)
     private val workingDirField = JBTextField()
-    private val autoCdCheck = JBCheckBox("自动切换到上下文远程目录", false)
-    private val confirmCheck = JBCheckBox("执行前确认", true)
+    private val autoCdCheck = JBCheckBox(DeployXBundle.message("dialog.script.checkbox.autoCd"), false)
+    private val confirmCheck = JBCheckBox(DeployXBundle.message("dialog.script.checkbox.confirmBeforeRun"), true)
     private val timeoutField = JBTextField("300")
     private val dangerousKeywordsField = JBTextField(ScriptConfig.DEFAULT_DANGEROUS_KEYWORDS.joinToString(", "))
 
@@ -51,16 +52,16 @@ class ScriptEditDialog(
 
     init {
         title = when {
-            isCopyMode -> "复制脚本"
-            existingScript != null -> "编辑脚本"
-            else -> "添加脚本"
+            isCopyMode -> DeployXBundle.message("dialog.script.copy.title")
+            existingScript != null -> DeployXBundle.message("dialog.script.edit.title")
+            else -> DeployXBundle.message("dialog.script.add.title")
         }
         scriptId = if (existingScript != null && !isCopyMode) existingScript.id else ScriptConfig.generateId()
         createdAt = if (existingScript != null && !isCopyMode) existingScript.createdAt else System.currentTimeMillis()
 
         setupServerCombo()
         existingScript?.let { fillData(it) }
-        if (isCopyMode) nameField.text = "${nameField.text} Copy"
+        if (isCopyMode) nameField.text = "${nameField.text} ${DeployXBundle.message("dialog.script.copy.suffix")}"
 
         descriptionField.lineWrap = true
         descriptionField.wrapStyleWord = true
@@ -71,7 +72,7 @@ class ScriptEditDialog(
     }
 
     private fun setupServerCombo() {
-        serverCombo.addItem(" - 运行时选择/使用上下文")
+        serverCombo.addItem(DeployXBundle.message("dialog.script.placeholder.serverSelect"))
         ServerManager.getInstance().getServers().forEach { server ->
             serverCombo.addItem("${server.id} - ${server.name} (${server.displayAddress})")
         }
@@ -117,19 +118,19 @@ class ScriptEditDialog(
             horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
         }
         val contentPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent("名称:", nameField)
-            .addLabeledComponent("描述:", descriptionScroll)
-            .addLabeledComponent("分组:", groupField)
-            .addLabeledComponent("标签(逗号分隔):", tagsField)
-            .addLabeledComponent("绑定服务器:", serverCombo)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.name"), nameField)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.description"), descriptionScroll)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.group"), groupField)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.tags"), tagsField)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.bindServer"), serverCombo)
             .addVerticalGap(8)
-            .addLabeledComponent("命令模板:", commandScroll)
-            .addLabeledComponent("变量说明:", variablesScroll)
-            .addLabeledComponent("工作目录:", workingDirField)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.commandTemplate"), commandScroll)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.variableHelp"), variablesScroll)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.workingDir"), workingDirField)
             .addComponent(autoCdCheck)
             .addComponent(confirmCheck)
-            .addLabeledComponent("超时(秒):", timeoutField)
-            .addLabeledComponent("危险关键字:", dangerousKeywordsField)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.timeout"), timeoutField)
+            .addLabeledComponent(DeployXBundle.message("dialog.script.label.dangerousKeywords"), dangerousKeywordsField)
             .panel
 
         val decorator = ToolbarDecorator.createDecorator(paramTable)
@@ -141,39 +142,35 @@ class ScriptEditDialog(
         }
 
         return JBTabbedPane().apply {
-            addTab("脚本内容", JBScrollPane(contentPanel).apply { horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER })
-            addTab("参数定义", paramsPanel)
+            addTab(DeployXBundle.message("dialog.script.tabs.scriptContent"), JBScrollPane(contentPanel).apply { horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER })
+            addTab(DeployXBundle.message("dialog.script.tabs.paramDefinition"), paramsPanel)
             preferredSize = Dimension(780, 720)
         }
     }
 
     private fun buildVariablesHelpText(): String {
         return buildString {
-            appendLine("脚本参数变量:")
-            appendLine("  在“参数定义”页添加参数后，可在命令中使用 ${'$'}{参数名} 引用。")
-            appendLine("  示例: 参数名 APP_NAME 可写为 ${'$'}{APP_NAME}")
+            appendLine(DeployXBundle.message("dialog.script.variables.paramHeader"))
+            appendLine("  \${'$'}{server.id} - server ID")
+            appendLine("  \${'$'}{server.name} - server name")
+            appendLine("  \${'$'}{server.host} - server host/IP")
+            appendLine("  \${'$'}{server.port} - SSH port")
+            appendLine("  \${'$'}{server.user} - SSH username")
+            appendLine("  \${'$'}{server.address} - user@host:port display address")
+            appendLine("  \${'$'}{server.auth} - auth type password/key")
+            appendLine("  \${'$'}{mapping.id} - current directory mapping ID")
+            appendLine("  \${'$'}{mapping.name} - current directory mapping name")
+            appendLine("  \${'$'}{mapping.localDir} - mapping local root directory")
+            appendLine("  \${'$'}{mapping.remoteDir} - mapping remote root directory")
+            appendLine("  \${'$'}{mapping.serverId} - mapping bound server ID")
+            appendLine("  \${'$'}{path.remoteDir} - currently resolved remote directory")
+            appendLine("  \${'$'}{path.projectBase} - current project root directory")
+            appendLine("  \${'$'}{path.artifact} - build artifact path, empty if not provided")
+            appendLine("  \${'$'}{path.local} - first selected local path")
+            appendLine("  \${'$'}{path.locals} - all selected local paths")
+            appendLine("  \${'$'}{path.local.0} - 1st local path, path.local.1 for 2nd, etc.")
             appendLine()
-            appendLine("内置上下文变量:")
-            appendLine("  ${'$'}{server.id} - 服务器 ID")
-            appendLine("  ${'$'}{server.name} - 服务器名称")
-            appendLine("  ${'$'}{server.host} - 服务器主机/IP")
-            appendLine("  ${'$'}{server.port} - SSH 端口")
-            appendLine("  ${'$'}{server.user} - SSH 用户名")
-            appendLine("  ${'$'}{server.address} - user@host:port 展示地址")
-            appendLine("  ${'$'}{server.auth} - 认证方式 password/key")
-            appendLine("  ${'$'}{mapping.id} - 当前目录映射 ID")
-            appendLine("  ${'$'}{mapping.name} - 当前目录映射名称")
-            appendLine("  ${'$'}{mapping.localDir} - 映射本地根目录")
-            appendLine("  ${'$'}{mapping.remoteDir} - 映射远程根目录")
-            appendLine("  ${'$'}{mapping.serverId} - 映射绑定的服务器 ID")
-            appendLine("  ${'$'}{path.remoteDir} - 当前解析出的远程目录")
-            appendLine("  ${'$'}{path.projectBase} - 当前项目根目录")
-            appendLine("  ${'$'}{path.artifact} - 构建产物路径，未提供时为空")
-            appendLine("  ${'$'}{path.local} - 当前选择的第一个本地路径")
-            appendLine("  ${'$'}{path.locals} - 当前选择的所有本地路径")
-            appendLine("  ${'$'}{path.local.0} - 第 1 个本地路径，path.local.1 为第 2 个，以此类推")
-            appendLine()
-            appendLine("转义: 写 $${'$'}{VAR} 可输出字面量 ${'$'}{VAR}。")
+            appendLine(DeployXBundle.message("dialog.script.variables.hint"))
         }.trimEnd()
     }
 
@@ -196,18 +193,18 @@ class ScriptEditDialog(
     }
 
     override fun doValidate(): ValidationInfo? {
-        if (nameField.text.isBlank()) return ValidationInfo("名称不能为空", nameField)
-        if (commandArea.text.isBlank()) return ValidationInfo("命令模板不能为空", commandArea)
+        if (nameField.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.script.validation.nameRequired"), nameField)
+        if (commandArea.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.script.validation.commandRequired"), commandArea)
         val timeout = timeoutField.text.trim().toIntOrNull()
-        if (timeout == null || timeout <= 0) return ValidationInfo("超时必须是正整数", timeoutField)
+        if (timeout == null || timeout <= 0) return ValidationInfo(DeployXBundle.message("dialog.script.validation.timeoutInvalid"), timeoutField)
         val names = mutableSetOf<String>()
         paramModel.getData().forEach { param ->
             if (!Regex("[A-Za-z_][A-Za-z0-9_]*").matches(param.name)) {
-                return ValidationInfo("参数名只能包含字母、数字和下划线，且不能以数字开头", paramTable)
+                return ValidationInfo(DeployXBundle.message("dialog.script.validation.paramNameInvalid"), paramTable)
             }
-            if (!names.add(param.name)) return ValidationInfo("参数名重复: ${param.name}", paramTable)
+            if (!names.add(param.name)) return ValidationInfo(DeployXBundle.message("dialog.script.validation.duplicateParamName", param.name), paramTable)
             if (param.type == ScriptParam.ParamType.ENUM && param.options.isEmpty()) {
-                return ValidationInfo("枚举参数 ${param.name} 至少需要一个选项", paramTable)
+                return ValidationInfo(DeployXBundle.message("dialog.script.validation.enumParamRequiresOptions", param.name), paramTable)
             }
         }
         return null
@@ -220,7 +217,7 @@ class ScriptEditDialog(
             id = scriptId,
             name = nameField.text.trim(),
             description = descriptionField.text.trim(),
-            group = groupField.text.trim().ifBlank { "默认" },
+            group = groupField.text.trim().ifBlank { DeployXBundle.message("dialog.script.defaultGroup") },
             tags = tagsField.text.split(",").map { it.trim() }.filter { it.isNotBlank() },
             serverId = serverId,
             command = commandArea.text.trim(),
@@ -236,7 +233,14 @@ class ScriptEditDialog(
     }
 
     private class ParamTableModel : AbstractTableModel() {
-        private val columns = arrayOf("Name", "Label", "Type", "Required", "Default", "Options")
+        private val columns = arrayOf(
+            DeployXBundle.message("dialog.param.table.name"),
+            DeployXBundle.message("dialog.param.table.label"),
+            DeployXBundle.message("dialog.param.table.type"),
+            DeployXBundle.message("dialog.param.table.required"),
+            DeployXBundle.message("dialog.param.table.default"),
+            DeployXBundle.message("dialog.param.table.options")
+        )
         private val params = mutableListOf<ScriptParam>()
 
         fun setData(data: List<ScriptParam>) {
@@ -273,13 +277,13 @@ private class ScriptParamEditDialog(private val existingParam: ScriptParam?) : D
     private val nameField = JBTextField()
     private val labelField = JBTextField()
     private val typeCombo = JComboBox(ScriptParam.ParamType.entries.toTypedArray())
-    private val requiredCheck = JBCheckBox("必填")
+    private val requiredCheck = JBCheckBox(DeployXBundle.message("dialog.param.checkbox.required"))
     private val defaultField = JBTextField()
     private val optionsField = JBTextField()
     private val descriptionField = JBTextArea(3, 30)
 
     init {
-        title = if (existingParam == null) "添加参数" else "编辑参数"
+        title = if (existingParam == null) DeployXBundle.message("dialog.param.add.title") else DeployXBundle.message("dialog.param.edit.title")
         existingParam?.let {
             nameField.text = it.name
             labelField.text = it.label
@@ -296,13 +300,13 @@ private class ScriptParamEditDialog(private val existingParam: ScriptParam?) : D
         val panel = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
         panel.add(
             FormBuilder.createFormBuilder()
-                .addLabeledComponent("名称:", nameField)
-                .addLabeledComponent("显示名:", labelField)
-                .addLabeledComponent("类型:", typeCombo)
+                .addLabeledComponent(DeployXBundle.message("dialog.param.label.name"), nameField)
+                .addLabeledComponent(DeployXBundle.message("dialog.param.label.displayLabel"), labelField)
+                .addLabeledComponent(DeployXBundle.message("dialog.param.label.type"), typeCombo)
                 .addComponent(requiredCheck)
-                .addLabeledComponent("默认值:", defaultField)
-                .addLabeledComponent("枚举选项(逗号分隔):", optionsField)
-                .addLabeledComponent("说明:", JBScrollPane(descriptionField))
+                .addLabeledComponent(DeployXBundle.message("dialog.param.label.defaultValue"), defaultField)
+                .addLabeledComponent(DeployXBundle.message("dialog.param.label.enumOptions"), optionsField)
+                .addLabeledComponent(DeployXBundle.message("dialog.param.label.description"), JBScrollPane(descriptionField))
                 .panel
         )
         panel.add(Box.createVerticalStrut(4))
@@ -311,12 +315,12 @@ private class ScriptParamEditDialog(private val existingParam: ScriptParam?) : D
     }
 
     override fun doValidate(): ValidationInfo? {
-        if (nameField.text.isBlank()) return ValidationInfo("参数名称不能为空", nameField)
+        if (nameField.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.param.validation.nameRequired"), nameField)
         if (!Regex("[A-Za-z_][A-Za-z0-9_]*").matches(nameField.text.trim())) {
-            return ValidationInfo("参数名只能包含字母、数字和下划线，且不能以数字开头", nameField)
+            return ValidationInfo(DeployXBundle.message("dialog.param.validation.nameFormat"), nameField)
         }
         if (typeCombo.selectedItem == ScriptParam.ParamType.ENUM && optionsField.text.split(",").none { it.trim().isNotBlank() }) {
-            return ValidationInfo("枚举参数需要填写选项", optionsField)
+            return ValidationInfo(DeployXBundle.message("dialog.param.validation.enumRequiresOptions"), optionsField)
         }
         return null
     }

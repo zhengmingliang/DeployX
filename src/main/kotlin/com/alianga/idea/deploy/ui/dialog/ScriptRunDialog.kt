@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.dialog
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ScriptParam
 import com.alianga.idea.deploy.model.ScriptRunContext
@@ -45,12 +46,12 @@ class ScriptRunDialog(
     private var runResult: ScriptRunResult? = null
 
     init {
-        title = "运行脚本 - ${script.name}"
+        title = DeployXBundle.message("dialog.script.run.title", script.name)
         setupServerCombo()
         previewArea.isEditable = false
         previewArea.font = Font("Monospaced", Font.PLAIN, 12)
         init()
-        setOKButtonText("运行")
+        setOKButtonText(DeployXBundle.message("dialog.script.run.button.run"))
     }
 
     private fun setupServerCombo() {
@@ -65,12 +66,12 @@ class ScriptRunDialog(
         if (index >= 0) serverCombo.selectedIndex = index
     }
 
-    override fun createActions() = arrayOf(object : AbstractAction("Dry Run") {
+    override fun createActions() = arrayOf(object : AbstractAction(DeployXBundle.message("dialog.script.run.button.dryRun")) {
         override fun actionPerformed(e: java.awt.event.ActionEvent?) {
             try {
                 renderPreview()
             } catch (ex: Exception) {
-                Messages.showErrorDialog(ex.message ?: "命令渲染失败", "Dry Run")
+                Messages.showErrorDialog(ex.message ?: DeployXBundle.message("dialog.script.run.dryrun.failed"), DeployXBundle.message("dialog.script.run.button.dryRun"))
             }
         }
     }, okAction, cancelAction)
@@ -90,14 +91,14 @@ class ScriptRunDialog(
             wrapStyleWord = true
         }
         val top = FormBuilder.createFormBuilder()
-            .addComponent(JLabel(script.description.ifBlank { "脚本命令执行前会先渲染参数和上下文变量。" }))
-            .addLabeledComponent("目标服务器:", serverCombo)
+            .addComponent(JLabel(script.description.ifBlank { DeployXBundle.message("dialog.script.run.description.default") }))
+            .addLabeledComponent(DeployXBundle.message("dialog.script.run.label.targetServer"), serverCombo)
             .addVerticalGap(6)
             .addComponent(paramsPanel.panel)
             .addVerticalGap(6)
-            .addLabeledComponent("变量说明:", JBScrollPane(variablesArea).apply { preferredSize = Dimension(680, 170) })
+            .addLabeledComponent(DeployXBundle.message("dialog.script.run.label.variablesHelp"), JBScrollPane(variablesArea).apply { preferredSize = Dimension(680, 170) })
             .addVerticalGap(6)
-            .addLabeledComponent("命令预览:", JBScrollPane(previewArea))
+            .addLabeledComponent(DeployXBundle.message("dialog.script.run.label.commandPreview"), JBScrollPane(previewArea))
             .panel
 
         return JPanel(BorderLayout()).apply {
@@ -108,16 +109,16 @@ class ScriptRunDialog(
 
     private fun buildVariablesHelpText(): String {
         val paramHelp = if (script.params.isEmpty()) {
-            "脚本参数: 无"
+            DeployXBundle.message("dialog.script.variables.paramNone")
         } else {
             buildString {
-                appendLine("脚本参数变量:")
+                appendLine(DeployXBundle.message("dialog.script.variables.paramHeader"))
                 script.params.forEach { param ->
-                    val required = if (param.required) "必填" else "可选"
-                    val defaultValue = if (param.defaultValue.isNotBlank()) "，默认值: ${param.defaultValue}" else ""
-                    val options = if (param.options.isNotEmpty()) "，选项: ${param.options.joinToString(", ")}" else ""
-                    val desc = param.description.ifBlank { "无说明" }
-                    appendLine("  ${'$'}{${param.name}} - ${param.displayLabel}，${param.type.name}，$required$defaultValue$options。$desc")
+                    val required = if (param.required) DeployXBundle.message("dialog.script.variables.paramRequired") else DeployXBundle.message("dialog.script.variables.paramOptional")
+                    val defaultValue = if (param.defaultValue.isNotBlank()) DeployXBundle.message("dialog.script.variables.paramDefault", param.defaultValue) else ""
+                    val options = if (param.options.isNotEmpty()) DeployXBundle.message("dialog.script.variables.paramOptions", param.options.joinToString(", ")) else ""
+                    val desc = param.description.ifBlank { DeployXBundle.message("dialog.script.variables.paramNoDesc") }
+                    appendLine(DeployXBundle.message("dialog.script.variables.paramLine", param.name, param.displayLabel, param.type.name, required, defaultValue, options, desc))
                 }
             }.trimEnd()
         }
@@ -125,27 +126,27 @@ class ScriptRunDialog(
         return buildString {
             appendLine(paramHelp)
             appendLine()
-            appendLine("上下文变量:")
-            appendLine("  ${'$'}{server.id} - 服务器 ID")
-            appendLine("  ${'$'}{server.name} - 服务器名称")
-            appendLine("  ${'$'}{server.host} - 服务器主机/IP")
-            appendLine("  ${'$'}{server.port} - SSH 端口")
-            appendLine("  ${'$'}{server.user} - SSH 用户名")
-            appendLine("  ${'$'}{server.address} - user@host:port 展示地址")
-            appendLine("  ${'$'}{server.auth} - 认证方式 password/key")
-            appendLine("  ${'$'}{mapping.id} - 当前目录映射 ID")
-            appendLine("  ${'$'}{mapping.name} - 当前目录映射名称")
-            appendLine("  ${'$'}{mapping.localDir} - 映射本地根目录")
-            appendLine("  ${'$'}{mapping.remoteDir} - 映射远程根目录")
-            appendLine("  ${'$'}{mapping.serverId} - 映射绑定的服务器 ID")
-            appendLine("  ${'$'}{path.remoteDir} - 当前解析出的远程目录")
-            appendLine("  ${'$'}{path.projectBase} - 当前项目根目录")
-            appendLine("  ${'$'}{path.artifact} - 构建产物路径，未提供时为空")
-            appendLine("  ${'$'}{path.local} - 当前选择的第一个本地路径")
-            appendLine("  ${'$'}{path.locals} - 当前选择的所有本地路径")
-            appendLine("  ${'$'}{path.local.0} - 第 1 个本地路径，path.local.1 为第 2 个，以此类推")
+            appendLine(DeployXBundle.message("dialog.script.variables.contextHeader"))
+            appendLine("  \${'$'}{server.id} - server ID")
+            appendLine("  \${'$'}{server.name} - server name")
+            appendLine("  \${'$'}{server.host} - server host/IP")
+            appendLine("  \${'$'}{server.port} - SSH port")
+            appendLine("  \${'$'}{server.user} - SSH username")
+            appendLine("  \${'$'}{server.address} - user@host:port display address")
+            appendLine("  \${'$'}{server.auth} - auth type password/key")
+            appendLine("  \${'$'}{mapping.id} - current directory mapping ID")
+            appendLine("  \${'$'}{mapping.name} - current directory mapping name")
+            appendLine("  \${'$'}{mapping.localDir} - mapping local root directory")
+            appendLine("  \${'$'}{mapping.remoteDir} - mapping remote root directory")
+            appendLine("  \${'$'}{mapping.serverId} - mapping bound server ID")
+            appendLine("  \${'$'}{path.remoteDir} - currently resolved remote directory")
+            appendLine("  \${'$'}{path.projectBase} - current project root directory")
+            appendLine("  \${'$'}{path.artifact} - build artifact path, empty if not provided")
+            appendLine("  \${'$'}{path.local} - first selected local path")
+            appendLine("  \${'$'}{path.locals} - all selected local paths")
+            appendLine("  \${'$'}{path.local.0} - 1st local path, path.local.1 for 2nd, etc.")
             appendLine()
-            appendLine("提示: 变量会在执行前替换。参数值和上下文值会自动进行 shell quote。")
+            appendLine(DeployXBundle.message("dialog.script.variables.hint"))
         }.trimEnd()
     }
 
@@ -166,7 +167,7 @@ class ScriptRunDialog(
             renderPreview()
             null
         } catch (e: Exception) {
-            ValidationInfo(e.message ?: "脚本参数错误")
+            ValidationInfo(e.message ?: DeployXBundle.message("dialog.script.run.paramError"))
         }
     }
 
@@ -198,28 +199,28 @@ class ScriptRunDialog(
         val command = try {
             renderPreview()
         } catch (e: Exception) {
-            Messages.showErrorDialog(e.message ?: "命令渲染失败", "运行脚本")
+            Messages.showErrorDialog(e.message ?: DeployXBundle.message("dialog.script.run.dryrun.failed"), DeployXBundle.message("dialog.script.run.button.run"))
             return
         }
 
         val serverId = selectedServerId()
         if (serverId.isNullOrBlank()) {
-            Messages.showWarningDialog("请选择目标服务器", "运行脚本")
+            Messages.showWarningDialog(DeployXBundle.message("dialog.script.run.selectServer"), DeployXBundle.message("dialog.script.run.button.run"))
             return
         }
 
         if (script.confirmBeforeRun || scriptManager.hasDangerousCommand(script, command)) {
             val result = Messages.showYesNoDialog(
-                "即将在远程服务器执行以下命令：\n\n$command\n\n确认继续？",
-                "确认执行脚本",
-                "执行",
-                "取消",
+                DeployXBundle.message("dialog.script.run.confirm.message", command),
+                DeployXBundle.message("dialog.script.run.confirm.title"),
+                DeployXBundle.message("dialog.script.run.confirm.yes"),
+                DeployXBundle.message("common.cancel"),
                 Messages.getWarningIcon()
             )
             if (result != Messages.YES) return
         }
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Running script ${script.name}...", true) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, DeployXBundle.message("dialog.script.run.progress.title", script.name), true) {
             override fun run(indicator: ProgressIndicator) {
                 val result = scriptManager.runScript(
                     script = script,
@@ -232,7 +233,7 @@ class ScriptRunDialog(
                 runResult = result
                 SwingUtilities.invokeLater {
                     if (!result.success) {
-                        Messages.showWarningDialog(result.error.ifBlank { "脚本执行失败" }, "运行脚本")
+                        Messages.showWarningDialog(result.error.ifBlank { DeployXBundle.message("dialog.script.run.failed") }, DeployXBundle.message("dialog.script.run.button.run"))
                     }
                     close(OK_EXIT_CODE)
                 }

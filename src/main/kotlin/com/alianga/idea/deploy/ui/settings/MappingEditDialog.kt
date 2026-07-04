@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.settings
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.MappingConfig
 import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
@@ -27,27 +28,27 @@ class MappingEditDialog(
     private val localDirField = TextFieldWithBrowseButton()
     private val serverCombo = JComboBox<String>()
     private val remoteDirField = TextFieldWithBrowseButton()
-    private val backupEnabledCheck = JBCheckBox("启用部署前备份")
+    private val backupEnabledCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.enableBackup"))
     private val backupDirField = JBTextField()
     private val backupSourceField = JBTextField()
-    private val unzipEnabledCheck = JBCheckBox("启用上传后解压")
+    private val unzipEnabledCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.enableUnzip"))
     private val unzipDestField = JBTextField()
     private val excludeField = JBTextField()
-    private val preCommandEnabledCheck = JBCheckBox("启用上传前命令")
+    private val preCommandEnabledCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.enablePreCommand"))
     private val preCommandField = JBTextField()
-    private val postCommandEnabledCheck = JBCheckBox("启用上传后命令")
+    private val postCommandEnabledCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.enablePostCommand"))
     private val postCommandField = JBTextField()
-    private val autoCdCheck = JBCheckBox("命令自动切换到远程目录 (cd <远程目录> && ...)", false)
+    private val autoCdCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.autoCd"), false)
 
     // 保存原始ID，编辑时保留，复制/新建时生成新ID
     private val mappingId: String
 
     init {
         title = when {
-            isCopyMode -> "复制映射"
-            existingMapping != null -> "编辑映射"
-            prefillData != null -> "保存为映射"
-            else -> "添加映射"
+            isCopyMode -> DeployXBundle.message("dialog.mapping.copy.title")
+            existingMapping != null -> DeployXBundle.message("dialog.mapping.edit.title")
+            prefillData != null -> DeployXBundle.message("dialog.mapping.saveAs.title")
+            else -> DeployXBundle.message("dialog.mapping.add.title")
         }
 
         mappingId = when {
@@ -98,8 +99,9 @@ class MappingEditDialog(
     private fun setupLocalDirBrowser() {
         localDirField.addBrowseFolderListener(
             null,
-            FileChooserDescriptorFactory.createSingleFolderDescriptor().withTitle("选择本地目录").withDescription
-                ("选择要同步的本地目录")
+            FileChooserDescriptorFactory.createSingleFolderDescriptor()
+                .withTitle(DeployXBundle.message("dialog.mapping.browser.selectLocal"))
+                .withDescription(DeployXBundle.message("dialog.mapping.browser.selectLocal.desc"))
         )
     }
 
@@ -118,7 +120,7 @@ class MappingEditDialog(
             }
         }
         // 设置工具提示
-        remoteDirField.toolTipText = "点击右侧按钮浏览远程服务器目录，或直接输入路径"
+        remoteDirField.toolTipText = DeployXBundle.message("dialog.mapping.tooltip.remotePathBrowse")
     }
 
     private fun fillData(mapping: MappingConfig, nameEditable: Boolean) {
@@ -173,23 +175,23 @@ class MappingEditDialog(
 
     override fun createCenterPanel(): JComponent {
         val panel = FormBuilder.createFormBuilder()
-            .addLabeledComponent("名称:", nameField)
-            .addLabeledComponent("本地目录:", localDirField)
-            .addLabeledComponent("目标服务器:", serverCombo)
-            .addLabeledComponent("远程目录:", remoteDirField)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.name"), nameField)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.localDir"), localDirField)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.targetServer"), serverCombo)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.remoteDir"), remoteDirField)
             .addVerticalGap(8)
             .addComponent(backupEnabledCheck)
-            .addLabeledComponent("备份目录:", backupDirField)
-            .addLabeledComponent("备份源 (可选):", backupSourceField)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.backupDirectory"), backupDirField)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.backupSource"), backupSourceField)
             .addVerticalGap(8)
             .addComponent(unzipEnabledCheck)
-            .addLabeledComponent("解压目标:", unzipDestField)
-            .addLabeledComponent("排除规则 (逗号分隔):", excludeField)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.unzipDestination"), unzipDestField)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.excludeRules"), excludeField)
             .addVerticalGap(8)
             .addComponent(preCommandEnabledCheck)
-            .addLabeledComponent("上传前命令:", preCommandField)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.preUploadCommand"), preCommandField)
             .addComponent(postCommandEnabledCheck)
-            .addLabeledComponent("上传后命令:", postCommandField)
+            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.postUploadCommand"), postCommandField)
             .addComponent(autoCdCheck)
             .panel
 
@@ -198,15 +200,15 @@ class MappingEditDialog(
     }
 
     override fun doValidate(): ValidationInfo? {
-        if (nameField.text.isBlank()) return ValidationInfo("名称不能为空", nameField)
-        if (localDirField.text.isBlank()) return ValidationInfo("本地目录不能为空", localDirField)
-        if (serverCombo.selectedItem == null) return ValidationInfo("请选择目标服务器", serverCombo)
-        if (remoteDirField.text.isBlank()) return ValidationInfo("远程目录不能为空", remoteDirField)
+        if (nameField.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.validation.nameRequired"), nameField)
+        if (localDirField.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.validation.localDirRequired"), localDirField)
+        if (serverCombo.selectedItem == null) return ValidationInfo(DeployXBundle.message("dialog.validation.selectTargetServer"), serverCombo)
+        if (remoteDirField.text.isBlank()) return ValidationInfo(DeployXBundle.message("dialog.validation.remoteDirRequired"), remoteDirField)
         if (backupEnabledCheck.isSelected && backupDirField.text.isBlank()) {
-            return ValidationInfo("启用了备份但未填写备份目录", backupDirField)
+            return ValidationInfo(DeployXBundle.message("dialog.validation.backupDirRequired"), backupDirField)
         }
         if (unzipEnabledCheck.isSelected && unzipDestField.text.isBlank()) {
-            return ValidationInfo("启用了但未填写解压目标", unzipDestField)
+            return ValidationInfo(DeployXBundle.message("dialog.validation.unzipDestRequired"), unzipDestField)
         }
         return null
     }

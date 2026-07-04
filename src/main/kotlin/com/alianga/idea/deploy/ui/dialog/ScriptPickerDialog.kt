@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.dialog
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.MappingConfig
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ScriptParam
@@ -47,13 +48,13 @@ class ScriptPickerDialog(
     private val paramsPanel = JPanel(BorderLayout())
     private val paramComponents = linkedMapOf<String, JComponent>()
     private val previewArea = JBTextArea(10, 50)
-    private val insertRadio = JBRadioButton("插入脚本内容", true)
-    private val referenceRadio = JBRadioButton("引用脚本")
+    private val insertRadio = JBRadioButton(DeployXBundle.message("dialog.script.picker.radio.insertContent"), true)
+    private val referenceRadio = JBRadioButton(DeployXBundle.message("dialog.script.picker.radio.referenceScript"))
     private val gson = GsonBuilder().disableHtmlEscaping().create()
     private var resultCommand: String = ""
 
     init {
-        title = "从脚本库选择"
+        title = DeployXBundle.message("dialog.script.picker.title")
         previewArea.isEditable = false
         previewArea.font = Font("Monospaced", Font.PLAIN, 12)
         previewArea.lineWrap = true
@@ -68,7 +69,7 @@ class ScriptPickerDialog(
         scriptList.fixedCellHeight = 72
         refreshList(initialScriptId)
         scriptList.addListSelectionListener { if (!it.valueIsAdjusting) showSelectedScript() }
-        searchField.emptyText.text = "搜索脚本"
+        searchField.emptyText.text = DeployXBundle.message("dialog.script.picker.search.placeholder")
         searchField.addActionListener { refreshList(scriptList.selectedValue?.id ?: initialScriptId) }
         init()
     }
@@ -180,13 +181,13 @@ class ScriptPickerDialog(
     override fun doOKAction() {
         val script = scriptList.selectedValue
         if (script == null) {
-            Messages.showWarningDialog("请选择脚本", "脚本库")
+            Messages.showWarningDialog(DeployXBundle.message("dialog.script.picker.selectScript"), DeployXBundle.message("dialog.script.picker.title.library"))
             return
         }
         resultCommand = try {
             if (referenceRadio.isSelected) buildReference(script) else scriptManager.renderCommand(script, collectParams(), buildContext(script))
         } catch (e: Exception) {
-            Messages.showErrorDialog(e.message ?: "命令渲染失败", "脚本库")
+            Messages.showErrorDialog(e.message ?: DeployXBundle.message("dialog.script.picker.commandRenderFailed"), DeployXBundle.message("dialog.script.picker.title.library"))
             return
         }
         super.doOKAction()
@@ -205,8 +206,8 @@ class ScriptPickerDialog(
             hasFocus: Boolean
         ) {
             if (value == null) return
-            append(value.name.ifBlank { "未命名脚本" }, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
-            append("    ${value.group.ifBlank { "默认" }}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+            append(value.name.ifBlank { DeployXBundle.message("script.unnamed") }, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+            append("    ${value.group.ifBlank { DeployXBundle.message("script.defaultGroup") }}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
             append("\n${summary(value)}", SimpleTextAttributes.REGULAR_ATTRIBUTES)
             append("\n${meta(value)}", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
         }
@@ -214,14 +215,14 @@ class ScriptPickerDialog(
         private fun summary(script: ScriptConfig): String {
             val text = script.description.ifBlank {
                 script.command.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
-            }.ifBlank { "无描述" }
+            }.ifBlank { DeployXBundle.message("script.noDescription") }
             return text.take(90)
         }
 
         private fun meta(script: ScriptConfig): String {
-            val server = script.serverId.ifBlank { "运行时服务器" }
-            val tags = if (script.tags.isEmpty()) "无标签" else script.tags.joinToString(", ")
-            return "$server · ${script.params.size} 参数 · $tags · 运行 ${script.runCount} 次"
+            val server = script.serverId.ifBlank { DeployXBundle.message("script.runtimeServer") }
+            val tags = if (script.tags.isEmpty()) DeployXBundle.message("script.noTags") else script.tags.joinToString(", ")
+            return DeployXBundle.message("script.meta", server, script.params.size, tags, script.runCount)
         }
     }
 }

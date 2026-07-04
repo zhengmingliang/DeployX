@@ -1,7 +1,11 @@
 package com.alianga.idea.deploy.ui.settings
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.MappingConfig
 import com.alianga.idea.deploy.service.MappingManager
+import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.table.JBTable
@@ -28,10 +32,12 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
             .setAddAction { addMapping() }
             .setEditAction { editMapping() }
             .setRemoveAction { removeMapping() }
-            .addExtraAction(object : com.intellij.openapi.actionSystem.AnAction("Copy", "Copy selected mapping", com.intellij.icons.AllIcons.Actions.Copy) {
-                override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
-                    copyMapping()
-                }
+            .addExtraAction(object : AnAction(
+                DeployXBundle.lazyMessage("settings.mapping.action.copy"),
+                DeployXBundle.lazyMessage("settings.mapping.action.copy.desc"),
+                AllIcons.Actions.Copy
+            ) {
+                override fun actionPerformed(e: AnActionEvent) { copyMapping() }
             })
 
         val panel = decorator.createPanel()
@@ -81,10 +87,10 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
 
         val mapping = tableModel.getMappingAt(selectedRow) ?: return
         val result = Messages.showYesNoDialog(
-            "确定要删除映射 '${mapping.name}' 吗？",
-            "删除映射",
-            "删除",
-            "取消",
+            DeployXBundle.message("settings.mapping.confirm.delete", mapping.name),
+            DeployXBundle.message("settings.mapping.confirm.delete.title"),
+            DeployXBundle.message("settings.mapping.confirm.delete.yes"),
+            DeployXBundle.message("common.cancel"),
             Messages.getQuestionIcon()
         )
         if (result == Messages.YES) {
@@ -102,7 +108,16 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private class MappingTableModel : AbstractTableModel() {
-        private val columns = arrayOf("Name", "Local Dir", "Server", "Remote Dir", "Backup", "Unzip", "Pre Cmd", "Post Cmd")
+        private val columns = arrayOf(
+            DeployXBundle.message("settings.mapping.column.name"),
+            DeployXBundle.message("settings.mapping.column.localDir"),
+            DeployXBundle.message("settings.mapping.column.server"),
+            DeployXBundle.message("settings.mapping.column.remoteDir"),
+            DeployXBundle.message("settings.mapping.column.backup"),
+            DeployXBundle.message("settings.mapping.column.unzip"),
+            DeployXBundle.message("settings.mapping.column.preCmd"),
+            DeployXBundle.message("settings.mapping.column.postCmd")
+        )
         private var mappings = listOf<MappingConfig>()
 
         fun setData(mappings: List<MappingConfig>) {

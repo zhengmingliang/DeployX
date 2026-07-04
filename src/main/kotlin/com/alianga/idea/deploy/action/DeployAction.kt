@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.action
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.DeployItem
 import com.alianga.idea.deploy.service.MappingManager
 import com.alianga.idea.deploy.service.ServerManager
@@ -33,7 +34,7 @@ class DeployAction : AnAction() {
         }.filterValues { it.isNotEmpty() }
 
         if (resolvedByFile.isEmpty()) {
-            showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
+            showNotification(project, DeployXBundle.message("notification.noMappingFound"), NotificationType.WARNING)
             return
         }
 
@@ -44,8 +45,8 @@ class DeployAction : AnAction() {
 
         val serverSelectionDialog = ServerSelectionDialog(
             availableServers,
-            "选择部署目标",
-            "已选择 ${files.size} 个文件/目录，请选择部署目标服务器："
+            DeployXBundle.message("dialog.server.select.title.deploy"),
+            DeployXBundle.message("dialog.server.select.message.deploy", files.size)
         )
         if (!serverSelectionDialog.showAndGet()) return
         val targetServer = serverSelectionDialog.selectedServer ?: return
@@ -76,14 +77,16 @@ class DeployAction : AnAction() {
         val skipped = files.size - items.size
         val panel = FileSyncToolWindowPanel.getPanel(project)
         if (panel != null) {
-            if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
+            if (skipped > 0) panel.appendLog(DeployXBundle.message("toolwindow.log.skippedNoMapping", skipped, targetServer.id))
             panel.executeDeployBatch(items)
         } else {
-            showNotification(project, "工具窗口未打开，请先打开 DeployX 工具窗口", NotificationType.WARNING)
+            showNotification(project, DeployXBundle.message("notification.toolWindowNotOpen"), NotificationType.WARNING)
         }
     }
 
     override fun update(e: AnActionEvent) {
+        e.presentation.text = DeployXBundle.message("action.deploy.text")
+        e.presentation.description = DeployXBundle.message("action.deploy.description")
         e.presentation.isEnabledAndVisible = getSelectedFiles(e).isNotEmpty()
     }
 

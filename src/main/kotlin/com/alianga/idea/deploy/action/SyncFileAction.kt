@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.action
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.UploadItem
 import com.alianga.idea.deploy.service.MappingManager
 import com.alianga.idea.deploy.service.ServerManager
@@ -32,7 +33,7 @@ class SyncFileAction : AnAction() {
         }.filterValues { it.isNotEmpty() }
 
         if (resolvedByFile.isEmpty()) {
-            showNotification(project, "未找到匹配的映射，请先在设置中配置目录映射", NotificationType.WARNING)
+            showNotification(project, DeployXBundle.message("notification.noMappingFound"), NotificationType.WARNING)
             return
         }
 
@@ -44,8 +45,8 @@ class SyncFileAction : AnAction() {
         val commandAvailability = buildCommandAvailability(resolvedByFile.values.flatten())
         val serverSelectionDialog = ServerSelectionDialog(
             availableServers,
-            "选择目标服务器",
-            "已选择 ${files.size} 个文件/目录，请选择上传目标服务器：",
+            DeployXBundle.message("dialog.server.select.title"),
+            DeployXBundle.message("dialog.server.select.messageWithCount", files.size),
             showCommandOptions = true,
             commandAvailabilityByServerId = commandAvailability
         )
@@ -75,10 +76,10 @@ class SyncFileAction : AnAction() {
         val skipped = files.size - items.size
         val panel = FileSyncToolWindowPanel.getPanel(project)
         if (panel != null) {
-            if (skipped > 0) panel.appendLog("[WARN] 有 $skipped 个文件没有匹配到目标服务器 ${targetServer.id} 的映射，已跳过")
+            if (skipped > 0) panel.appendLog(DeployXBundle.message("toolwindow.log.skippedNoMapping", skipped, targetServer.id))
             panel.executeUploadBatch(items)
         } else {
-            showNotification(project, "工具窗口未打开，请先打开 DeployX 工具窗口", NotificationType.WARNING)
+            showNotification(project, DeployXBundle.message("notification.toolWindowNotOpen"), NotificationType.WARNING)
         }
     }
 
@@ -92,6 +93,8 @@ class SyncFileAction : AnAction() {
     }
 
     override fun update(e: AnActionEvent) {
+        e.presentation.text = DeployXBundle.message("action.syncFile.text")
+        e.presentation.description = DeployXBundle.message("action.syncFile.description")
         e.presentation.isEnabledAndVisible = getSelectedFiles(e).isNotEmpty()
     }
 

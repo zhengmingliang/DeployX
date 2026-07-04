@@ -1,8 +1,12 @@
 package com.alianga.idea.deploy.ui.settings
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.ssh.SshConnection
+import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.table.JBTable
@@ -30,20 +34,26 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
             .setAddAction { addServer() }
             .setEditAction { editServer() }
             .setRemoveAction { removeServer() }
-            .addExtraAction(object : com.intellij.openapi.actionSystem.AnAction("Copy", "Copy selected server", com.intellij.icons.AllIcons.Actions.Copy) {
-                override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
-                    copyServer()
-                }
+            .addExtraAction(object : AnAction(
+                DeployXBundle.lazyMessage("settings.server.action.copy"),
+                DeployXBundle.lazyMessage("settings.server.action.copy.desc"),
+                AllIcons.Actions.Copy
+            ) {
+                override fun actionPerformed(e: AnActionEvent) { copyServer() }
             })
-            .addExtraAction(object : com.intellij.openapi.actionSystem.AnAction("Test Connection", "Test SSH connection", com.intellij.icons.AllIcons.Actions.Execute) {
-                override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
-                    testConnection()
-                }
+            .addExtraAction(object : AnAction(
+                DeployXBundle.lazyMessage("settings.server.action.testConnection"),
+                DeployXBundle.lazyMessage("settings.server.action.testConnection.desc"),
+                AllIcons.Actions.Execute
+            ) {
+                override fun actionPerformed(e: AnActionEvent) { testConnection() }
             })
-            .addExtraAction(object : com.intellij.openapi.actionSystem.AnAction("Set Default", "Set as default server", com.intellij.icons.AllIcons.Actions.Checked) {
-                override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
-                    setDefaultServer()
-                }
+            .addExtraAction(object : AnAction(
+                DeployXBundle.lazyMessage("settings.server.action.setDefault"),
+                DeployXBundle.lazyMessage("settings.server.action.setDefault.desc"),
+                AllIcons.Actions.Checked
+            ) {
+                override fun actionPerformed(e: AnActionEvent) { setDefaultServer() }
             })
 
         val panel = decorator.createPanel()
@@ -92,10 +102,10 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
 
         val server = tableModel.getServerAt(selectedRow) ?: return
         val result = Messages.showYesNoDialog(
-            "确定要删除服务器 '${server.name}' 吗？",
-            "删除服务器",
-            "删除",
-            "取消",
+            DeployXBundle.message("settings.server.confirm.delete", server.name),
+            DeployXBundle.message("settings.server.confirm.delete.title"),
+            DeployXBundle.message("settings.server.confirm.delete.yes"),
+            DeployXBundle.message("common.cancel"),
             Messages.getQuestionIcon()
         )
         if (result == Messages.YES) {
@@ -112,17 +122,17 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
 
         // 在后台线程中测试连接
         com.intellij.openapi.progress.ProgressManager.getInstance().run(
-            object : com.intellij.openapi.progress.Task.Backgroundable(null, "Testing Connection...", true) {
+            object : com.intellij.openapi.progress.Task.Backgroundable(null, DeployXBundle.message("settings.server.connection.testing"), true) {
                 override fun run(indicator: com.intellij.openapi.progress.ProgressIndicator) {
-                    indicator.text = "Connecting to ${server.displayAddress}..."
+                    indicator.text = DeployXBundle.message("settings.server.connection.connecting", server.displayAddress)
                     val connection = SshConnection(server)
                     val result = connection.testConnection()
 
                     com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
                         if (result.success) {
-                            Messages.showInfoMessage(result.message, "Connection Test")
+                            Messages.showInfoMessage(result.message, DeployXBundle.message("settings.server.connection.success.title"))
                         } else {
-                            Messages.showErrorDialog(result.message, "Connection Test Failed")
+                            Messages.showErrorDialog(result.message, DeployXBundle.message("settings.server.connection.failed.title"))
                         }
                     }
                 }
@@ -153,7 +163,15 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
      * 服务器表格模型
      */
     private class ServerTableModel : AbstractTableModel() {
-        private val columns = arrayOf("ID", "Name", "Host", "Port", "User", "Auth", "Default")
+        private val columns = arrayOf(
+            DeployXBundle.message("settings.server.column.id"),
+            DeployXBundle.message("settings.server.column.name"),
+            DeployXBundle.message("settings.server.column.host"),
+            DeployXBundle.message("settings.server.column.port"),
+            DeployXBundle.message("settings.server.column.user"),
+            DeployXBundle.message("settings.server.column.auth"),
+            DeployXBundle.message("settings.server.column.default")
+        )
         private var servers = listOf<ServerConfig>()
 
         fun setData(servers: List<ServerConfig>) {

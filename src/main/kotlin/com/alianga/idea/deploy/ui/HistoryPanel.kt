@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.HistoryRecord
 import com.alianga.idea.deploy.service.HistoryManager
 import com.intellij.ui.components.JBList
@@ -25,11 +26,11 @@ class HistoryPanel : JPanel(BorderLayout()) {
         // 工具栏
         val toolbarPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
-            add(JButton("刷新").apply {
+            add(JButton(DeployXBundle.message("toolwindow.history.refresh")).apply {
                 addActionListener { refreshHistory() }
             })
             add(Box.createHorizontalStrut(8))
-            add(JButton("清空").apply {
+            add(JButton(DeployXBundle.message("toolwindow.history.clear")).apply {
                 addActionListener { clearHistory() }
             })
         }
@@ -49,8 +50,8 @@ class HistoryPanel : JPanel(BorderLayout()) {
     private fun clearHistory() {
         val result = JOptionPane.showConfirmDialog(
             this,
-            "确定要清空所有历史记录吗？",
-            "清空历史",
+            DeployXBundle.message("toolwindow.history.confirmClear"),
+            DeployXBundle.message("toolwindow.history.confirmClearTitle"),
             JOptionPane.YES_NO_OPTION
         )
         if (result == JOptionPane.YES_OPTION) {

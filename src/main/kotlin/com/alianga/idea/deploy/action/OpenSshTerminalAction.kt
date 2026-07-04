@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.action
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.service.TerminalService
 import com.alianga.idea.deploy.ui.dialog.ServerSelectionDialog
@@ -15,7 +16,7 @@ import com.intellij.openapi.project.Project
  * 打开 SSH 终端 Action
  * 支持从右键菜单和 Go to Action 打开到远程服务器的 SSH 终端
  */
-class OpenSshTerminalAction : AnAction("Open SSH Terminal", "Open SSH terminal to remote server", null) {
+class OpenSshTerminalAction : AnAction() {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
@@ -26,7 +27,7 @@ class OpenSshTerminalAction : AnAction("Open SSH Terminal", "Open SSH terminal t
 
         when {
             servers.isEmpty() -> {
-                showNotification(project, "请先在设置中配置服务器", NotificationType.WARNING)
+                showNotification(project, DeployXBundle.message("notification.configServerFirst"), NotificationType.WARNING)
                 ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX")
             }
             servers.size == 1 -> {
@@ -37,8 +38,8 @@ class OpenSshTerminalAction : AnAction("Open SSH Terminal", "Open SSH terminal t
                 // 多个服务器，显示选择对话框
                 val dialog = ServerSelectionDialog(
                     servers,
-                    "选择服务器",
-                    "请选择要连接的远程服务器：",
+                    DeployXBundle.message("dialog.server.select.title.connect"),
+                    DeployXBundle.message("dialog.server.select.message.connect"),
                     showCommandOptions = false
                 )
                 if (dialog.showAndGet()) {
@@ -55,19 +56,21 @@ class OpenSshTerminalAction : AnAction("Open SSH Terminal", "Open SSH terminal t
         if (!terminalService.openTerminal(project, serverConfig)) {
             showNotification(
                 project,
-                "无法打开 SSH 终端，请确保 Terminal 插件已启用",
+                DeployXBundle.message("notification.cannotOpenTerminal"),
                 NotificationType.ERROR
             )
         } else {
             showNotification(
                 project,
-                "正在连接到 ${serverConfig.displayAddress}...",
+                DeployXBundle.message("notification.connecting", serverConfig.displayAddress),
                 NotificationType.INFORMATION
             )
         }
     }
 
     override fun update(e: AnActionEvent) {
+        e.presentation.text = DeployXBundle.message("action.openSshTerminal.text")
+        e.presentation.description = DeployXBundle.message("action.openSshTerminal.description")
         val project = e.project
         e.presentation.isEnabledAndVisible = project != null
     }

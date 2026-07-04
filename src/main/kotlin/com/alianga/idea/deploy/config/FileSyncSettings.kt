@@ -30,7 +30,9 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
         var rsyncPath: String = "rsync",
         var rsyncOptions: String = "-avz --progress --stats",
         var sshpassAvailable: Boolean = true,
-        var transferMode: String = "AUTO"
+        var transferMode: String = "AUTO",
+        // language settings: "system" | "en" | "zh_CN"
+        var language: String = "system"
     )
 
     private var myState = State()
@@ -93,4 +95,8 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
     var transferMode: String
         get() = myState.transferMode
         set(value) { myState.transferMode = value }
+
+    var language: String
+        get() = myState.language
+        set(value) { myState.language = value }
 }

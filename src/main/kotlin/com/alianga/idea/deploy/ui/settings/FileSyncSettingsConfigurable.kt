@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.settings
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.intellij.openapi.options.Configurable
 import com.intellij.ui.components.JBTabbedPane
 import javax.swing.JComponent
@@ -15,15 +16,15 @@ class FileSyncSettingsConfigurable : Configurable {
     private val rsyncPanel = RsyncSettingsPanel()
     private val scriptPanel = ScriptSettingsPanel()
 
-    override fun getDisplayName(): String = "DeployX"
+    override fun getDisplayName(): String = DeployXBundle.message("settings.title")
 
     override fun createComponent(): JComponent {
         if (mainPanel == null) {
             mainPanel = JBTabbedPane().apply {
-                addTab("服务器管理", serverPanel)
-                addTab("目录映射", mappingPanel)
-                addTab("rsync 配置", rsyncPanel)
-                addTab("脚本库", scriptPanel)
+                addTab(DeployXBundle.message("settings.tab.serverManagement"), serverPanel)
+                addTab(DeployXBundle.message("settings.tab.mappingManagement"), mappingPanel)
+                addTab(DeployXBundle.message("settings.tab.rsyncConfig"), rsyncPanel)
+                addTab(DeployXBundle.message("settings.tab.scriptLibrary"), scriptPanel)
             }
         }
         return mainPanel!!

@@ -34,10 +34,12 @@
         </ul>
     ]]></description>
 
-    <idea-version since-build="223" until-build="261.*"/>
+    <idea-version since-build="223" until-build="262.*"/>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
+
+    <resource-bundle>messages.DeployXBundle</resource-bundle>
 
     <!-- ============================================================ -->
     <!--                        EXTENSIONS                             -->
@@ -71,6 +73,15 @@
             id="com.alianga.idea.deploy.settings"
             displayName="DeployX"/>
 
+        <!-- Language Settings Page (child of DeployX settings) -->
+        <!-- displayName 不在 XML 中用 %key 声明：平台对 %key 的静态解析基于 JVM
+             默认 Locale，无法响应运行时语言切换，且解析失败时会原样显示 "%key"。
+             改由 LanguageConfigurable.getDisplayName() 通过 DeployXBundle 动态返回。 -->
+        <applicationConfigurable
+            parentId="com.alianga.idea.deploy.settings"
+            instance="com.alianga.idea.deploy.ui.settings.LanguageConfigurable"
+            id="com.alianga.idea.deploy.languageSettings"/>
+
         <!-- Tool Window -->
         <toolWindow
             id="DeployX"
@@ -92,8 +103,6 @@
         <!-- Sync File Action -->
         <action id="FileSync.SyncFile"
                 class="com.alianga.idea.deploy.action.SyncFileAction"
-                text="Sync to Server"
-                description="Sync selected file(s) to remote server"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
@@ -103,8 +112,6 @@
         <!-- Quick Push Action -->
         <action id="FileSync.QuickPush"
                 class="com.alianga.idea.deploy.action.QuickPushAction"
-                text="Quick Push to Server"
-                description="Quickly push selected file(s) to the matched server"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
@@ -114,8 +121,6 @@
         <!-- Deploy Action -->
         <action id="FileSync.Deploy"
                 class="com.alianga.idea.deploy.action.DeployAction"
-                text="Deploy (Backup + Upload + Unzip)"
-                description="Full deployment workflow"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
@@ -123,16 +128,38 @@
         <!-- Preview Sync Action -->
         <action id="FileSync.PreviewSync"
                 class="com.alianga.idea.deploy.action.PreviewSyncAction"
-                text="Preview Sync"
-                description="Preview which files would be transferred"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
 
+        <!-- Open SSH Terminal Action -->
+        <action id="FileSync.OpenSshTerminal"
+                class="com.alianga.idea.deploy.action.OpenSshTerminalAction"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt T"/>
+        </action>
+
+        <!-- Open Script Library Action -->
+        <action id="FileSync.OpenScriptLibrary"
+                class="com.alianga.idea.deploy.action.OpenScriptLibraryAction"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+
+        <!-- Run Script From Selection Action -->
+        <action id="FileSync.RunScriptOnSelection"
+                class="com.alianga.idea.deploy.action.RunScriptOnSelectionAction"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+
         <!-- DeployX Submenu -->
         <group id="FileSync.MenuGroup"
-               text="DeployX"
-               description="File sync operations"
+               class="com.alianga.idea.deploy.action.DeployXMenuGroup"
                popup="true"
                icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
@@ -148,37 +175,6 @@
             <reference id="FileSync.OpenScriptLibrary"/>
             <reference id="FileSync.RunScriptOnSelection"/>
         </group>
-
-        <!-- Open SSH Terminal Action -->
-        <action id="FileSync.OpenSshTerminal"
-                class="com.alianga.idea.deploy.action.OpenSshTerminalAction"
-                text="Open SSH Terminal"
-                description="Open SSH terminal to remote server"
-                icon="/icons/toolWindow.svg">
-            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt T"/>
-        </action>
-
-        <!-- Open Script Library Action -->
-        <action id="FileSync.OpenScriptLibrary"
-                class="com.alianga.idea.deploy.action.OpenScriptLibraryAction"
-                text="Script Library"
-                description="Open the DeployX script library"
-                icon="/icons/toolWindow.svg">
-            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-
-        <!-- Run Script From Selection Action -->
-        <action id="FileSync.RunScriptOnSelection"
-                class="com.alianga.idea.deploy.action.RunScriptOnSelectionAction"
-                text="Run Script on Selection"
-                description="Pick a script from library and run on selection context"
-                icon="/icons/toolWindow.svg">
-            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
     </actions>
 
 </idea-plugin>
