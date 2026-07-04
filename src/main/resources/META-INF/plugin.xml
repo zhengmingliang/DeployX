@@ -103,7 +103,7 @@
     <!-- ============================================================ -->
     <actions>
         <!-- Sync File Action -->
-        <action id="FileSync.SyncFile"
+        <action id="DeployX.SyncFile"
                 class="com.alianga.idea.deploy.action.SyncFileAction"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
@@ -112,30 +112,33 @@
         </action>
 
         <!-- Quick Push Action -->
-        <action id="FileSync.QuickPush"
+        <action id="DeployX.QuickPush"
                 class="com.alianga.idea.deploy.action.QuickPushAction"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift P"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift 3"/>
         </action>
 
         <!-- Deploy Action -->
-        <action id="FileSync.Deploy"
+        <action id="DeployX.Deploy"
                 class="com.alianga.idea.deploy.action.DeployAction"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift 2"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift D"/>
         </action>
 
         <!-- Preview Sync Action -->
-        <action id="FileSync.PreviewSync"
+        <action id="DeployX.PreviewSync"
                 class="com.alianga.idea.deploy.action.PreviewSyncAction"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
 
         <!-- Open SSH Terminal Action -->
-        <action id="FileSync.OpenSshTerminal"
+        <action id="DeployX.OpenSshTerminal"
                 class="com.alianga.idea.deploy.action.OpenSshTerminalAction"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
@@ -144,7 +147,7 @@
         </action>
 
         <!-- Open Script Library Action -->
-        <action id="FileSync.OpenScriptLibrary"
+        <action id="DeployX.OpenScriptLibrary"
                 class="com.alianga.idea.deploy.action.OpenScriptLibraryAction"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
@@ -152,7 +155,7 @@
         </action>
 
         <!-- Run Script From Selection Action -->
-        <action id="FileSync.RunScriptOnSelection"
+        <action id="DeployX.RunScriptOnSelection"
                 class="com.alianga.idea.deploy.action.RunScriptOnSelectionAction"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
@@ -160,22 +163,22 @@
         </action>
 
         <!-- DeployX Submenu -->
-        <group id="FileSync.MenuGroup"
+        <group id="DeployX.MenuGroup"
                class="com.alianga.idea.deploy.action.DeployXMenuGroup"
                popup="true"
                icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
 
-            <reference id="FileSync.SyncFile"/>
-            <reference id="FileSync.QuickPush"/>
+            <reference id="DeployX.Deploy"/>
+            <reference id="DeployX.SyncFile"/>
+            <reference id="DeployX.QuickPush"/>
             <separator/>
-            <reference id="FileSync.Deploy"/>
-            <reference id="FileSync.PreviewSync"/>
+            <reference id="DeployX.PreviewSync"/>
             <separator/>
-            <reference id="FileSync.OpenSshTerminal"/>
+            <reference id="DeployX.OpenSshTerminal"/>
             <separator/>
-            <reference id="FileSync.OpenScriptLibrary"/>
-            <reference id="FileSync.RunScriptOnSelection"/>
+            <reference id="DeployX.OpenScriptLibrary"/>
+            <reference id="DeployX.RunScriptOnSelection"/>
         </group>
     </actions>
 
