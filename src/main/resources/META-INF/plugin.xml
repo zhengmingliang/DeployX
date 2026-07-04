@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.alianga.idea.deploy</id>
     <name>DeployX</name>
-    <vendor email="alianga@example.com" url="https://github.com/alianga">alianga</vendor>
+    <vendor email="zml@alianga.com" url="https://github.com/zhengmingliang/DeployX">alianga</vendor>
 
     <description><![CDATA[
         <p>DeployX - All-in-one remote deployment tool with SSH server management, file sync, auto backup, remote extraction, command execution and terminal integration.</p>
@@ -74,13 +74,15 @@
             displayName="DeployX"/>
 
         <!-- Language Settings Page (child of DeployX settings) -->
-        <!-- displayName 不在 XML 中用 %key 声明：平台对 %key 的静态解析基于 JVM
-             默认 Locale，无法响应运行时语言切换，且解析失败时会原样显示 "%key"。
-             改由 LanguageConfigurable.getDisplayName() 通过 DeployXBundle 动态返回。 -->
+        <!-- 使用 key 属性（而非 displayName="%key"）声明本地化显示名：
+             ConfigurableEP 对 % 前缀不做解析，displayName="%key" 会原样显示；
+             key 属性由平台从 <resource-bundle> 按 IDE Locale 解析，避免异常
+             且正确显示 "Language" / "语言"。 -->
         <applicationConfigurable
             parentId="com.alianga.idea.deploy.settings"
             instance="com.alianga.idea.deploy.ui.settings.LanguageConfigurable"
-            id="com.alianga.idea.deploy.languageSettings"/>
+            id="com.alianga.idea.deploy.languageSettings"
+            key="settings.language.configurableName"/>
 
         <!-- Tool Window -->
         <toolWindow
