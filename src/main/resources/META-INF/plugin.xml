@@ -89,7 +89,8 @@
             id="DeployX"
             icon="/icons/toolWindow.svg"
             factoryClass="com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowFactory"
-            anchor="right"/>
+            anchor="right"
+            keyboardShortcut="alt shift Z"/>
 
         <!-- Notification Group -->
         <notificationGroup id="DeployX"
