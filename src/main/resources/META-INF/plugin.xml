@@ -89,8 +89,7 @@
             id="DeployX"
             icon="/icons/toolWindow.svg"
             factoryClass="com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowFactory"
-            anchor="right"
-            keyboardShortcut="alt shift Z"/>
+            anchor="right"/>
 
         <!-- Notification Group -->
         <notificationGroup id="DeployX"
@@ -163,6 +162,13 @@
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+
+        <!-- Show DeployX Quick Menu Action (Alt+Shift+Z) -->
+        <action id="DeployX.ShowMenu"
+                class="com.alianga.idea.deploy.action.ShowDeployXMenuAction"
+                icon="/icons/toolWindow.svg">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift Z"/>
         </action>
 
         <!-- DeployX Submenu -->
