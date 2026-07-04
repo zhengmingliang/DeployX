@@ -102,6 +102,16 @@
     <!--                         ACTIONS                               -->
     <!-- ============================================================ -->
     <actions>
+        <!-- Deploy Action -->
+        <action id="DeployX.Deploy"
+                class="com.alianga.idea.deploy.action.DeployAction"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift 2"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift D"/>
+        </action>
+
         <!-- Sync File Action -->
         <action id="DeployX.SyncFile"
                 class="com.alianga.idea.deploy.action.SyncFileAction"
@@ -117,17 +127,8 @@
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift P"/>
             <keyboard-shortcut keymap="$default" first-keystroke="alt shift 3"/>
-        </action>
-
-        <!-- Deploy Action -->
-        <action id="DeployX.Deploy"
-                class="com.alianga.idea.deploy.action.DeployAction"
-                icon="/icons/toolWindow.svg">
-            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="alt shift 2"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="alt shift D"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift P"/>
         </action>
 
         <!-- Preview Sync Action -->
@@ -143,6 +144,7 @@
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift 4"/>
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt T"/>
         </action>
 
