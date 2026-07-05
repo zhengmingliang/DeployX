@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.service
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.*
 import com.alianga.idea.deploy.ssh.RsyncWrapper
 import com.alianga.idea.deploy.ssh.SshConnection
@@ -79,17 +80,17 @@ class DeployService {
             }
             val server = ServerManager.getInstance().getServer(key.serverId)
             if (server == null) {
-                val result = SyncResult(false, error = "服务器不存在: ${key.serverId}")
+                val result = SyncResult(false, error = DeployXBundle.message("deploy.error.serverNotFound", key.serverId))
                 results.add(result)
-                groupLog("[ERROR] ${result.error}")
+                groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
                 return@forEach
             }
 
-            groupLog("========== ${if (dryRun) "预览" else "上传"}分组 ==========")
-            groupLog("服务器: ${server.displayAddress}")
-            groupLog("本地根目录: ${key.sourceBaseDir}")
-            groupLog("远程根目录: ${key.remoteBaseDir}")
-            groupLog("文件数: ${groupItems.size}")
+            groupLog(DeployXBundle.message(if (dryRun) "deploy.log.previewGroupHeader" else "deploy.log.uploadGroupHeader"))
+            groupLog(DeployXBundle.message("deploy.log.server", server.displayAddress))
+            groupLog(DeployXBundle.message("deploy.log.localRootDir", key.sourceBaseDir))
+            groupLog(DeployXBundle.message("deploy.log.remoteRootDir", key.remoteBaseDir))
+            groupLog(DeployXBundle.message("deploy.log.fileCount", groupItems.size))
 
             val sshConnection = if (!dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
                 SshConnection(server)
@@ -97,26 +98,26 @@ class DeployService {
 
             try {
                 if (sshConnection != null) {
-                    groupLog("正在连接服务器 ${server.displayAddress} 以执行命令...")
+                    groupLog(DeployXBundle.message("deploy.log.connectingServerForCommand", server.displayAddress))
                     val connectResult = sshConnection.connectWithDetails()
                     if (!connectResult.success) {
                         val errorDetail = if (connectResult.exceptionClass != null) " (${connectResult.exceptionClass})" else ""
-                        val result = SyncResult(false, error = "无法连接服务器执行命令: ${server.displayAddress}$errorDetail")
+                        val result = SyncResult(false, error = DeployXBundle.message("deploy.error.cannotConnectForCommand", "${server.displayAddress}$errorDetail"))
                         results.add(result)
-                        groupLog("[ERROR] ${result.error}")
+                        groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
                         if (connectResult.errorMessage != null) {
-                            groupLog("[DETAIL] ${connectResult.errorMessage}")
+                            groupLog(DeployXBundle.message("deploy.log.detail", connectResult.errorMessage))
                         }
                         return@forEach
                     }
                 }
 
                 if (!dryRun && !key.preCommand.isNullOrBlank()) {
-                    groupLog("[PRE] 执行上传前命令: ${key.preCommand}")
+                    groupLog(DeployXBundle.message("deploy.log.preCommand", key.preCommand))
                     val conn = sshConnection ?: return@forEach
                     val preResult = conn.executeCommand(key.preCommand)
-                    if (preResult.output.isNotBlank()) groupLog("[PRE] 输出: ${preResult.output.trim()}")
-                    if (!preResult.success) groupLog("[WARN] 上传前命令失败 (${preResult.exitCode}): ${preResult.error}")
+                    if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
+                    if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandFailedBatch", preResult.exitCode, preResult.error))
                 }
 
                 val relativePaths = groupItems.map { item ->
@@ -150,11 +151,11 @@ class DeployService {
                 results.add(resultWithReport)
 
                 if (!dryRun && !key.postCommand.isNullOrBlank()) {
-                    groupLog("[POST] 执行上传后命令: ${key.postCommand}")
+                    groupLog(DeployXBundle.message("deploy.log.postCommand", key.postCommand))
                     val conn = sshConnection ?: return@forEach
                     val postResult = conn.executeCommand(key.postCommand)
-                    if (postResult.output.isNotBlank()) groupLog("[POST] 输出: ${postResult.output.trim()}")
-                    if (!postResult.success) groupLog("[WARN] 上传后命令失败 (${postResult.exitCode}): ${postResult.error}")
+                    if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
+                    if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandFailedBatch", postResult.exitCode, postResult.error))
                 }
             } finally {
                 sshConnection?.disconnect()
@@ -198,17 +199,17 @@ class DeployService {
             val taskId = UUID.randomUUID().toString().substring(0, 8)
             val server = ServerManager.getInstance().getServer(key.serverId)
             if (server == null) {
-                val result = DeployResult(false, taskId = taskId, error = "服务器不存在: ${key.serverId}")
+                val result = DeployResult(false, taskId = taskId, error = DeployXBundle.message("deploy.error.serverNotFound", key.serverId))
                 results.add(result)
-                groupLog("[ERROR] ${result.error}")
+                groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
                 return@forEach
             }
 
-            groupLog("========== 部署分组 $taskId ==========")
-            groupLog("服务器: ${server.displayAddress}")
-            groupLog("本地根目录: ${key.sourceBaseDir}")
-            groupLog("远程根目录: ${key.remoteBaseDir}")
-            groupLog("文件数: ${groupItems.size}")
+            groupLog(DeployXBundle.message("deploy.log.deployGroupHeader", taskId))
+            groupLog(DeployXBundle.message("deploy.log.server", server.displayAddress))
+            groupLog(DeployXBundle.message("deploy.log.localRootDir", key.sourceBaseDir))
+            groupLog(DeployXBundle.message("deploy.log.remoteRootDir", key.remoteBaseDir))
+            groupLog(DeployXBundle.message("deploy.log.fileCount", groupItems.size))
 
             // 计算需要 SSH 连接的步骤
             val needsSshConnection = !key.preCommand.isNullOrBlank() ||
@@ -223,7 +224,7 @@ class DeployService {
 
             // 先建立 SSH 连接（如果需要），确保连接可用后再上传
             val sshConnection = if (needsSshConnection) {
-                groupLog("正在连接服务器 ${server.displayAddress}...")
+                groupLog(DeployXBundle.message("deploy.log.connectingServer", server.displayAddress))
                 val conn = SshConnection(server)
                 val connectResult = conn.connectWithDetails()
                 if (!connectResult.success) {
@@ -231,29 +232,29 @@ class DeployService {
                     val result = DeployResult(
                         false,
                         taskId = taskId,
-                        error = "无法连接到服务器: ${server.displayAddress}$errorDetail",
+                        error = DeployXBundle.message("deploy.error.cannotConnectToServer", "${server.displayAddress}$errorDetail"),
                         duration = System.currentTimeMillis() - startTime
                     )
                     results.add(result)
-                    groupLog("[ERROR] ${result.error}")
+                    groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
                     if (connectResult.errorMessage != null) {
-                        groupLog("[DETAIL] ${connectResult.errorMessage}")
+                        groupLog(DeployXBundle.message("deploy.log.detail", connectResult.errorMessage))
                     }
                     return@forEach
                 }
-                groupLog("SSH 连接成功")
+                groupLog(DeployXBundle.message("deploy.log.sshConnected"))
                 conn
             } else null
 
             try {
                 // 步骤 1: 上传前命令（在备份和上传之前执行）
                 if (!key.preCommand.isNullOrBlank()) {
-                    groupLog("[PRE] 执行上传前命令: ${key.preCommand}")
+                    groupLog(DeployXBundle.message("deploy.log.preCommand", key.preCommand))
                     val conn = sshConnection ?: return@forEach
                     val preResult = conn.executeCommand(key.preCommand)
-                    if (preResult.output.isNotBlank()) groupLog("[PRE] 输出: ${preResult.output.trim()}")
-                    if (!preResult.success) groupLog("[WARN] 上传前命令执行失败 (${preResult.exitCode}): ${preResult.error}")
-                    else groupLog("[PRE] 命令执行成功")
+                    if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
+                    if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandExecuteFailed", preResult.exitCode, preResult.error))
+                    else groupLog(DeployXBundle.message("deploy.log.preCommandSuccess"))
                 }
 
                 // 步骤 2: 备份（在上传之前执行，确保备份的是旧版本）
@@ -261,31 +262,31 @@ class DeployService {
                 val backupDir = key.backupDir
                 if (sshConnection != null && !backupDir.isNullOrBlank()) {
                     val backupResult = if (!key.backupSource.isNullOrBlank()) {
-                        groupLog("[1/${if (needsSshConnection) 4 else 2}] 备份配置源: ${key.backupSource} → $backupDir")
+                        groupLog(DeployXBundle.message("deploy.log.backupConfigSource", if (needsSshConnection) 4 else 2, key.backupSource, backupDir))
                         doBackup(sshConnection, key.backupSource, backupDir, groupLog)
                     } else {
-                        groupLog("[1/${if (needsSshConnection) 4 else 2}] 备份本次选择的远程文件 → $backupDir")
+                        groupLog(DeployXBundle.message("deploy.log.backupSelectedFiles", if (needsSshConnection) 4 else 2, backupDir))
                         doBackupSelected(sshConnection, key.remoteBaseDir, groupItems.map { it.relativePath }, backupDir, groupLog)
                     }
                     if (!backupResult.success) {
                         val result = DeployResult(
                             false,
                             taskId = taskId,
-                            error = "备份失败: ${backupResult.error}",
+                            error = DeployXBundle.message("deploy.error.backupFailed", backupResult.error ?: ""),
                             duration = System.currentTimeMillis() - startTime
                         )
                         results.add(result)
-                        groupLog("[ERROR] ${result.error}")
+                        groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
                         return@forEach
                     }
                     backupPath = backupResult.path
                 } else {
-                    groupLog("[1/${if (needsSshConnection) 4 else 2}] 跳过备份（未配置备份目录）")
+                    groupLog(DeployXBundle.message("deploy.log.skipBackup", if (needsSshConnection) 4 else 2))
                 }
 
                 // 步骤 3: 上传文件（使用 rsync 命令）
                 val uploadStep = if (needsSshConnection) 2 else 1
-                groupLog("[$uploadStep/${if (needsSshConnection) 4 else 2}] 批量上传文件...")
+                groupLog(DeployXBundle.message("deploy.log.batchUpload", uploadStep, if (needsSshConnection) 4 else 2))
                 val syncResult = TransferService.getInstance().transferFilesFrom(
                     sourceBaseDir = key.sourceBaseDir,
                     remoteBaseDir = key.remoteBaseDir,
@@ -300,19 +301,19 @@ class DeployService {
                         false,
                         taskId = taskId,
                         backupPath = backupPath,
-                        error = "上传失败: ${syncResult.error}",
+                        error = DeployXBundle.message("deploy.error.uploadFailed", syncResult.error ?: ""),
                         duration = System.currentTimeMillis() - startTime
                     )
                     results.add(result)
-                    groupLog("[ERROR] ${result.error}")
+                    groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
                     return@forEach
                 }
-                groupLog("上传完成")
+                groupLog(DeployXBundle.message("deploy.log.uploadComplete"))
 
                 // 如果不需要 SSH 连接，直接完成
                 if (!needsSshConnection) {
                     val duration = System.currentTimeMillis() - startTime
-                    groupLog("========== 部署分组完成！耗时: ${duration}ms ==========")
+                    groupLog(DeployXBundle.message("deploy.log.deployGroupComplete", duration))
                     val reportGroup = buildReportGroup(
                         server = server,
                         sourceBaseDir = key.sourceBaseDir,
@@ -342,10 +343,10 @@ class DeployService {
                 if (!key.unzipDest.isNullOrBlank()) {
                     val zipItems = groupItems.filter { it.relativePath.endsWith(".zip", ignoreCase = true) }
                     when {
-                        zipItems.isEmpty() -> groupLog("[3/4] 已配置解压，但本组没有 zip 文件，跳过解压")
+                        zipItems.isEmpty() -> groupLog(DeployXBundle.message("deploy.log.skipUnzipNoZip"))
                         zipItems.size == 1 -> {
                             val remoteZip = joinRemotePath(key.remoteBaseDir, zipItems.first().relativePath)
-                            groupLog("[3/4] 解压远程文件: $remoteZip → ${key.unzipDest}")
+                            groupLog(DeployXBundle.message("deploy.log.unzipRemoteFile", remoteZip, key.unzipDest))
                             val conn = sshConnection ?: return@forEach
                             val unzipResult = doUnzip(conn, remoteZip, key.unzipDest)
                             if (!unzipResult.success) {
@@ -355,14 +356,14 @@ class DeployService {
                                     backupPath = backupPath,
                                     transferredFiles = syncResult.transferredFiles,
                                     totalSize = syncResult.totalSize,
-                                    error = "解压失败: ${unzipResult.error}",
+                                    error = DeployXBundle.message("deploy.error.unzipFailed", unzipResult.error ?: ""),
                                     duration = System.currentTimeMillis() - startTime
                                 )
                                 results.add(result)
-                                groupLog("[ERROR] ${result.error}")
+                                groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
                                 return@forEach
                             }
-                            groupLog("解压成功: ${key.unzipDest}")
+                            groupLog(DeployXBundle.message("deploy.log.unzipSuccess", key.unzipDest))
                         }
                         else -> {
                             val result = DeployResult(
@@ -371,30 +372,30 @@ class DeployService {
                                 backupPath = backupPath,
                                 transferredFiles = syncResult.transferredFiles,
                                 totalSize = syncResult.totalSize,
-                                error = "本组包含多个 zip 文件，无法安全执行单次解压，请单独部署或关闭解压",
+                                error = DeployXBundle.message("deploy.error.multipleZipFiles"),
                                 duration = System.currentTimeMillis() - startTime
                             )
                             results.add(result)
-                            groupLog("[ERROR] ${result.error}")
+                            groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
                             return@forEach
                         }
                     }
                 } else {
-                    groupLog("[3/4] 跳过解压（未配置解压目标）")
+                    groupLog(DeployXBundle.message("deploy.log.skipUnzipNoDest"))
                 }
 
                 // 步骤 5: 上传后命令
                 if (!key.postCommand.isNullOrBlank()) {
-                    groupLog("[POST] 执行上传后命令: ${key.postCommand}")
+                    groupLog(DeployXBundle.message("deploy.log.postCommand", key.postCommand))
                     val conn = sshConnection ?: return@forEach
                     val postResult = conn.executeCommand(key.postCommand)
-                    if (postResult.output.isNotBlank()) groupLog("[POST] 输出: ${postResult.output.trim()}")
-                    if (!postResult.success) groupLog("[WARN] 上传后命令执行失败 (${postResult.exitCode}): ${postResult.error}")
-                    else groupLog("[POST] 命令执行成功")
+                    if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
+                    if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandExecuteFailed", postResult.exitCode, postResult.error))
+                    else groupLog(DeployXBundle.message("deploy.log.postCommandSuccess"))
                 }
 
                 val duration = System.currentTimeMillis() - startTime
-                groupLog("========== 部署分组完成！耗时: ${duration}ms ==========")
+                groupLog(DeployXBundle.message("deploy.log.deployGroupComplete", duration))
                 val reportGroup = buildReportGroup(
                     server = server,
                     sourceBaseDir = key.sourceBaseDir,
@@ -421,9 +422,9 @@ class DeployService {
                 saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS)
             } catch (e: Exception) {
                 LOG.error("Batch deploy group failed", e)
-                val result = DeployResult(false, taskId = taskId, error = "部署异常: ${e.message}", duration = System.currentTimeMillis() - startTime)
+                val result = DeployResult(false, taskId = taskId, error = DeployXBundle.message("deploy.error.deployException", e.message ?: ""), duration = System.currentTimeMillis() - startTime)
                 results.add(result)
-                groupLog("[ERROR] ${result.error}")
+                groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
             } finally {
                 sshConnection?.disconnect()
             }
@@ -444,16 +445,16 @@ class DeployService {
         val taskId = UUID.randomUUID().toString().substring(0, 8)
 
         LOG.info("Starting deploy task $taskId: ${request.localPath} -> ${request.serverId}:${request.remotePath}")
-        logCallback?.invoke("========== 部署任务 $taskId ==========")
-        logCallback?.invoke("本地路径: ${request.localPath}")
-        logCallback?.invoke("远程路径: ${request.serverId}:${request.remotePath}")
+        logCallback?.invoke(DeployXBundle.message("deploy.log.deployTaskHeader", taskId))
+        logCallback?.invoke(DeployXBundle.message("deploy.log.localPath", request.localPath))
+        logCallback?.invoke(DeployXBundle.message("deploy.log.remotePath", request.serverId, request.remotePath))
 
         val server = ServerManager.getInstance().getServer(request.serverId)
             ?: return DeployResult(
                 success = false,
                 taskId = taskId,
-                error = "服务器不存在: ${request.serverId}",
-                logs = listOf("错误: 服务器不存在: ${request.serverId}")
+                error = DeployXBundle.message("deploy.error.serverNotFound", request.serverId),
+                logs = listOf(DeployXBundle.message("deploy.log.serverNotFoundLog", request.serverId))
             )
 
         // 判断是否需要 SSH 连接
@@ -464,42 +465,42 @@ class DeployService {
 
         // 先建立 SSH 连接（如果需要），确保连接可用后再上传
         val sshConnection = if (needsSshConnection) {
-            logCallback?.invoke("正在连接服务器 ${server.displayAddress}...")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.connectingServer", server.displayAddress))
             val conn = SshConnection(server)
             val connectResult = conn.connectWithDetails()
             if (!connectResult.success) {
                 val errorDetail = if (connectResult.exceptionClass != null) " (${connectResult.exceptionClass})" else ""
-                logCallback?.invoke("[ERROR] 无法连接到服务器: ${server.displayAddress}$errorDetail")
+                logCallback?.invoke(DeployXBundle.message("deploy.log.cannotConnectToServerError", "${server.displayAddress}$errorDetail"))
                 if (connectResult.errorMessage != null) {
-                    logCallback?.invoke("[DETAIL] ${connectResult.errorMessage}")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.detail", connectResult.errorMessage))
                 }
                 return DeployResult(
                     success = false,
                     taskId = taskId,
-                    error = "无法连接到服务器: ${server.displayAddress}$errorDetail",
+                    error = DeployXBundle.message("deploy.error.cannotConnectToServer", "${server.displayAddress}$errorDetail"),
                     logs = listOfNotNull(
-                        "错误: 无法连接到服务器",
-                        connectResult.errorMessage?.let { "详情: $it" }
+                        DeployXBundle.message("deploy.log.cannotConnectServerLog"),
+                        connectResult.errorMessage?.let { DeployXBundle.message("deploy.log.detailLog", it) }
                     )
                 )
             }
-            logCallback?.invoke("SSH 连接成功")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.sshConnected"))
             conn
         } else null
 
         try {
             // 步骤 1: 执行上传前命令（在备份和上传之前执行）
             if (!request.preCommand.isNullOrBlank()) {
-                logCallback?.invoke("[PRE] 执行上传前命令: ${request.preCommand}")
+                logCallback?.invoke(DeployXBundle.message("deploy.log.preCommand", request.preCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
                 val preResult = conn.executeCommand(request.preCommand)
                 if (preResult.output.isNotBlank()) {
-                    logCallback?.invoke("[PRE] 输出: ${preResult.output.trim()}")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                 }
                 if (!preResult.success) {
-                    logCallback?.invoke("[WARN] 上传前命令执行失败 (exit code: ${preResult.exitCode}): ${preResult.error}")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.preCommandFailedExit", preResult.exitCode, preResult.error))
                 } else {
-                    logCallback?.invoke("[PRE] 命令执行成功")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.preCommandSuccess"))
                 }
             }
 
@@ -513,29 +514,29 @@ class DeployService {
                     "${request.remotePath}/${localFile.name}"
                 }
                 val backupDir = requireNotNull(request.backupDir) { "backupDir should not be null at this point" }
-                logCallback?.invoke("[1/${if (needsSshConnection) 4 else 2}] 备份: $backupSource → $backupDir")
+                logCallback?.invoke(DeployXBundle.message("deploy.log.backupSingle", if (needsSshConnection) 4 else 2, backupSource, backupDir))
                 val backupResult = doBackup(sshConnection, backupSource, backupDir, logCallback)
                 if (backupResult.success) {
-                    logCallback?.invoke("备份成功: ${backupResult.path}")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.backupSuccess", backupResult.path ?: ""))
                     backupPath = backupResult.path
                 } else {
-                    logCallback?.invoke("[ERROR] 备份失败: ${backupResult.error}")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.backupFailedErrorLog", backupResult.error ?: ""))
                     return DeployResult(
                         success = false,
                         taskId = taskId,
                         backupPath = backupResult.path,
-                        error = "备份失败: ${backupResult.error}",
-                        logs = listOf("备份失败: ${backupResult.error}"),
+                        error = DeployXBundle.message("deploy.error.backupFailed", backupResult.error ?: ""),
+                        logs = listOf(DeployXBundle.message("deploy.error.backupFailed", backupResult.error ?: "")),
                         duration = System.currentTimeMillis() - startTime
                     )
                 }
             } else {
-                logCallback?.invoke("[1/${if (needsSshConnection) 4 else 2}] 跳过备份（未配置备份目录）")
+                logCallback?.invoke(DeployXBundle.message("deploy.log.skipBackup", if (needsSshConnection) 4 else 2))
             }
 
             // 步骤 3: 上传文件（使用 rsync 命令）
             val uploadStep = if (needsSshConnection) 2 else 1
-            logCallback?.invoke("[$uploadStep/${if (needsSshConnection) 4 else 2}] 上传文件...")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.uploadFiles", uploadStep, if (needsSshConnection) 4 else 2))
             val syncOptions = SyncOptions(excludePatterns = request.excludePatterns)
             val syncResult = TransferService.getInstance().transfer(
                 request.localPath,
@@ -547,23 +548,23 @@ class DeployService {
             )
 
             if (!syncResult.success) {
-                logCallback?.invoke("[ERROR] 上传失败: ${syncResult.error}")
+                logCallback?.invoke(DeployXBundle.message("deploy.log.uploadFailedErrorLog", syncResult.error ?: ""))
                 saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.FAILED)
                 return DeployResult(
                     success = false,
                     taskId = taskId,
                     backupPath = backupPath,
-                    error = "上传失败: ${syncResult.error}",
-                    logs = listOf("上传失败: ${syncResult.error}"),
+                    error = DeployXBundle.message("deploy.error.uploadFailed", syncResult.error ?: ""),
+                    logs = listOf(DeployXBundle.message("deploy.error.uploadFailed", syncResult.error ?: "")),
                     duration = System.currentTimeMillis() - startTime
                 )
             }
-            logCallback?.invoke("上传完成")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.uploadComplete"))
 
             // 如果不需要 SSH 连接，直接完成
             if (!needsSshConnection) {
                 val duration = System.currentTimeMillis() - startTime
-                logCallback?.invoke("========== 部署完成！耗时: ${duration}ms ==========")
+                logCallback?.invoke(DeployXBundle.message("deploy.log.deployComplete", duration))
                 saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS)
                 val reportGroup = buildReportGroup(
                     server = server,
@@ -589,16 +590,16 @@ class DeployService {
 
             // 步骤 4: 解压（可选）
             if (!request.unzipDest.isNullOrBlank()) {
-                logCallback?.invoke("[3/4] 解压远程文件...")
+                logCallback?.invoke(DeployXBundle.message("deploy.log.unzipRemoteFileStart"))
                 val filename = File(request.localPath).name
                 val remoteFile = "${request.remotePath}/$filename"
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
                 val unzipResult = doUnzip(conn, remoteFile, request.unzipDest)
 
                 if (unzipResult.success) {
-                    logCallback?.invoke("解压成功: ${request.unzipDest}")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.unzipSuccess", request.unzipDest))
                 } else {
-                    logCallback?.invoke("[ERROR] 解压失败: ${unzipResult.error}")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.unzipFailedErrorLog", unzipResult.error ?: ""))
                     saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.FAILED)
                     return DeployResult(
                         success = false,
@@ -606,31 +607,31 @@ class DeployService {
                         backupPath = backupPath,
                         transferredFiles = syncResult.transferredFiles,
                         totalSize = syncResult.totalSize,
-                        error = "解压失败: ${unzipResult.error}",
+                        error = DeployXBundle.message("deploy.error.unzipFailed", unzipResult.error ?: ""),
                         duration = System.currentTimeMillis() - startTime
                     )
                 }
             } else {
-                logCallback?.invoke("[3/4] 跳过解压（未配置解压目标）")
+                logCallback?.invoke(DeployXBundle.message("deploy.log.skipUnzipNoDest"))
             }
 
             // 步骤 5: 执行上传后命令（可选）
             if (!request.postCommand.isNullOrBlank()) {
-                logCallback?.invoke("[POST] 执行上传后命令: ${request.postCommand}")
+                logCallback?.invoke(DeployXBundle.message("deploy.log.postCommand", request.postCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
                 val postResult = conn.executeCommand(request.postCommand)
                 if (postResult.output.isNotBlank()) {
-                    logCallback?.invoke("[POST] 输出: ${postResult.output.trim()}")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                 }
                 if (!postResult.success) {
-                    logCallback?.invoke("[WARN] 上传后命令执行失败 (exit code: ${postResult.exitCode}): ${postResult.error}")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.postCommandFailedExit", postResult.exitCode, postResult.error))
                 } else {
-                    logCallback?.invoke("[POST] 命令执行成功")
+                    logCallback?.invoke(DeployXBundle.message("deploy.log.postCommandSuccess"))
                 }
             }
 
             val duration = System.currentTimeMillis() - startTime
-            logCallback?.invoke("========== 部署完成！耗时: ${duration}ms ==========")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.deployComplete", duration))
             saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS)
 
             val reportGroup = buildReportGroup(
@@ -658,11 +659,11 @@ class DeployService {
             )
         } catch (e: Exception) {
             LOG.error("Deploy failed", e)
-            logCallback?.invoke("[ERROR] 部署异常: ${e.message}")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.deployExceptionErrorLog", e.message ?: ""))
             return DeployResult(
                 success = false,
                 taskId = taskId,
-                error = "部署异常: ${e.message}",
+                error = DeployXBundle.message("deploy.error.deployException", e.message ?: ""),
                 duration = System.currentTimeMillis() - startTime
             )
         } finally {
@@ -685,10 +686,10 @@ class DeployService {
 
         val resolvedMappings = MappingManager.getInstance().resolveMappingsByLocalPath(localPath)
         if (resolvedMappings.isEmpty()) {
-            logCallback?.invoke("[ERROR] 未找到匹配的映射，请先配置目录映射")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.noMappingErrorLog"))
             return DeployResult(
                 success = false,
-                error = "未找到匹配的映射，请先配置目录映射"
+                error = DeployXBundle.message("deploy.error.noMapping")
             )
         }
 
@@ -700,7 +701,7 @@ class DeployService {
         val mapping = resolvedMapping.mapping
 
         val targetServerId = serverId ?: mapping.serverId
-        logCallback?.invoke("匹配映射: ${mapping.name} → ${targetServerId}:${resolvedMapping.resolvedRemoteDir}")
+        logCallback?.invoke(DeployXBundle.message("deploy.log.matchedMapping", mapping.name, targetServerId, resolvedMapping.resolvedRemoteDir))
 
         val request = DeployRequest(
             localPath = localPath,
@@ -725,8 +726,8 @@ class DeployService {
         logCallback: ((String) -> Unit)? = null,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
     ): DeployResult {
-        logCallback?.invoke("========== 重新部署 ==========")
-        logCallback?.invoke("原始操作: ${record.summary}")
+        logCallback?.invoke(DeployXBundle.message("deploy.log.redeployHeader"))
+        logCallback?.invoke(DeployXBundle.message("deploy.log.originalOperation", record.summary))
         return deploy(record.toDeployRequest(), logCallback, progressCallback)
     }
 
@@ -890,18 +891,18 @@ class DeployService {
         }
 
         if (existingPaths.isEmpty()) {
-            logCallback?.invoke("远程文件均不存在，首次部署，跳过备份")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.skipBackupFirstDeploy"))
             return BackupResult(true, null)
         }
 
-        logCallback?.invoke("正在压缩备份 ${existingPaths.size} 个远程文件/目录 → $backupFile")
+        logCallback?.invoke(DeployXBundle.message("deploy.log.compressingBackup", existingPaths.size, backupFile))
         existingPaths.forEach { logCallback?.invoke("  $it") }
         val quotedPaths = existingPaths.joinToString(" ") { shellQuote(it) }
         val result = sshConnection.executeCommand(
             "tar -czf ${shellQuote(backupFile)} -C ${shellQuote(remoteBaseDir)} $quotedPaths"
         )
         return if (result.success) {
-            logCallback?.invoke("备份完成: $backupFile")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.backupCompleteFile", backupFile))
             BackupResult(true, backupFile)
         } else {
             BackupResult(false, error = result.error)
@@ -925,7 +926,7 @@ class DeployService {
         // 检查源文件/目录是否存在
         val checkResult = sshConnection.executeCommand("test -e ${shellQuote(backupSource)}")
         if (!checkResult.success) {
-            logCallback?.invoke("远程文件不存在，首次部署，跳过备份: $backupSource")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.skipBackupSourceNotFound", backupSource))
             return BackupResult(true, null)
         }
 
@@ -946,24 +947,24 @@ class DeployService {
             val baseName = sourceName.substringBeforeLast(".")
             val ext = sourceName.substringAfterLast(".")
             val backupFile = "$backupDir/${baseName}_bak_${timestamp}.$ext"
-            logCallback?.invoke("压缩包备份: $backupSource → $backupFile")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.archiveBackup", backupSource, backupFile))
             sshConnection.executeCommand("cp ${shellQuote(backupSource)} ${shellQuote(backupFile)}")
         } else {
             // 目录或非压缩文件：压缩为 tar.gz
             val tarName = "${sourceName}_${timestamp}.tar.gz"
             val tarPath = "$backupDir/$tarName"
             val sourceParent = File(backupSource).parent
-            logCallback?.invoke("压缩备份: $backupSource → $tarPath")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.compressBackup", backupSource, tarPath))
             sshConnection.executeCommand(
                 "tar -czf ${shellQuote(tarPath)} -C ${shellQuote(sourceParent ?: ".")} ${shellQuote(sourceName)}"
             )
         }
 
         return if (backupResult.success) {
-            logCallback?.invoke("备份完成")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.backupComplete"))
             BackupResult(true, backupDir)
         } else {
-            logCallback?.invoke("[WARN] 备份失败: ${backupResult.error}")
+            logCallback?.invoke(DeployXBundle.message("deploy.log.backupFailedWarn", backupResult.error ?: ""))
             BackupResult(false, error = backupResult.error)
         }
     }
@@ -978,7 +979,7 @@ class DeployService {
     ): UnzipResult {
         val checkResult = sshConnection.executeCommand("test -f ${shellQuote(zipPath)}")
         if (!checkResult.success) {
-            return UnzipResult(false, error = "文件不存在: $zipPath")
+            return UnzipResult(false, error = DeployXBundle.message("deploy.error.fileNotFound", zipPath))
         }
 
         sshConnection.executeCommand("mkdir -p ${shellQuote(destDir)}")

@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ssh
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.model.ServerConfig
 import com.intellij.openapi.diagnostic.Logger
@@ -151,16 +152,16 @@ class SshConnection(private val serverConfig: ServerConfig) {
     fun testConnection(): ConnectionTestResult {
         return try {
             if (!connect()) {
-                return ConnectionTestResult(false, "无法连接到 ${serverConfig.displayAddress}")
+                return ConnectionTestResult(false, DeployXBundle.message("ssh.connection.connectFailed", serverConfig.displayAddress))
             }
             val result = executeCommand("echo 'connected'")
             if (result.success) {
-                ConnectionTestResult(true, "连接成功: ${serverConfig.displayAddress}")
+                ConnectionTestResult(true, DeployXBundle.message("ssh.connection.connectSuccess", serverConfig.displayAddress))
             } else {
-                ConnectionTestResult(false, "连接失败: ${result.error}")
+                ConnectionTestResult(false, DeployXBundle.message("ssh.connection.connectFailedWith", result.error))
             }
         } catch (e: Exception) {
-            ConnectionTestResult(false, "连接异常: ${e.message}")
+            ConnectionTestResult(false, DeployXBundle.message("ssh.connection.connectException", e.message ?: ""))
         } finally {
             disconnect()
         }

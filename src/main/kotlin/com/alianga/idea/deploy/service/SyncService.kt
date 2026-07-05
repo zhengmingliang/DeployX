@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.service
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.SyncOptions
 import com.alianga.idea.deploy.model.SyncResult
 import com.alianga.idea.deploy.ssh.RsyncWrapper
@@ -38,7 +39,7 @@ class SyncService {
         LOG.info("Starting sync: $localPath -> $serverId:$remotePath")
 
         val server = ServerManager.getInstance().getServer(serverId)
-            ?: return SyncResult(false, error = "服务器不存在: $serverId")
+            ?: return SyncResult(false, error = DeployXBundle.message("sync.error.serverNotFound", serverId))
 
         return TransferService.getInstance().transfer(localPath, remotePath, server, options, logCallback, progressCallback)
     }
@@ -56,10 +57,10 @@ class SyncService {
         LOG.info("Preview sync: $localPath -> $serverId:$remotePath")
 
         val server = ServerManager.getInstance().getServer(serverId)
-            ?: return SyncResult(false, error = "服务器不存在: $serverId")
+            ?: return SyncResult(false, error = DeployXBundle.message("sync.error.serverNotFound", serverId))
 
         if (!TransferService.getInstance().canPreviewWithRsync()) {
-            return SyncResult(false, error = "预览需要 rsync。当前本机未安装/未配置 rsync，SFTP fallback 只能实际上传，无法提供 rsync dry-run 预览。")
+            return SyncResult(false, error = DeployXBundle.message("sync.error.previewRequiresRsync"))
         }
         val dryRunOptions = options.copy(dryRun = true)
         return rsyncWrapper.sync(localPath, remotePath, server, dryRunOptions, logCallback)

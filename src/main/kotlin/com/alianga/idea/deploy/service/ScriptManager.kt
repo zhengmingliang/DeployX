@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.service
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.config.ConfigManager
 import com.alianga.idea.deploy.model.HistoryRecord
 import com.alianga.idea.deploy.model.MappingConfig
@@ -54,13 +55,13 @@ class ScriptManager {
                     script.description.lowercase().contains(kw) ||
                     script.command.lowercase().contains(kw) ||
                     script.tags.any { it.lowercase().contains(kw) }
-            val matchGroup = group.isBlank() || group == "全部" || script.group == group
-            val matchTag = tag.isBlank() || tag == "全部" || script.tags.contains(tag)
+            val matchGroup = group.isBlank() || group == DeployXBundle.message("script.allGroups") || script.group == group
+            val matchTag = tag.isBlank() || tag == DeployXBundle.message("script.allGroups") || script.tags.contains(tag)
             matchKeyword && matchGroup && matchTag
         }
     }
 
-    fun getGroups(): List<String> = scripts.map { it.group.ifBlank { "默认" } }.distinct().sorted()
+    fun getGroups(): List<String> = scripts.map { it.group.ifBlank { DeployXBundle.message("script.defaultGroup") } }.distinct().sorted()
 
     fun getAllTags(): List<String> = scripts.flatMap { it.tags }.distinct().sorted()
 
@@ -131,7 +132,7 @@ class ScriptManager {
     }
 
     fun renderCommand(script: ScriptConfig, rawParams: Map<String, String>, context: ScriptRunContext = ScriptRunContext.EMPTY): String {
-        if (script.command.isBlank()) throw IllegalArgumentException("脚本命令不能为空")
+        if (script.command.isBlank()) throw IllegalArgumentException(DeployXBundle.message("script.error.commandEmpty"))
         val normalizedParams = normalizeParams(script, rawParams)
         val variables = collectContextVars(context).toMutableMap()
         normalizedParams.forEach { (key, value) -> variables[key] = shellQuote(value) }
@@ -140,7 +141,7 @@ class ScriptManager {
         val escaped = script.command.replace("$${'$'}{", placeholder)
         val rendered = Regex("\\$\\{([^}]+)}").replace(escaped) { match ->
             val key = match.groupValues[1].trim()
-            variables[key] ?: throw IllegalArgumentException("未知变量: $key")
+            variables[key] ?: throw IllegalArgumentException(DeployXBundle.message("script.error.unknownVariable", key))
         }.replace(placeholder, "${'$'}{")
 
         val wrapped = wrapWorkingDir(rendered, script, context)
@@ -210,7 +211,7 @@ class ScriptManager {
         val start = System.currentTimeMillis()
         val normalizedParams = normalizeParams(script, rawParams)
         val server = resolveServer(script, context, serverId)
-            ?: throw IllegalArgumentException("请选择脚本执行服务器")
+            ?: throw IllegalArgumentException(DeployXBundle.message("script.error.noServerSelected"))
         val effectiveContext = if (context.server == null) context.copy(server = server) else context
         val command = renderCommand(script, normalizedParams, effectiveContext)
 
@@ -224,7 +225,7 @@ class ScriptManager {
                     resolvedCommand = command,
                     success = false,
                     exitCode = -1,
-                    error = "用户取消执行",
+                    error = DeployXBundle.message("script.userCancelled"),
                     duration = System.currentTimeMillis() - start,
                     params = normalizedParams
                 )
@@ -242,7 +243,7 @@ class ScriptManager {
                     resolvedCommand = command,
                     success = false,
                     exitCode = -1,
-                    error = "用户取消执行",
+                    error = DeployXBundle.message("script.userCancelled"),
                     duration = System.currentTimeMillis() - start,
                     params = normalizedParams
                 )
@@ -252,15 +253,15 @@ class ScriptManager {
             }
         }
 
-        logCallback?.invoke("[SCRIPT] 执行脚本: ${script.name}")
-        logCallback?.invoke("[SCRIPT] 服务器: ${server.displayAddress}")
-        logCallback?.invoke("[SCRIPT] 命令: ${maskSensitive(command, server)}")
+        logCallback?.invoke(DeployXBundle.message("script.log.executeScript", script.name))
+        logCallback?.invoke(DeployXBundle.message("script.log.server", server.displayAddress))
+        logCallback?.invoke(DeployXBundle.message("script.log.command", maskSensitive(command, server)))
 
         val connection = SshConnection(server)
         return try {
             val connectResult = connection.connectWithDetails()
             if (!connectResult.success) {
-                val message = connectResult.errorMessage ?: "无法连接服务器"
+                val message = connectResult.errorMessage ?: DeployXBundle.message("script.error.cannotConnectServer")
                 logCallback?.invoke("[ERROR] $message")
                 val result = ScriptRunResult(script.id, script.name, server.id, command, false, -1, error = message, duration = System.currentTimeMillis() - start, params = normalizedParams)
                 updateRunStats(script.id, false)
@@ -270,9 +271,9 @@ class ScriptManager {
                 val commandResult = connection.executeCommand(command)
                 val output = truncateOutput(commandResult.output)
                 val error = truncateOutput(commandResult.error)
-                if (output.isNotBlank()) logCallback?.invoke("[SCRIPT] 输出:\n${maskSensitive(output, server)}")
-                if (error.isNotBlank()) logCallback?.invoke("[SCRIPT] 错误:\n${maskSensitive(error, server)}")
-                logCallback?.invoke(if (commandResult.success) "[SCRIPT] 执行成功" else "[SCRIPT] 执行失败 (${commandResult.exitCode})")
+                if (output.isNotBlank()) logCallback?.invoke(DeployXBundle.message("script.log.output", maskSensitive(output, server)))
+                if (error.isNotBlank()) logCallback?.invoke(DeployXBundle.message("script.log.errorOutput", maskSensitive(error, server)))
+                logCallback?.invoke(if (commandResult.success) DeployXBundle.message("script.log.executeSuccess") else DeployXBundle.message("script.log.executeFailed", commandResult.exitCode))
                 val result = ScriptRunResult(
                     scriptId = script.id,
                     scriptName = script.name,
@@ -298,20 +299,20 @@ class ScriptManager {
         val result = linkedMapOf<String, String>()
         script.params.forEach { param ->
             val raw = rawParams[param.name]?.trim().orEmpty().ifBlank { param.defaultValue.trim() }
-            if (param.required && raw.isBlank()) throw IllegalArgumentException("参数 ${param.displayLabel} 不能为空")
+            if (param.required && raw.isBlank()) throw IllegalArgumentException(DeployXBundle.message("script.error.paramRequired", param.displayLabel))
             if (raw.isBlank()) {
                 result[param.name] = ""
                 return@forEach
             }
             result[param.name] = when (param.type) {
                 ScriptParam.ParamType.NUMBER -> {
-                    raw.toDoubleOrNull() ?: throw IllegalArgumentException("参数 ${param.displayLabel} 必须是数字")
+                    raw.toDoubleOrNull() ?: throw IllegalArgumentException(DeployXBundle.message("script.error.paramMustBeNumber", param.displayLabel))
                     raw
                 }
                 ScriptParam.ParamType.BOOLEAN -> normalizeBoolean(raw, param.displayLabel)
                 ScriptParam.ParamType.ENUM -> {
                     if (param.options.isNotEmpty() && raw !in param.options) {
-                        throw IllegalArgumentException("参数 ${param.displayLabel} 必须是以下值之一: ${param.options.joinToString(", ")}")
+                        throw IllegalArgumentException(DeployXBundle.message("script.error.paramEnumInvalid", param.displayLabel, param.options.joinToString(", ")))
                     }
                     raw
                 }
@@ -326,7 +327,7 @@ class ScriptManager {
         return when (value.lowercase()) {
             "true", "yes", "y", "on", "1" -> "true"
             "false", "no", "n", "off", "0" -> "false"
-            else -> throw IllegalArgumentException("参数 $label 必须是布尔值")
+            else -> throw IllegalArgumentException(DeployXBundle.message("script.error.paramMustBeBoolean", label))
         }
     }
 
@@ -374,18 +375,18 @@ class ScriptManager {
     private fun saveHistory(script: ScriptConfig, server: ServerConfig, result: ScriptRunResult) {
         val safeCommand = maskSensitive(result.resolvedCommand, server)
         val text = buildString {
-            appendLine("脚本: ${script.name}")
-            appendLine("服务器: ${server.displayAddress}")
-            appendLine("命令:")
+            appendLine(DeployXBundle.message("script.history.script", script.name))
+            appendLine(DeployXBundle.message("script.history.server", server.displayAddress))
+            appendLine(DeployXBundle.message("script.history.command"))
             appendLine(safeCommand)
             if (result.output.isNotBlank()) {
                 appendLine()
-                appendLine("输出:")
+                appendLine(DeployXBundle.message("script.history.output"))
                 appendLine(maskSensitive(result.output, server))
             }
             if (result.error.isNotBlank()) {
                 appendLine()
-                appendLine("错误:")
+                appendLine(DeployXBundle.message("script.history.error"))
                 appendLine(maskSensitive(result.error, server))
             }
         }.let { truncateOutput(it, MAX_HISTORY_TEXT_LENGTH) }

@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.service
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.UpdateReport
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -14,26 +15,26 @@ object UpdateReportFormatter {
 
     fun format(report: UpdateReport): String {
         val time = timeFormat.format(Date(report.timestamp))
-        val status = if (report.success) "✅ 成功" else "❌ 失败"
+        val status = if (report.success) DeployXBundle.message("report.status.success") else DeployXBundle.message("report.status.failed")
         val operation = when (report.operationType) {
-            "DEPLOY" -> "部署"
-            "UPLOAD" -> "上传"
-            "SYNC" -> "同步"
+            "DEPLOY" -> DeployXBundle.message("report.operation.deploy")
+            "UPLOAD" -> DeployXBundle.message("report.operation.upload")
+            "SYNC" -> DeployXBundle.message("report.operation.sync")
             else -> report.operationType
         }
 
         return buildString {
             // 标题
-            appendLine("## 📦 文件更新报告")
+            appendLine(DeployXBundle.message("report.header"))
             appendLine()
 
             // 摘要信息
-            appendLine("| 项目 | 值 |")
-            appendLine("|:---|:---|")
-            appendLine("| 📅 时间 | $time |")
-            appendLine("| ⚙️ 操作 | $operation |")
-            appendLine("| 📊 状态 | $status |")
-            appendLine("| 📁 分组数 | ${report.groups.size} |")
+            appendLine(DeployXBundle.message("report.tableHeader"))
+            appendLine(DeployXBundle.message("report.tableDivider"))
+            appendLine(DeployXBundle.message("report.row.time", time))
+            appendLine(DeployXBundle.message("report.row.operation", operation))
+            appendLine(DeployXBundle.message("report.row.status", status))
+            appendLine(DeployXBundle.message("report.row.groupCount", report.groups.size))
 
             // 汇总信息 - 使用实际传输的文件数量
             val totalTransferredFiles = report.groups.sumOf { it.transferredFiles.size }
@@ -43,9 +44,9 @@ object UpdateReportFormatter {
 
             // 显示实际传输文件数（如果有）
             val displayFileCount = if (totalTransferredFiles > 0) totalTransferredFiles else totalSelectedFiles
-            appendLine("| 📈 总文件数 | $displayFileCount |")
-            appendLine("| ⏱️ 总耗时 | ${formatDuration(totalDuration)} |")
-            appendLine("| 💾 传输大小 | ${formatBytes(totalSize)} |")
+            appendLine(DeployXBundle.message("report.row.totalFiles", displayFileCount))
+            appendLine(DeployXBundle.message("report.row.totalDuration", formatDuration(totalDuration)))
+            appendLine(DeployXBundle.message("report.row.totalSize", formatBytes(totalSize)))
             appendLine()
 
             // 分组详情
@@ -54,35 +55,35 @@ object UpdateReportFormatter {
                 appendLine()
 
                 report.groups.forEachIndexed { index, group ->
-                    appendLine("### 分组 ${index + 1}")
+                    appendLine(DeployXBundle.message("report.groupTitle", index + 1))
                     appendLine()
-                    appendLine("| 项目 | 值 |")
-                    appendLine("|:---|:---|")
-                    appendLine("| 🖥️ 服务器 | ${group.serverName.ifBlank { group.serverId }} |")
-                    appendLine("| 🌐 地址 | `${group.serverAddress}` |")
-                    appendLine("| 📊 状态 | ${if (group.success) "✅ 成功" else "❌ 失败"} |")
-                    appendLine("| 📂 本地目录 | `${group.sourceBaseDir}` |")
-                    appendLine("| 📂 远程目录 | `${group.remoteBaseDir}` |")
+                    appendLine(DeployXBundle.message("report.tableHeader"))
+                    appendLine(DeployXBundle.message("report.tableDivider"))
+                    appendLine(DeployXBundle.message("report.row.server", group.serverName.ifBlank { group.serverId }))
+                    appendLine(DeployXBundle.message("report.row.address", group.serverAddress))
+                    appendLine(DeployXBundle.message("report.row.status", if (group.success) DeployXBundle.message("report.status.success") else DeployXBundle.message("report.status.failed")))
+                    appendLine(DeployXBundle.message("report.row.localDir", group.sourceBaseDir))
+                    appendLine(DeployXBundle.message("report.row.remoteDir", group.remoteBaseDir))
 
                     // 显示实际传输文件数
                     val fileCount = if (group.transferredFiles.isNotEmpty()) group.transferredFiles.size else group.remotePaths.size
-                    appendLine("| 📄 文件数 | $fileCount |")
-                    appendLine("| ⏱️ 耗时 | ${formatDuration(group.duration)} |")
+                    appendLine(DeployXBundle.message("report.row.fileCount", fileCount))
+                    appendLine(DeployXBundle.message("report.row.duration", formatDuration(group.duration)))
                     if (group.totalSize > 0) {
-                        appendLine("| 💾 传输大小 | ${formatBytes(group.totalSize)} |")
+                        appendLine(DeployXBundle.message("report.row.totalSize", formatBytes(group.totalSize)))
                     }
 
                     // 显示备份路径
                     if (!group.backupPath.isNullOrBlank()) {
-                        appendLine("| 💾 备份位置 | `${group.backupPath}` |")
+                        appendLine(DeployXBundle.message("report.row.backupPath", group.backupPath))
                     }
                     appendLine()
 
                     // 备份信息说明
                     if (!group.backupPath.isNullOrBlank()) {
-                        appendLine("#### 📦 备份信息")
+                        appendLine(DeployXBundle.message("report.backupInfoTitle"))
                         appendLine()
-                        appendLine("备份文件已保存至: `${group.backupPath}`")
+                        appendLine(DeployXBundle.message("report.backupInfoPath", group.backupPath))
                         appendLine()
                     }
 
@@ -95,9 +96,9 @@ object UpdateReportFormatter {
 
                     if (displayFiles.isNotEmpty()) {
                         if (group.transferredFiles.isNotEmpty()) {
-                            appendLine("#### ✅ 实际更新的文件")
+                            appendLine(DeployXBundle.message("report.updatedFilesTitle"))
                         } else {
-                            appendLine("#### 📄 上传文件")
+                            appendLine(DeployXBundle.message("report.uploadedFilesTitle"))
                         }
                         appendLine()
                         appendLine("```text")
@@ -111,7 +112,7 @@ object UpdateReportFormatter {
             // 备注
             appendLine("---")
             appendLine()
-            appendLine("> 💡 提示：目录同步时，rsync 仅传输变更的文件。报告生成时间: $time")
+            appendLine(DeployXBundle.message("report.footer", time))
         }
     }
 

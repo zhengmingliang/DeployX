@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ssh
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.model.SyncOptions
 import com.alianga.idea.deploy.model.SyncResult
@@ -25,7 +26,7 @@ class SftpTransferClient {
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
     ): SyncResult {
         val localFile = File(localPath)
-        if (!localFile.exists()) return SyncResult(false, error = "本地路径不存在: $localPath")
+        if (!localFile.exists()) return SyncResult(false, error = DeployXBundle.message("ssh.sftp.localPathNotFound", localPath))
         val remoteBase = remotePath.trimEnd('/')
         val relative = localFile.name + if (localFile.isDirectory) "/" else ""
         return uploadFilesFrom(localFile.parent ?: ".", remoteBase, listOf(relative), serverConfig, options, logCallback, progressCallback)
@@ -42,14 +43,14 @@ class SftpTransferClient {
     ): SyncResult {
         val startTime = System.currentTimeMillis()
         if (options.dryRun) {
-            return SyncResult(false, error = "SFTP fallback 不支持 rsync dry-run 预览")
+            return SyncResult(false, error = DeployXBundle.message("ssh.sftp.dryRunNotSupported"))
         }
 
         val connection = SshConnection(serverConfig)
         return try {
-            logCallback?.invoke("[TRANSFER] 使用 SFTP fallback 上传")
+            logCallback?.invoke(DeployXBundle.message("ssh.sftp.usingFallback"))
             if (!connection.connect()) {
-                return SyncResult(false, error = "SFTP 连接失败: ${serverConfig.displayAddress}")
+                return SyncResult(false, error = DeployXBundle.message("ssh.sftp.connectFailed", serverConfig.displayAddress))
             }
             val channel = connection.openSftpChannel()
             try {
@@ -65,7 +66,7 @@ class SftpTransferClient {
                     if (relative.isBlank()) return@forEach
                     val source = sourceBase.resolve(relative).normalize()
                     if (!Files.exists(source)) {
-                        logCallback?.invoke("[WARN] 本地路径不存在，跳过: $source")
+                        logCallback?.invoke(DeployXBundle.message("ssh.sftp.skipLocalNotFound", source))
                         return@forEach
                     }
                     val uploaded = uploadPath(channel, sourceBase, source, remoteBase, matchers, logCallback, progressCallback, transferredFiles)
@@ -85,7 +86,7 @@ class SftpTransferClient {
                 channel.disconnect()
             }
         } catch (e: Exception) {
-            SyncResult(false, duration = System.currentTimeMillis() - startTime, error = "SFTP 上传失败: ${e.message}")
+            SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("ssh.sftp.uploadFailed", e.message ?: ""))
         } finally {
             connection.disconnect()
         }

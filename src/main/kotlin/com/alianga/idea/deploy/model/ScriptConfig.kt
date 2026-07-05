@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.model
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.google.gson.annotations.SerializedName
 
 /**
@@ -16,7 +17,7 @@ data class ScriptConfig(
     val description: String = "",
 
     @SerializedName("group")
-    val group: String = "默认",
+    val group: String = DeployXBundle.message("script.defaultGroup"),
 
     @SerializedName("tags")
     val tags: List<String> = emptyList(),

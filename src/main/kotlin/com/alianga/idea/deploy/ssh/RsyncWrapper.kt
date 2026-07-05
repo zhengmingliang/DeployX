@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ssh
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.model.SyncOptions
@@ -67,7 +68,7 @@ class RsyncWrapper {
             // 验证本地路径
             val localFile = File(localPath)
             if (!localFile.exists()) {
-                val msg = "本地路径不存在: $localPath"
+                val msg = DeployXBundle.message("ssh.rsync.localPathNotFound", localPath)
                 logCallback?.invoke("[ERROR] $msg")
                 return SyncResult(false, error = msg)
             }
@@ -126,7 +127,7 @@ class RsyncWrapper {
             val duration = System.currentTimeMillis() - startTime
 
             return if (exitCode == 0) {
-                logCallback?.invoke("[OK] rsync 完成 (exit code: 0, 耗时: ${duration}ms)")
+                logCallback?.invoke(DeployXBundle.message("ssh.rsync.completed", duration))
                 SyncResult(
                     success = true,
                     transferredFiles = transferredFileList.size,
@@ -136,7 +137,7 @@ class RsyncWrapper {
                     output = outputBuilder.toString()
                 )
             } else {
-                val errMsg = "rsync 执行失败 (exit code: $exitCode)"
+                val errMsg = DeployXBundle.message("ssh.rsync.executionFailed", exitCode)
                 logCallback?.invoke("[ERROR] $errMsg")
                 SyncResult(
                     success = false,
@@ -149,7 +150,7 @@ class RsyncWrapper {
             }
         } catch (e: Exception) {
             LOG.error("rsync execution failed", e)
-            val errMsg = "rsync 执行异常: ${e.message}"
+            val errMsg = DeployXBundle.message("ssh.rsync.executionException", e.message ?: "")
             logCallback?.invoke("[ERROR] $errMsg")
             return SyncResult(
                 success = false,
@@ -174,7 +175,7 @@ class RsyncWrapper {
     ): SyncResult {
         val startTime = System.currentTimeMillis()
         if (relativePaths.isEmpty()) {
-            return SyncResult(false, error = "files-from 列表为空")
+            return SyncResult(false, error = DeployXBundle.message("ssh.rsync.filesFromEmpty"))
         }
 
         try {
@@ -182,7 +183,7 @@ class RsyncWrapper {
             val remoteBase = remoteBaseDir.trimEnd('/') + "/"
             val baseDir = File(sourceBase)
             if (!baseDir.exists()) {
-                val msg = "本地映射根目录不存在: $sourceBase"
+                val msg = DeployXBundle.message("ssh.rsync.baseDirNotFound", sourceBase)
                 logCallback?.invoke("[ERROR] $msg")
                 return SyncResult(false, error = msg)
             }
@@ -239,7 +240,7 @@ class RsyncWrapper {
             val exitCode = process.waitFor()
             val duration = System.currentTimeMillis() - startTime
             return if (exitCode == 0) {
-                logCallback?.invoke("[OK] rsync files-from 完成 (exit code: 0, 耗时: ${duration}ms)")
+                logCallback?.invoke(DeployXBundle.message("ssh.rsync.filesFromCompleted", duration))
                 SyncResult(
                     success = true,
                     transferredFiles = transferredFileList.size,
@@ -249,13 +250,13 @@ class RsyncWrapper {
                     output = outputBuilder.toString()
                 )
             } else {
-                val errMsg = "rsync files-from 执行失败 (exit code: $exitCode)"
+                val errMsg = DeployXBundle.message("ssh.rsync.filesFromFailed", exitCode)
                 logCallback?.invoke("[ERROR] $errMsg")
                 SyncResult(false, transferredFiles = transferredFileList.size, transferredFileList = transferredFileList, duration = duration, error = errMsg, output = outputBuilder.toString())
             }
         } catch (e: Exception) {
             LOG.error("rsync files-from execution failed", e)
-            val errMsg = "rsync files-from 执行异常: ${e.message}"
+            val errMsg = DeployXBundle.message("ssh.rsync.filesFromException", e.message ?: "")
             logCallback?.invoke("[ERROR] $errMsg")
             return SyncResult(false, duration = System.currentTimeMillis() - startTime, error = errMsg)
         }
