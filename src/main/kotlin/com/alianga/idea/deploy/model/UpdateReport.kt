@@ -25,8 +25,10 @@ data class UpdateReportGroup(
     val selectedLocalPaths: List<String> = emptyList(),
     val relativePaths: List<String> = emptyList(),
     val remotePaths: List<String> = emptyList(),
+    val transferredFiles: List<String> = emptyList(),
     val success: Boolean = true,
     val duration: Long = 0,
     val totalSize: Long = 0,
-    val rsyncOutput: String = ""
+    val rsyncOutput: String = "",
+    val backupPath: String? = null
 )

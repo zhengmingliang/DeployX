@@ -85,8 +85,8 @@ class RsyncWrapper {
 
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val outputBuilder = StringBuilder()
-            var transferredFiles = 0
             var totalSize = 0L
+            val transferredFileList = mutableListOf<String>()
 
             // 读取输出并解析进度
             var line: String?
@@ -103,7 +103,13 @@ class RsyncWrapper {
                     progressCallback?.invoke(progress)
                 }
 
-                // 统计传输文件
+                // 收集传输的文件列表（从 rsync -v 输出）
+                // 排除进度行（包含 %、MB/s 等）和统计行
+                if (isFileTransferLine(currentLine)) {
+                    transferredFileList.add(currentLine.trim())
+                }
+
+                // 统计传输文件大小
                 if (currentLine.contains("sent ") && currentLine.contains("received ") &&
                     currentLine.contains("bytes")
                 ) {
@@ -123,7 +129,8 @@ class RsyncWrapper {
                 logCallback?.invoke("[OK] rsync 完成 (exit code: 0, 耗时: ${duration}ms)")
                 SyncResult(
                     success = true,
-                    transferredFiles = transferredFiles,
+                    transferredFiles = transferredFileList.size,
+                    transferredFileList = transferredFileList,
                     totalSize = totalSize,
                     duration = duration,
                     output = outputBuilder.toString()
@@ -133,6 +140,8 @@ class RsyncWrapper {
                 logCallback?.invoke("[ERROR] $errMsg")
                 SyncResult(
                     success = false,
+                    transferredFiles = transferredFileList.size,
+                    transferredFileList = transferredFileList,
                     duration = duration,
                     error = errMsg,
                     output = outputBuilder.toString()
@@ -200,6 +209,7 @@ class RsyncWrapper {
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val outputBuilder = StringBuilder()
             var totalSize = 0L
+            val transferredFileList = mutableListOf<String>()
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 val currentLine = line ?: continue
@@ -209,6 +219,11 @@ class RsyncWrapper {
                 val progress = parseProgressLine(currentLine)
                 if (progress != null) {
                     progressCallback?.invoke(progress)
+                }
+
+                // 收集传输的文件列表
+                if (isFileTransferLine(currentLine)) {
+                    transferredFileList.add(currentLine.trim())
                 }
 
                 if (currentLine.contains("sent ") && currentLine.contains("received ") && currentLine.contains("bytes")) {
@@ -227,7 +242,8 @@ class RsyncWrapper {
                 logCallback?.invoke("[OK] rsync files-from 完成 (exit code: 0, 耗时: ${duration}ms)")
                 SyncResult(
                     success = true,
-                    transferredFiles = relativePaths.size,
+                    transferredFiles = transferredFileList.size,
+                    transferredFileList = transferredFileList,
                     totalSize = totalSize,
                     duration = duration,
                     output = outputBuilder.toString()
@@ -235,7 +251,7 @@ class RsyncWrapper {
             } else {
                 val errMsg = "rsync files-from 执行失败 (exit code: $exitCode)"
                 logCallback?.invoke("[ERROR] $errMsg")
-                SyncResult(false, duration = duration, error = errMsg, output = outputBuilder.toString())
+                SyncResult(false, transferredFiles = transferredFileList.size, transferredFileList = transferredFileList, duration = duration, error = errMsg, output = outputBuilder.toString())
             }
         } catch (e: Exception) {
             LOG.error("rsync files-from execution failed", e)
@@ -410,6 +426,79 @@ class RsyncWrapper {
             }
         }
         return masked
+    }
+
+    /**
+     * 判断行是否为文件传输行（rsync -v 输出中的文件名）
+     * 
+     * rsync -v --progress 输出格式：
+     *   文件名
+     *   空行
+     *   进度行（包含 %、bytes/s、xfr# 等）
+     * 
+     * 文件名行特征：
+     *   - 不包含进度/统计关键字
+     *   - 不是数字计数行（如 "0 files..."）
+     *   - 不是统计信息行（如 "File list generation time: ..."）
+     *   - 通常包含 .（扩展名）或 /（路径）
+     *   - 不包含冒号后跟数字（如 "0.001 seconds"）
+     */
+    private fun isFileTransferLine(line: String): Boolean {
+        val trimmed = line.trim()
+        
+        // 空行不是文件名
+        if (trimmed.isEmpty()) return false
+        
+        // 进度行特征（包含这些关键字就不是文件名）
+        val progressKeywords = listOf(
+            "%", "bytes/s", "kB/s", "KB/s", "MB/s", "GB/s",
+            "xfr#", "to-chk", "irc#", "to-check"
+        )
+        if (progressKeywords.any { trimmed.contains(it, ignoreCase = true) }) {
+            return false
+        }
+
+        // 统计行特征（前缀匹配）
+        val statsPrefixes = listOf(
+            "sent ", "received ", "total size ", "Number of ",
+            "files ...", "building file list", "done",
+            "file list generation time", "file list transfer time",
+            "literal data:", "matched data:", "total transferred file size",
+            "number of files", "number of created", "number of deleted",
+            "number of regular", "is running..."
+        )
+        if (statsPrefixes.any { trimmed.startsWith(it, ignoreCase = true) }) {
+            return false
+        }
+
+        // 排除文件计数行：如 "0 files...", "100 files..."
+        if (trimmed.matches(Regex("^\\s*\\d+\\s+files?\\s*\\.*\\s*$", RegexOption.IGNORE_CASE))) {
+            return false
+        }
+
+        // 排除纯数字/符号/空格行
+        if (trimmed.matches(Regex("^[\\d\\s,.:\\-+*/=<>()\\[\\]{}]+$"))) {
+            return false
+        }
+
+        // 排除包含时间信息的行（如 "0.001 seconds"）
+        if (trimmed.matches(Regex(".*:\\s*\\d+[\\d.]*\\s*(seconds|sec|ms|min|minutes)\\s*$", RegexOption.IGNORE_CASE))) {
+            return false
+        }
+
+        // 排除 rsync 命令行和选项输出
+        if (trimmed.startsWith("rsync ") || trimmed.startsWith("--") || 
+            trimmed.startsWith("- ") || trimmed.startsWith("[")) {
+            return false
+        }
+
+        // 有效的文件传输行特征：包含文件扩展名或路径分隔符
+        // 文件名通常：包含 .（扩展名）或 /（路径）或只是简单的文件名
+        val hasValidPathChars = trimmed.any { it.isLetterOrDigit() }
+        val hasExtensionOrPath = trimmed.contains('.') || trimmed.contains('/')
+        val isSimpleFileName = trimmed.matches(Regex("^[a-zA-Z0-9_-]+$")) && trimmed.length <= 200
+        
+        return hasValidPathChars && (hasExtensionOrPath || isSimpleFileName)
     }
 
     /**

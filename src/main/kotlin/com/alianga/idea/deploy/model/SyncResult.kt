@@ -6,6 +6,7 @@ package com.alianga.idea.deploy.model
 data class SyncResult(
     val success: Boolean,
     val transferredFiles: Int = 0,
+    val transferredFileList: List<String> = emptyList(),
     val totalSize: Long = 0,
     val duration: Long = 0,
     val error: String? = null,

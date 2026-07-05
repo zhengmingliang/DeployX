@@ -35,13 +35,15 @@ object UpdateReportFormatter {
             appendLine("| 📊 状态 | $status |")
             appendLine("| 📁 分组数 | ${report.groups.size} |")
 
-            // 汇总信息
-            val totalFiles = report.groups.sumOf { it.remotePaths.size }
+            // 汇总信息 - 使用实际传输的文件数量
+            val totalTransferredFiles = report.groups.sumOf { it.transferredFiles.size }
+            val totalSelectedFiles = report.groups.sumOf { it.remotePaths.size }
             val totalDuration = report.groups.sumOf { it.duration }
             val totalSize = report.groups.sumOf { it.totalSize }
-            val successGroups = report.groups.count { it.success }
 
-            appendLine("| 📈 总文件数 | $totalFiles |")
+            // 显示实际传输文件数（如果有）
+            val displayFileCount = if (totalTransferredFiles > 0) totalTransferredFiles else totalSelectedFiles
+            appendLine("| 📈 总文件数 | $displayFileCount |")
             appendLine("| ⏱️ 总耗时 | ${formatDuration(totalDuration)} |")
             appendLine("| 💾 传输大小 | ${formatBytes(totalSize)} |")
             appendLine()
@@ -61,19 +63,45 @@ object UpdateReportFormatter {
                     appendLine("| 📊 状态 | ${if (group.success) "✅ 成功" else "❌ 失败"} |")
                     appendLine("| 📂 本地目录 | `${group.sourceBaseDir}` |")
                     appendLine("| 📂 远程目录 | `${group.remoteBaseDir}` |")
-                    appendLine("| 📄 文件数 | ${group.remotePaths.size} |")
+
+                    // 显示实际传输文件数
+                    val fileCount = if (group.transferredFiles.isNotEmpty()) group.transferredFiles.size else group.remotePaths.size
+                    appendLine("| 📄 文件数 | $fileCount |")
                     appendLine("| ⏱️ 耗时 | ${formatDuration(group.duration)} |")
                     if (group.totalSize > 0) {
                         appendLine("| 💾 传输大小 | ${formatBytes(group.totalSize)} |")
                     }
+
+                    // 显示备份路径
+                    if (!group.backupPath.isNullOrBlank()) {
+                        appendLine("| 💾 备份位置 | `${group.backupPath}` |")
+                    }
                     appendLine()
 
-                    // 文件列表
-                    if (group.remotePaths.isNotEmpty()) {
-                        appendLine("#### 上传文件")
+                    // 备份信息说明
+                    if (!group.backupPath.isNullOrBlank()) {
+                        appendLine("#### 📦 备份信息")
+                        appendLine()
+                        appendLine("备份文件已保存至: `${group.backupPath}`")
+                        appendLine()
+                    }
+
+                    // 实际传输的文件列表（优先显示）
+                    val displayFiles = if (group.transferredFiles.isNotEmpty()) {
+                        group.transferredFiles
+                    } else {
+                        group.remotePaths
+                    }
+
+                    if (displayFiles.isNotEmpty()) {
+                        if (group.transferredFiles.isNotEmpty()) {
+                            appendLine("#### ✅ 实际更新的文件")
+                        } else {
+                            appendLine("#### 📄 上传文件")
+                        }
                         appendLine()
                         appendLine("```text")
-                        group.remotePaths.forEach { appendLine(it) }
+                        displayFiles.forEach { appendLine(it) }
                         appendLine("```")
                         appendLine()
                     }

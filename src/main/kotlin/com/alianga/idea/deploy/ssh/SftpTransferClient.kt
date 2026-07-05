@@ -58,6 +58,7 @@ class SftpTransferClient {
                 val matchers = createMatchers(options.excludePatterns)
                 var count = 0
                 var totalSize = 0L
+                val transferredFiles = mutableListOf<String>()
 
                 relativePaths.forEach { rawRelative ->
                     val relative = rawRelative.trim('/').replace("\\", "/")
@@ -67,7 +68,7 @@ class SftpTransferClient {
                         logCallback?.invoke("[WARN] 本地路径不存在，跳过: $source")
                         return@forEach
                     }
-                    val uploaded = uploadPath(channel, sourceBase, source, remoteBase, matchers, logCallback, progressCallback)
+                    val uploaded = uploadPath(channel, sourceBase, source, remoteBase, matchers, logCallback, progressCallback, transferredFiles)
                     count += uploaded.first
                     totalSize += uploaded.second
                 }
@@ -75,6 +76,7 @@ class SftpTransferClient {
                 SyncResult(
                     success = true,
                     transferredFiles = count,
+                    transferredFileList = transferredFiles,
                     totalSize = totalSize,
                     duration = System.currentTimeMillis() - startTime,
                     output = "SFTP uploaded $count file(s)"
@@ -96,7 +98,8 @@ class SftpTransferClient {
         remoteBase: String,
         matchers: List<PathMatcher>,
         logCallback: ((String) -> Unit)?,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)?
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)?,
+        transferredFiles: MutableList<String> = mutableListOf()
     ): Pair<Int, Long> {
         var count = 0
         var totalSize = 0L
@@ -114,6 +117,7 @@ class SftpTransferClient {
                         channel.put(path.toString(), remotePath)
                         count++
                         totalSize += Files.size(path)
+                        transferredFiles.add(rel)
                         progressCallback?.invoke(RsyncWrapper.SyncProgress(currentFile = rel, percentage = 100))
                     }
                 }
@@ -127,6 +131,7 @@ class SftpTransferClient {
                 channel.put(source.toString(), remotePath)
                 count++
                 totalSize += Files.size(source)
+                transferredFiles.add(rel)
                 progressCallback?.invoke(RsyncWrapper.SyncProgress(currentFile = rel, percentage = 100))
             }
         }

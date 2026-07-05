@@ -142,7 +142,8 @@ class DeployService {
                         success = result.success,
                         duration = result.duration,
                         totalSize = result.totalSize,
-                        output = result.output
+                        output = result.output,
+                        transferredFileList = result.transferredFileList
                     )
                 )
                 results.add(resultWithReport)
@@ -318,7 +319,8 @@ class DeployService {
                         success = true,
                         duration = duration,
                         totalSize = syncResult.totalSize,
-                        output = syncResult.output
+                        output = syncResult.output,
+                        transferredFileList = syncResult.transferredFileList
                     )
                     val result = DeployResult(
                         success = true,
@@ -397,7 +399,9 @@ class DeployService {
                     success = true,
                     duration = duration,
                     totalSize = syncResult.totalSize,
-                    output = syncResult.output
+                    output = syncResult.output,
+                    transferredFileList = syncResult.transferredFileList,
+                    backupPath = backupPath
                 )
                 val result = DeployResult(
                     success = true,
@@ -564,7 +568,8 @@ class DeployService {
                     success = true,
                     duration = duration,
                     totalSize = syncResult.totalSize,
-                    output = syncResult.output
+                    output = syncResult.output,
+                    transferredFileList = syncResult.transferredFileList
                 )
                 return DeployResult(
                     success = true,
@@ -629,7 +634,9 @@ class DeployService {
                 success = true,
                 duration = duration,
                 totalSize = syncResult.totalSize,
-                output = syncResult.output
+                output = syncResult.output,
+                transferredFileList = syncResult.transferredFileList,
+                backupPath = backupPath
             )
 
             return DeployResult(
@@ -724,9 +731,17 @@ class DeployService {
         success: Boolean,
         duration: Long,
         totalSize: Long,
-        output: String
+        output: String,
+        transferredFileList: List<String> = emptyList(),
+        backupPath: String? = null
     ): UpdateReportGroup {
         val normalizedRelativePaths = relativePaths.map { it.trim('/') }.filter { it.isNotBlank() }
+        // 如果有实际传输的文件列表，优先使用；否则回退到选择的路径
+        val transferredFiles = if (transferredFileList.isNotEmpty()) {
+            transferredFileList.map { joinRemotePath(remoteBaseDir, it) }
+        } else {
+            normalizedRelativePaths.map { joinRemotePath(remoteBaseDir, it) }
+        }
         return UpdateReportGroup(
             serverId = server.id,
             serverName = server.name,
@@ -736,10 +751,12 @@ class DeployService {
             selectedLocalPaths = localPaths,
             relativePaths = normalizedRelativePaths,
             remotePaths = normalizedRelativePaths.map { joinRemotePath(remoteBaseDir, it) },
+            transferredFiles = transferredFiles,
             success = success,
             duration = duration,
             totalSize = totalSize,
-            rsyncOutput = output
+            rsyncOutput = output,
+            backupPath = backupPath
         )
     }
 
@@ -761,7 +778,9 @@ class DeployService {
                 success = status == HistoryRecord.OperationStatus.SUCCESS,
                 duration = duration,
                 totalSize = syncResult.totalSize,
-                output = syncResult.output
+                output = syncResult.output,
+                transferredFileList = syncResult.transferredFileList,
+                backupPath = key.backupDir
             )
         } else null
         val reportText = reportGroup?.let {
@@ -811,7 +830,9 @@ class DeployService {
                 success = status == HistoryRecord.OperationStatus.SUCCESS,
                 duration = System.currentTimeMillis() - startTime,
                 totalSize = syncResult.totalSize,
-                output = syncResult.output
+                output = syncResult.output,
+                transferredFileList = syncResult.transferredFileList,
+                backupPath = request.backupDir
             )
         } else null
         val reportText = reportGroup?.let {
