@@ -13,6 +13,10 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import java.io.File
+import java.security.MessageDigest
+import java.util.*
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * 配置管理器 - 负责 JSON 配置文件的读写
@@ -33,9 +37,14 @@ class ConfigManager {
         private val MAPPINGS_FILE = File(CONFIG_DIR, "mappings.json")
         private val HISTORY_FILE = File(CONFIG_DIR, "history.json")
         private val SCRIPTS_FILE = File(CONFIG_DIR, "scripts.json")
+        /** 加密的密码备份文件（Base64 编码的 AES 加密数据） */
+        private val PASSWORD_BACKUP_FILE = File(CONFIG_DIR, ".passwords.dat")
 
         /** PasswordSafe 服务名，用于区分不同凭据 */
         private const val PASSWORD_SERVICE_NAME = "DeployX.Server.password"
+
+        /** 加密密钥派生盐（插件专属固定值） */
+        private val ENCRYPTION_SALT = "DeployX-Plugin-Secret-Key-2024".toByteArray()
 
         private val GSON: Gson = GsonBuilder()
             .setPrettyPrinting()
@@ -44,6 +53,75 @@ class ConfigManager {
 
         fun getInstance(): ConfigManager =
             ApplicationManager.getApplication().getService(ConfigManager::class.java)
+
+        // ==================== AES 加密工具 ====================
+
+        /** 从用户唯一标识派生加密密钥 */
+        private fun getEncryptionKey(): SecretKeySpec {
+            // 使用 user.home + user.name 作为基础，每个用户有不同的加密密钥
+            val userKey = (System.getProperty("user.home") + System.getProperty("user.name")).toByteArray()
+            val md = MessageDigest.getInstance("SHA-256")
+            val keyBytes = md.digest(userKey + ENCRYPTION_SALT)
+            return SecretKeySpec(keyBytes, "AES")
+        }
+
+        /** AES 加密字符串 */
+        private fun encrypt(value: String): String {
+            return try {
+                val cipher = Cipher.getInstance("AES")
+                cipher.init(Cipher.ENCRYPT_MODE, getEncryptionKey())
+                val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+                Base64.getEncoder().encodeToString(encrypted)
+            } catch (e: Exception) {
+                LOG.error("Encryption failed", e)
+                ""
+            }
+        }
+
+        /** AES 解密字符串 */
+        private fun decrypt(encrypted: String): String? {
+            return try {
+                val cipher = Cipher.getInstance("AES")
+                cipher.init(Cipher.DECRYPT_MODE, getEncryptionKey())
+                val decoded = Base64.getDecoder().decode(encrypted)
+                val decrypted = cipher.doFinal(decoded)
+                String(decrypted, Charsets.UTF_8)
+            } catch (e: Exception) {
+                LOG.warn("Decryption failed, data may be corrupted or from another user", e)
+                null
+            }
+        }
+
+        /** 从加密备份文件加载所有密码 */
+        private fun loadPasswordBackup(): Map<String, String> {
+            return try {
+                if (!PASSWORD_BACKUP_FILE.exists()) {
+                    emptyMap()
+                } else {
+                    val content = PASSWORD_BACKUP_FILE.readText()
+                    val decrypted = decrypt(content)
+                    if (decrypted != null) {
+                        GSON.fromJson(decrypted, object : TypeToken<Map<String, String>>() {}.type) ?: emptyMap()
+                    } else {
+                        emptyMap()
+                    }
+                }
+            } catch (e: Exception) {
+                LOG.warn("Failed to load password backup", e)
+                emptyMap()
+            }
+        }
+
+        /** 保存所有密码到加密备份文件 */
+        private fun savePasswordBackup(passwords: Map<String, String>) {
+            try {
+                val json = GSON.toJson(passwords)
+                val encrypted = encrypt(json)
+                PASSWORD_BACKUP_FILE.writeText(encrypted)
+            } catch (e: Exception) {
+                LOG.error("Failed to save password backup", e)
+            }
+        }
     }
 
     init {
@@ -75,41 +153,127 @@ class ConfigManager {
     private val passwordSafe: PasswordSafe?
         get() = ApplicationManager.getApplication().getService(PasswordSafe::class.java)
 
+    /** 内存密码缓存（加速频繁访问） */
+    private val passwordCache = mutableMapOf<String, String>()
+
     /**
-     * 从 PasswordSafe 加载服务器密码
+     * 从 PasswordSafe + 加密备份文件加载服务器密码
+     * 双层存储策略：
+     * 1. 优先从内存缓存加载
+     * 2. 然后尝试从系统密钥链 (PasswordSafe) 加载
+     * 3. 最后从加密本地备份文件加载
      */
     private fun loadPassword(serverId: String): String? {
-        return try {
-            val ps = passwordSafe ?: return null
-            ps.getPassword(passwordAttributes(serverId))
-        } catch (e: Exception) {
-            LOG.warn("Failed to load password for server $serverId from PasswordSafe", e)
-            null
+        // 1. 优先从内存缓存加载
+        passwordCache[serverId]?.let {
+            LOG.debug("Loaded password for server $serverId from memory cache")
+            return it
         }
+
+        // 2. 尝试从系统密钥链加载
+        var password: String? = null
+        try {
+            val ps = passwordSafe
+            if (ps != null) {
+                password = ps.getPassword(passwordAttributes(serverId))
+                if (password != null) {
+                    LOG.debug("Loaded password for server $serverId from PasswordSafe (system keychain)")
+                }
+            }
+        } catch (e: Exception) {
+            LOG.warn("Failed to load password from PasswordSafe for server $serverId", e)
+        }
+
+        // 3. 如果系统密钥链加载失败，尝试从加密备份文件加载
+        if (password == null) {
+            try {
+                val backups = loadPasswordBackup()
+                password = backups[serverId]
+                if (password != null) {
+                    LOG.info("Loaded password for server $serverId from encrypted backup file")
+                    // 重新保存到 PasswordSafe，尝试恢复系统密钥链存储
+                    savePasswordToKeychain(serverId, password)
+                }
+            } catch (e: Exception) {
+                LOG.warn("Failed to load password from backup for server $serverId", e)
+            }
+        }
+
+        // 缓存到内存
+        if (password != null) {
+            passwordCache[serverId] = password
+        }
+
+        return password
     }
 
     /**
-     * 保存服务器密码到 PasswordSafe
+     * 保存密码到系统密钥链 (PasswordSafe)
      */
-    private fun savePassword(serverId: String, password: String) {
+    private fun savePasswordToKeychain(serverId: String, password: String) {
         try {
             val ps = passwordSafe ?: return
             ps.setPassword(passwordAttributes(serverId), password)
+            LOG.debug("Password saved to PasswordSafe for server $serverId")
         } catch (e: Exception) {
-            LOG.warn("Failed to save password for server $serverId to PasswordSafe", e)
+            LOG.warn("Failed to save password to PasswordSafe for server $serverId", e)
         }
     }
 
     /**
-     * 删除服务器密码（删除服务器时调用，清理凭据）
+     * 保存服务器密码（双层存储策略）
+     * 1. 保存到系统密钥链 (PasswordSafe)
+     * 2. 保存到加密本地备份文件
+     * 3. 缓存到内存
+     */
+    private fun savePassword(serverId: String, password: String) {
+        // 1. 保存到系统密钥链
+        savePasswordToKeychain(serverId, password)
+
+        // 2. 更新内存缓存
+        passwordCache[serverId] = password
+
+        // 3. 更新加密备份文件
+        try {
+            val backups = loadPasswordBackup().toMutableMap()
+            backups[serverId] = password
+            savePasswordBackup(backups)
+            LOG.debug("Password backup updated for server $serverId")
+        } catch (e: Exception) {
+            LOG.error("Failed to update password backup for server $serverId", e)
+        }
+    }
+
+    /**
+     * 删除服务器密码（删除服务器时调用，清理所有存储层）
+     * 1. 从系统密钥链删除
+     * 2. 从加密备份文件删除
+     * 3. 从内存缓存删除
      */
     fun removePassword(serverId: String) {
+        // 1. 从系统密钥链删除
         try {
-            val ps = passwordSafe ?: return
-            ps.setPassword(passwordAttributes(serverId), null)
+            val ps = passwordSafe
+            if (ps != null) {
+                ps.setPassword(passwordAttributes(serverId), null)
+            }
         } catch (e: Exception) {
-            LOG.warn("Failed to remove password for server $serverId from PasswordSafe", e)
+            LOG.warn("Failed to remove password from PasswordSafe for server $serverId", e)
         }
+
+        // 2. 从加密备份文件删除
+        try {
+            val backups = loadPasswordBackup().toMutableMap()
+            if (backups.remove(serverId) != null) {
+                savePasswordBackup(backups)
+            }
+        } catch (e: Exception) {
+            LOG.warn("Failed to remove password from backup for server $serverId", e)
+        }
+
+        // 3. 从内存缓存删除
+        passwordCache.remove(serverId)
+        LOG.debug("Password removed from all storage layers for server $serverId")
     }
 
     // ==================== 服务器配置 ====================
