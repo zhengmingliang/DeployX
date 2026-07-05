@@ -19,6 +19,8 @@ import java.util.Date
 import java.util.Locale
 import javax.swing.JFileChooser
 import javax.swing.JPanel
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.table.AbstractTableModel
 
 /**
@@ -39,7 +41,12 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
 
     private fun setupUI() {
         searchField.emptyText.text = DeployXBundle.message("settings.script.search.placeholder")
-        searchField.addActionListener { refreshTable() }
+        // 实时过滤：输入即过滤，无需按 Enter
+        searchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = refreshTable()
+            override fun removeUpdate(e: DocumentEvent) = refreshTable()
+            override fun changedUpdate(e: DocumentEvent) = refreshTable()
+        })
         add(searchField, BorderLayout.NORTH)
 
         val decorator = ToolbarDecorator.createDecorator(table)

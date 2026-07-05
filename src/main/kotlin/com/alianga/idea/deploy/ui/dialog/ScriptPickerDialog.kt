@@ -70,7 +70,10 @@ class ScriptPickerDialog(
         refreshList(initialScriptId)
         scriptList.addListSelectionListener { if (!it.valueIsAdjusting) showSelectedScript() }
         searchField.emptyText.text = DeployXBundle.message("dialog.script.picker.search.placeholder")
-        searchField.addActionListener { refreshList(scriptList.selectedValue?.id ?: initialScriptId) }
+        // 实时过滤：输入即过滤，无需按 Enter
+        searchField.document.addDocumentListener(
+            SimpleDocumentListener { refreshList(scriptList.selectedValue?.id ?: initialScriptId) }
+        )
         init()
     }
 
