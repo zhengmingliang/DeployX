@@ -4,7 +4,11 @@ import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.ssh.SshConnection
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.ColoredListCellRenderer
@@ -16,7 +20,6 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import java.awt.Dimension
 import javax.swing.*
-import kotlin.concurrent.thread
 
 /**
  * 远程路径选择对话框
@@ -43,6 +46,13 @@ class RemotePathChooserDialog(
             field = value
             updateUIState()
         }
+
+    /**
+     * 取消标志：当用户关闭对话框时设为 true，后台任务检查后提前退出，
+     * 避免对话框关闭后访问已失效的 UI 组件
+     */
+    @Volatile
+    private var isCancelled = false
 
     init {
         title = DeployXBundle.message("dialog.remote.path.title", server.name, server.displayAddress)
@@ -162,66 +172,88 @@ class RemotePathChooserDialog(
         pathField.text = normalizedPath
         isLoading = true
         updateUIState()
+        isCancelled = false
 
         LOG.info("Loading remote directory: $normalizedPath for server ${server.displayAddress}")
 
-        // 使用简单的后台线程加载，避免 IntelliJ Task 框架的复杂性
-        thread(start = true, isDaemon = true, name = "RemoteDirLoader") {
-            var result: List<String>? = null
-            var error: String? = null
-            val connection = SshConnection(server)
+        // 使用 ProgressManager 后台任务，可取消且不会在对话框关闭后泄漏
+        ProgressManager.getInstance().run(
+            object : Task.Backgroundable(
+                null,
+                DeployXBundle.message("dialog.remote.path.loading"),
+                /* canBeCancelled = */ true
+            ) {
+                override fun run(indicator: ProgressIndicator) {
+                    var result: List<String>? = null
+                    var error: String? = null
+                    val connection = SshConnection(server)
 
-            try {
-                LOG.info("Connecting to ${server.displayAddress}...")
-                if (!connection.connect()) {
-                    error = DeployXBundle.message("dialog.remote.path.error.connectFailed")
-                    LOG.warn("Failed to connect to ${server.displayAddress}")
-                } else {
-                    LOG.info("Connected successfully, executing ls command...")
+                    try {
+                        indicator.checkCanceled()
+                        indicator.text = DeployXBundle.message("dialog.remote.path.loading")
+                        LOG.info("Connecting to ${server.displayAddress}...")
+                        if (!connection.connect()) {
+                            error = DeployXBundle.message("dialog.remote.path.error.connectFailed")
+                            LOG.warn("Failed to connect to ${server.displayAddress}")
+                        } else {
+                            indicator.checkCanceled()
+                            LOG.info("Connected successfully, executing ls command...")
+                            val lsResult = connection.executeCommand("cd \"$normalizedPath\" && ls -1F")
+                            LOG.info("ls command result - success: ${lsResult.success}, exitCode: ${lsResult.exitCode}")
+                            LOG.info("ls output: ${lsResult.output}")
+                            if (lsResult.error.isNotBlank()) {
+                                LOG.warn("ls error: ${lsResult.error}")
+                            }
 
-                    // 执行 ls 命令获取目录
-                    val lsResult = connection.executeCommand("cd \"$normalizedPath\" && ls -1F")
-                    LOG.info("ls command result - success: ${lsResult.success}, exitCode: ${lsResult.exitCode}")
-                    LOG.info("ls output: ${lsResult.output}")
-                    if (lsResult.error.isNotBlank()) {
-                        LOG.warn("ls error: ${lsResult.error}")
+                            if (!lsResult.success) {
+                                error = DeployXBundle.message("dialog.remote.path.error.cannotReadDir", lsResult.error)
+                            } else {
+                                result = lsResult.output.split("\n")
+                                    .map { it.trim() }
+                                    .filter { it.isNotEmpty() && it != "." && it != ".." }
+                                    .sortedWith(compareBy({ !it.endsWith("/") }, { it }))
+
+                                LOG.info("Found ${result?.size ?: 0} items in directory")
+                            }
+                        }
+                    } catch (e: com.intellij.openapi.progress.ProcessCanceledException) {
+                        LOG.info("Remote directory loading was cancelled")
+                    } catch (e: Exception) {
+                        LOG.error("Failed to load remote directory", e)
+                        error = DeployXBundle.message("dialog.remote.path.error.loadFailed", e.message ?: "")
+                    } finally {
+                        connection.disconnect()
                     }
 
-                    if (!lsResult.success) {
-                        error = DeployXBundle.message("dialog.remote.path.error.cannotReadDir", lsResult.error)
-                    } else {
-                        result = lsResult.output.split("\n")
-                            .map { it.trim() }
-                            .filter { it.isNotEmpty() && it != "." && it != ".." }
-                            .sortedWith(compareBy({ !it.endsWith("/") }, { it }))
-
-                        LOG.info("Found ${result?.size ?: 0} items in directory")
+                    // 在 UI 线程更新结果，检查对话框是否已关闭
+                    ApplicationManager.getApplication().invokeLater {
+                        // 对话框已关闭或任务已取消，跳过 UI 更新
+                        if (!isShowing || isCancelled) {
+                            return@invokeLater
+                        }
+                        isLoading = false
+                        updateUIState()
+                        listModel.clear()
+                        if (error != null) {
+                            JOptionPane.showMessageDialog(
+                                this@RemotePathChooserDialog.contentPanel,
+                                error,
+                                DeployXBundle.message("dialog.remote.path.error.title"),
+                                JOptionPane.ERROR_MESSAGE
+                            )
+                        } else {
+                            result?.forEach { listModel.addElement(it) }
+                        }
                     }
                 }
-            } catch (e: Exception) {
-                LOG.error("Failed to load remote directory", e)
-                error = DeployXBundle.message("dialog.remote.path.error.loadFailed", e.message ?: "")
-            } finally {
-                connection.disconnect()
             }
+        )
+    }
 
-            // 在 UI 线程更新结果
-            SwingUtilities.invokeLater {
-                isLoading = false
-                updateUIState()
-                listModel.clear()
-                if (error != null) {
-                    JOptionPane.showMessageDialog(
-                        this@RemotePathChooserDialog.contentPanel,
-                        error,
-                        DeployXBundle.message("dialog.remote.path.error.title"),
-                        JOptionPane.ERROR_MESSAGE
-                    )
-                } else {
-                    result?.forEach { listModel.addElement(it) }
-                }
-            }
-        }
+    override fun dispose() {
+        // 通知后台任务停止
+        isCancelled = true
+        super.dispose()
     }
 
     override fun createCenterPanel(): JComponent {
