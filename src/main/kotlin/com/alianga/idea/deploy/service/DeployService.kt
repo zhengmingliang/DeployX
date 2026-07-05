@@ -113,7 +113,8 @@ class DeployService {
 
                 if (!dryRun && !key.preCommand.isNullOrBlank()) {
                     groupLog("[PRE] 执行上传前命令: ${key.preCommand}")
-                    val preResult = sshConnection!!.executeCommand(key.preCommand)
+                    val conn = sshConnection ?: return@forEach
+                    val preResult = conn.executeCommand(key.preCommand)
                     if (preResult.output.isNotBlank()) groupLog("[PRE] 输出: ${preResult.output.trim()}")
                     if (!preResult.success) groupLog("[WARN] 上传前命令失败 (${preResult.exitCode}): ${preResult.error}")
                 }
@@ -150,7 +151,8 @@ class DeployService {
 
                 if (!dryRun && !key.postCommand.isNullOrBlank()) {
                     groupLog("[POST] 执行上传后命令: ${key.postCommand}")
-                    val postResult = sshConnection!!.executeCommand(key.postCommand)
+                    val conn = sshConnection ?: return@forEach
+                    val postResult = conn.executeCommand(key.postCommand)
                     if (postResult.output.isNotBlank()) groupLog("[POST] 输出: ${postResult.output.trim()}")
                     if (!postResult.success) groupLog("[WARN] 上传后命令失败 (${postResult.exitCode}): ${postResult.error}")
                 }
@@ -247,7 +249,8 @@ class DeployService {
                 // 步骤 1: 上传前命令（在备份和上传之前执行）
                 if (!key.preCommand.isNullOrBlank()) {
                     groupLog("[PRE] 执行上传前命令: ${key.preCommand}")
-                    val preResult = sshConnection!!.executeCommand(key.preCommand)
+                    val conn = sshConnection ?: return@forEach
+                    val preResult = conn.executeCommand(key.preCommand)
                     if (preResult.output.isNotBlank()) groupLog("[PRE] 输出: ${preResult.output.trim()}")
                     if (!preResult.success) groupLog("[WARN] 上传前命令执行失败 (${preResult.exitCode}): ${preResult.error}")
                     else groupLog("[PRE] 命令执行成功")
@@ -343,7 +346,8 @@ class DeployService {
                         zipItems.size == 1 -> {
                             val remoteZip = joinRemotePath(key.remoteBaseDir, zipItems.first().relativePath)
                             groupLog("[3/4] 解压远程文件: $remoteZip → ${key.unzipDest}")
-                            val unzipResult = doUnzip(sshConnection!!, remoteZip, key.unzipDest)
+                            val conn = sshConnection ?: return@forEach
+                            val unzipResult = doUnzip(conn, remoteZip, key.unzipDest)
                             if (!unzipResult.success) {
                                 val result = DeployResult(
                                     false,
@@ -382,7 +386,8 @@ class DeployService {
                 // 步骤 5: 上传后命令
                 if (!key.postCommand.isNullOrBlank()) {
                     groupLog("[POST] 执行上传后命令: ${key.postCommand}")
-                    val postResult = sshConnection!!.executeCommand(key.postCommand)
+                    val conn = sshConnection ?: return@forEach
+                    val postResult = conn.executeCommand(key.postCommand)
                     if (postResult.output.isNotBlank()) groupLog("[POST] 输出: ${postResult.output.trim()}")
                     if (!postResult.success) groupLog("[WARN] 上传后命令执行失败 (${postResult.exitCode}): ${postResult.error}")
                     else groupLog("[POST] 命令执行成功")
@@ -486,7 +491,8 @@ class DeployService {
             // 步骤 1: 执行上传前命令（在备份和上传之前执行）
             if (!request.preCommand.isNullOrBlank()) {
                 logCallback?.invoke("[PRE] 执行上传前命令: ${request.preCommand}")
-                val preResult = sshConnection!!.executeCommand(request.preCommand)
+                val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
+                val preResult = conn.executeCommand(request.preCommand)
                 if (preResult.output.isNotBlank()) {
                     logCallback?.invoke("[PRE] 输出: ${preResult.output.trim()}")
                 }
@@ -506,7 +512,7 @@ class DeployService {
                 } else {
                     "${request.remotePath}/${localFile.name}"
                 }
-                val backupDir = request.backupDir!!
+                val backupDir = requireNotNull(request.backupDir) { "backupDir should not be null at this point" }
                 logCallback?.invoke("[1/${if (needsSshConnection) 4 else 2}] 备份: $backupSource → $backupDir")
                 val backupResult = doBackup(sshConnection, backupSource, backupDir, logCallback)
                 if (backupResult.success) {
@@ -586,7 +592,8 @@ class DeployService {
                 logCallback?.invoke("[3/4] 解压远程文件...")
                 val filename = File(request.localPath).name
                 val remoteFile = "${request.remotePath}/$filename"
-                val unzipResult = doUnzip(sshConnection!!, remoteFile, request.unzipDest)
+                val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
+                val unzipResult = doUnzip(conn, remoteFile, request.unzipDest)
 
                 if (unzipResult.success) {
                     logCallback?.invoke("解压成功: ${request.unzipDest}")
@@ -610,7 +617,8 @@ class DeployService {
             // 步骤 5: 执行上传后命令（可选）
             if (!request.postCommand.isNullOrBlank()) {
                 logCallback?.invoke("[POST] 执行上传后命令: ${request.postCommand}")
-                val postResult = sshConnection!!.executeCommand(request.postCommand)
+                val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
+                val postResult = conn.executeCommand(request.postCommand)
                 if (postResult.output.isNotBlank()) {
                     logCallback?.invoke("[POST] 输出: ${postResult.output.trim()}")
                 }
