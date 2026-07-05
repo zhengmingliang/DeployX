@@ -8,9 +8,12 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.ToolbarDecorator
+import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import java.awt.BorderLayout
 import javax.swing.JPanel
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.table.AbstractTableModel
 
 /**
@@ -21,6 +24,7 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
     private val mappingManager = MappingManager.getInstance()
     private val tableModel = MappingTableModel()
     private val table = JBTable(tableModel)
+    private val searchField = JBTextField()
 
     init {
         setupUI()
@@ -28,6 +32,15 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun setupUI() {
+        // 顶部搜索框：实时过滤
+        searchField.emptyText.text = DeployXBundle.message("settings.mapping.search.placeholder")
+        searchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = refreshTable()
+            override fun removeUpdate(e: DocumentEvent) = refreshTable()
+            override fun changedUpdate(e: DocumentEvent) = refreshTable()
+        })
+        add(searchField, BorderLayout.NORTH)
+
         val decorator = ToolbarDecorator.createDecorator(table)
             .setAddAction { addMapping() }
             .setEditAction { editMapping() }
@@ -45,7 +58,19 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun refreshTable() {
-        tableModel.setData(mappingManager.getMappings())
+        val keyword = searchField.text.trim().lowercase()
+        val allMappings = mappingManager.getMappings()
+        val filtered = if (keyword.isEmpty()) {
+            allMappings
+        } else {
+            allMappings.filter {
+                it.name.lowercase().contains(keyword) ||
+                    it.localDir.lowercase().contains(keyword) ||
+                    it.serverId.lowercase().contains(keyword) ||
+                    it.remoteDir.lowercase().contains(keyword)
+            }
+        }
+        tableModel.setData(filtered)
     }
 
     private fun addMapping() {

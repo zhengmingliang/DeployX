@@ -9,9 +9,12 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.ToolbarDecorator
+import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import java.awt.BorderLayout
 import javax.swing.JPanel
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.table.AbstractTableModel
 
 /**
@@ -22,6 +25,7 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
     private val serverManager = ServerManager.getInstance()
     private val tableModel = ServerTableModel()
     private val table = JBTable(tableModel)
+    private val searchField = JBTextField()
 
     init {
         setupUI()
@@ -29,6 +33,15 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun setupUI() {
+        // 顶部搜索框：实时过滤
+        searchField.emptyText.text = DeployXBundle.message("settings.server.search.placeholder")
+        searchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = refreshTable()
+            override fun removeUpdate(e: DocumentEvent) = refreshTable()
+            override fun changedUpdate(e: DocumentEvent) = refreshTable()
+        })
+        add(searchField, BorderLayout.NORTH)
+
         // 创建带工具栏的表格
         val decorator = ToolbarDecorator.createDecorator(table)
             .setAddAction { addServer() }
@@ -61,7 +74,19 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun refreshTable() {
-        tableModel.setData(serverManager.getServers())
+        val keyword = searchField.text.trim().lowercase()
+        val allServers = serverManager.getServers()
+        val filtered = if (keyword.isEmpty()) {
+            allServers
+        } else {
+            allServers.filter {
+                it.id.lowercase().contains(keyword) ||
+                    it.name.lowercase().contains(keyword) ||
+                    it.host.lowercase().contains(keyword) ||
+                    it.user.lowercase().contains(keyword)
+            }
+        }
+        tableModel.setData(filtered)
     }
 
     private fun addServer() {
