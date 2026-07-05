@@ -13,6 +13,8 @@ import java.awt.Dimension
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.JComponent
 import javax.swing.JScrollPane
 import javax.swing.ListSelectionModel
@@ -72,6 +74,14 @@ class ServerSelectionDialog(
         serverList.addListSelectionListener {
             if (!it.valueIsAdjusting) updateCommandOptions()
         }
+        // 双击列表项直接确认选择（与 RemotePathChooserDialog 行为一致）
+        serverList.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount >= 2 && filteredServers.isNotEmpty()) {
+                    doOKAction()
+                }
+            }
+        })
 
         // 搜索框：占位提示文本
         searchField.emptyText.text = DeployXBundle.message("dialog.server.select.search.placeholder")
