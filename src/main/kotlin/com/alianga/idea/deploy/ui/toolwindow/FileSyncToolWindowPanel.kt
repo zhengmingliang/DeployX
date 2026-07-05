@@ -21,6 +21,7 @@ import com.alianga.idea.deploy.ui.script.ScriptTabPanel
 import com.alianga.idea.deploy.ui.settings.MappingEditDialog
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.progress.ProgressIndicator
@@ -55,6 +56,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     companion object {
         /** 按 Project 存储面板实例，供 Action 调用 */
         private val panelByProject = linkedMapOf<String, FileSyncToolWindowPanel>()
+
+        /**
+         * “清除日志”图标。直接打包在插件 resources 中引用，
+         * 以兼容 AllIcons.Actions.ClearCash 不存在的低版本 IDE（如 IU-241）。
+         */
+        private val CLEAR_LOG_ICON: Icon =
+            IconLoader.getIcon("/icons/clearCash.svg", FileSyncToolWindowPanel::class.java)
 
         fun getPanel(project: Project): FileSyncToolWindowPanel? {
             return panelByProject[project.hashCode().toString()]
@@ -150,7 +158,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val exportReportAction = createLocalizedAction("toolwindow.action.exportReport", AllIcons.ToolbarDecorator.Export) {
             exportLastReport()
         }
-        val clearLogAction = createLocalizedAction("toolwindow.action.clearLog", AllIcons.Actions.ClearCash) {
+        val clearLogAction = createLocalizedAction("toolwindow.action.clearLog", CLEAR_LOG_ICON) {
             logArea.text = ""
             serverLogAreas.values.forEach { it.text = "" }
         }
