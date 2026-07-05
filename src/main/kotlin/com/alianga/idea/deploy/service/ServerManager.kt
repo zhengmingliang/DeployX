@@ -6,9 +6,14 @@ import com.alianga.idea.deploy.model.ServerConfig
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * 服务器管理器 - 负责服务器配置的 CRUD 操作
+ *
+ * 使用 CopyOnWriteArrayList 保证线程安全：
+ * - 读操作无锁（适合 ActionUpdateThread.BGT 后台调用 + EDT 读取的并发场景）
+ * - 写操作复制底层数组，开销可接受（服务器增删频率低）
  */
 @Service
 class ServerManager {
@@ -20,7 +25,7 @@ class ServerManager {
             ApplicationManager.getApplication().getService(ServerManager::class.java)
     }
 
-    private val servers = mutableListOf<ServerConfig>()
+    private val servers = CopyOnWriteArrayList<ServerConfig>()
 
     init {
         loadFromConfig()
@@ -36,7 +41,7 @@ class ServerManager {
     }
 
     /**
-     * 获取所有服务器
+     * 获取所有服务器（返回快照副本，调用方可安全遍历）
      */
     fun getServers(): List<ServerConfig> = servers.toList()
 
@@ -83,8 +88,12 @@ class ServerManager {
      * 删除服务器
      */
     fun deleteServer(id: String) {
-        servers.removeAll { it.id == id }
-        saveToConfig()
+        // CopyOnWriteArrayList 的 iterator 不支持 remove，用 removeAll(Collection) 替代扩展函数
+        val toRemove = servers.filter { it.id == id }
+        if (toRemove.isNotEmpty()) {
+            servers.removeAll(toRemove)
+            saveToConfig()
+        }
         LOG.info("Deleted server: $id")
     }
 

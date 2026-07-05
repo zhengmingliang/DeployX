@@ -6,9 +6,14 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * 映射管理器 - 负责目录映射配置的 CRUD 操作（基于唯一ID）
+ *
+ * 使用 CopyOnWriteArrayList 保证线程安全：
+ * - 读操作无锁（适合 ActionUpdateThread.BGT 后台调用 + EDT 读取的并发场景）
+ * - 写操作复制底层数组，开销可接受（映射增删频率低）
  */
 @Service
 class MappingManager {
@@ -28,7 +33,7 @@ class MappingManager {
         val resolvedRemoteDir: String
     )
 
-    private val mappings = mutableListOf<MappingConfig>()
+    private val mappings = CopyOnWriteArrayList<MappingConfig>()
 
     init {
         loadFromConfig()
@@ -51,6 +56,9 @@ class MappingManager {
         LOG.info("Loaded ${mappings.size} mappings from config")
     }
 
+    /**
+     * 获取所有映射（返回快照副本，调用方可安全遍历）
+     */
     fun getMappings(): List<MappingConfig> = mappings.toList()
 
     /**
@@ -133,8 +141,12 @@ class MappingManager {
      * 根据ID删除映射
      */
     fun deleteMapping(id: String) {
-        mappings.removeAll { it.effectiveId == id }
-        saveToConfig()
+        // CopyOnWriteArrayList 的 iterator 不支持 remove，用 removeAll(Collection) 替代扩展函数
+        val toRemove = mappings.filter { it.effectiveId == id }
+        if (toRemove.isNotEmpty()) {
+            mappings.removeAll(toRemove)
+            saveToConfig()
+        }
         LOG.info("Deleted mapping: $id")
     }
 
