@@ -4,53 +4,64 @@ import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.model.UploadItem
 import com.alianga.idea.deploy.service.MappingManager
-import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.ui.dialog.ServerSelectionDialog
 import com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowPanel
-import com.intellij.notification.NotificationGroupManager
-import com.intellij.notification.NotificationType
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
-import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.wm.ToolWindowManager
 
 /**
  * 快速推送 Action - upload-only，支持多文件/目录批量上传
+ *
+ * 与 SyncFileAction 的差异：
+ * - 单服务器且无任何命令时跳过服务器选择对话框，直接执行
+ * - 仅当存在前/后命令时才显示命令选项勾选框
  */
-class QuickPushAction : AnAction() {
+class QuickPushAction : AbstractDeployAction<UploadItem>() {
 
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    /**
+     * 重写服务器选择：单服务器且无命令时跳过对话框
+     */
+    override fun selectServer(
+        servers: List<ServerConfig>,
+        resolvedByFile: Map<VirtualFile, List<MappingManager.ResolvedMapping>>,
+        fileCount: Int
+    ): ServerSelectionResult? {
+        if (servers.isEmpty()) return null
+        val commandAvailability = ActionUtils.buildCommandAvailability(resolvedByFile.values.flatten())
+        val hasAnyCommand = commandAvailability.values.any { it.hasPreCommand || it.hasPostCommand }
 
-    override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-        val files = getSelectedFiles(e)
-        if (files.isEmpty()) return
-
-        val mappingManager = MappingManager.getInstance()
-        val resolvedByFile = files.associateWith { file ->
-            mappingManager.resolveMappingsByLocalPath(file.path, file.isDirectory)
-        }.filterValues { it.isNotEmpty() }
-
-        if (resolvedByFile.isEmpty()) {
-            showNotification(project, DeployXBundle.message("notification.noMappingFound"), NotificationType.WARNING)
-            return
+        // 单服务器且无任何命令：直接执行，不弹对话框
+        if (servers.size == 1 && !hasAnyCommand) {
+            return ServerSelectionResult(
+                server = servers.first(),
+                executePreCommand = false,
+                executePostCommand = false
+            )
         }
 
-        val availableServers = resolvedByFile.values.flatten()
-            .map { it.mapping.serverId }
-            .distinct()
-            .mapNotNull { ServerManager.getInstance().getServer(it) }
+        val dialog = ServerSelectionDialog(
+            servers,
+            dialogTitle(),
+            dialogMessage(fileCount),
+            showCommandOptions = hasAnyCommand,
+            commandAvailabilityByServerId = commandAvailability
+        )
+        if (!dialog.showAndGet()) return null
+        val server = dialog.selectedServer ?: return null
+        return ServerSelectionResult(server, dialog.executePreCommand, dialog.executePostCommand)
+    }
 
-        val commandAvailability = buildCommandAvailability(resolvedByFile.values.flatten())
-        val hasAnyCommand = commandAvailability.values.any { it.hasPreCommand || it.hasPostCommand }
-        val selection = selectServer(availableServers, commandAvailability, hasAnyCommand, files.size) ?: return
-        val targetServer = selection.server
+    override fun dialogTitle(): String =
+        DeployXBundle.message("dialog.server.select.title.push")
 
-        ToolWindowManager.getInstance(project).getToolWindow("DeployX")?.show()
+    override fun dialogMessage(fileCount: Int): String =
+        DeployXBundle.message("dialog.server.select.message.push", fileCount)
 
-        val items = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
+    override fun buildItems(
+        resolvedByFile: Map<VirtualFile, List<MappingManager.ResolvedMapping>>,
+        targetServer: ServerConfig,
+        selection: ServerSelectionResult
+    ): List<UploadItem> {
+        return resolvedByFile.mapNotNull { (file, resolvedMappings) ->
             val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
                 ?: return@mapNotNull null
             val mapping = resolved.mapping
@@ -67,65 +78,12 @@ class QuickPushAction : AnAction() {
                 postCommand = if (selection.executePostCommand && mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
             )
         }
-
-        val skipped = files.size - items.size
-        val panel = FileSyncToolWindowPanel.getPanel(project)
-        if (panel != null) {
-            if (skipped > 0) panel.appendLog(DeployXBundle.message("toolwindow.log.skippedNoMapping", skipped, targetServer.id))
-            panel.executeUploadBatch(items)
-        } else {
-            showNotification(project, DeployXBundle.message("notification.toolWindowNotOpen"), NotificationType.WARNING)
-        }
     }
 
-    private data class ServerSelection(
-        val server: ServerConfig,
-        val executePreCommand: Boolean,
-        val executePostCommand: Boolean
-    )
-
-    private fun selectServer(
-        servers: List<ServerConfig>,
-        commandAvailability: Map<String, ServerSelectionDialog.CommandAvailability>,
-        hasAnyCommand: Boolean,
-        selectedCount: Int
-    ): ServerSelection? {
-        if (servers.isEmpty()) return null
-        if (servers.size == 1 && !hasAnyCommand) {
-            return ServerSelection(servers.first(), executePreCommand = false, executePostCommand = false)
-        }
-        val dialog = ServerSelectionDialog(
-            servers,
-            DeployXBundle.message("dialog.server.select.title.push"),
-            DeployXBundle.message("dialog.server.select.message.push", selectedCount),
-            showCommandOptions = hasAnyCommand,
-            commandAvailabilityByServerId = commandAvailability
-        )
-        if (!dialog.showAndGet()) return null
-        val server = dialog.selectedServer ?: return null
-        return ServerSelection(server, dialog.executePreCommand, dialog.executePostCommand)
+    override fun executeBatch(panel: FileSyncToolWindowPanel, items: List<UploadItem>) {
+        panel.executeUploadBatch(items)
     }
 
-    private fun buildCommandAvailability(resolvedMappings: List<MappingManager.ResolvedMapping>): Map<String, ServerSelectionDialog.CommandAvailability> {
-        return resolvedMappings.groupBy { it.mapping.serverId }.mapValues { (_, values) ->
-            ServerSelectionDialog.CommandAvailability(
-                hasPreCommand = values.any { it.mapping.effectivePreCommandEnabled && it.mapping.preCommand.isNotBlank() },
-                hasPostCommand = values.any { it.mapping.effectivePostCommandEnabled && it.mapping.postCommand.isNotBlank() }
-            )
-        }
-    }
-
-    override fun update(e: AnActionEvent) {
-        e.presentation.text = DeployXBundle.message("action.quickPush.text")
-        e.presentation.description = DeployXBundle.message("action.quickPush.description")
-        e.presentation.isEnabledAndVisible = getSelectedFiles(e).isNotEmpty()
-    }
-
-    private fun getSelectedFiles(e: AnActionEvent): Array<VirtualFile> {
-        return e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY) ?: emptyArray()
-    }
-
-    private fun showNotification(project: com.intellij.openapi.project.Project, content: String, type: NotificationType) {
-        NotificationGroupManager.getInstance().getNotificationGroup("DeployX").createNotification(content, type).notify(project)
-    }
+    override fun actionText(): String = DeployXBundle.message("action.quickPush.text")
+    override fun actionDescription(): String = DeployXBundle.message("action.quickPush.description")
 }
