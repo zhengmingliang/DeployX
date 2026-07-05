@@ -104,8 +104,6 @@ class SshConnection(private val serverConfig: ServerConfig) {
         val finalErrorMsg = "SSH connection failed after $maxRetries attempts to ${serverConfig.displayAddress}: ${lastException?.message}"
         val exceptionClass = lastException?.javaClass?.simpleName
         LOG.error(finalErrorMsg, lastException)
-        println("[DEBUG] $finalErrorMsg")
-        lastException?.printStackTrace()
         return ConnectResult(false, finalErrorMsg, exceptionClass)
     }
 
