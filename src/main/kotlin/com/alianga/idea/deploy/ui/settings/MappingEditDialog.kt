@@ -7,6 +7,7 @@ import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.openapi.ui.TextBrowseFolderListener
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBTextField
@@ -98,10 +99,12 @@ class MappingEditDialog(
 
     private fun setupLocalDirBrowser() {
         localDirField.addBrowseFolderListener(
-            null,
-            FileChooserDescriptorFactory.createSingleFolderDescriptor()
-                .withTitle(DeployXBundle.message("dialog.mapping.browser.selectLocal"))
-                .withDescription(DeployXBundle.message("dialog.mapping.browser.selectLocal.desc"))
+            TextBrowseFolderListener(
+                FileChooserDescriptorFactory.createSingleFolderDescriptor()
+                    .withTitle(DeployXBundle.message("dialog.mapping.browser.selectLocal"))
+                    .withDescription(DeployXBundle.message("dialog.mapping.browser.selectLocal.desc")),
+                null
+            )
         )
     }
 

@@ -3,15 +3,16 @@ package com.alianga.idea.deploy.ui.settings
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.ssh.SshConnection
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.openapi.ui.TextBrowseFolderListener
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
@@ -69,10 +70,12 @@ class ServerEditDialog(
 
         // 密钥文件浏览按钮：允许手动输入，也允许通过文件选择器选择
         keyFileField.addBrowseFolderListener(
-            null,
-            FileChooserDescriptorFactory.createSingleFileDescriptor()
-                .withTitle(DeployXBundle.message("dialog.server.browser.selectKeyFile"))
-                .withDescription(DeployXBundle.message("dialog.server.browser.selectKeyFile.desc"))
+            TextBrowseFolderListener(
+                FileChooserDescriptorFactory.createSingleFileDescriptor()
+                    .withTitle(DeployXBundle.message("dialog.server.browser.selectKeyFile"))
+                    .withDescription(DeployXBundle.message("dialog.server.browser.selectKeyFile.desc")),
+                null
+            )
         )
 
         // 认证方式切换：联动显示对应输入框
