@@ -47,6 +47,20 @@ DeployX 是一个 JetBrains IntelliJ IDEA 插件，用于在 IDE 内完成本地
   - 日志中会隐藏 sshpass 密码
   - 工具窗口内置“历史”Tab，可查看部署记录并快速重新部署
   - 每次上传/部署后生成 Markdown 更新报告，可复制或导出，便于他人按服务器路径增量拉取文件
+  - **更新报告优化**（v1.0.1）：上传目录时显示目录下实际更新的具体文件列表，并显示备份文件位置
+
+- **快捷操作菜单**
+  - 支持 `Alt+Shift+Z` 快捷呼出 DeployX 操作菜单，无需右键即可快速执行常用操作
+  - 丰富的快捷键支持：
+    - `Alt+Shift+D` / `Alt+Shift+2`：Deploy（完整部署）
+    - `Ctrl+Alt+Y`：Sync to Server（同步上传）
+    - `Ctrl+Alt+Shift+P` / `Alt+Shift+3`：Quick Push（快速推送）
+    - `Ctrl+Alt+T` / `Alt+Shift+4`：Open SSH Terminal（打开终端）
+
+- **国际化支持**
+  - 支持中英文双语界面
+  - 可在 `Settings → Tools → DeployX → Language` 中切换语言（English / 简体中文 / 跟随系统）
+  - 免重启切换，所有 UI 文案即时刷新
 
 ## 环境要求
 
@@ -125,7 +139,7 @@ DeployX/
 生成的插件包位于：
 
 ```text
-build/distributions/DeployX-1.0.0.zip
+build/distributions/DeployX-1.0.1.zip
 ```
 
 ### 在沙箱 IDE 中运行
@@ -150,7 +164,7 @@ build/distributions/DeployX-1.0.0.zip
 4. 选择：
 
 ```text
-build/distributions/DeployX-1.0.0.zip
+build/distributions/DeployX-1.0.1.zip
 ```
 
 5. 重启 IDE
