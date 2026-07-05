@@ -93,6 +93,8 @@ class ServerManager {
         if (toRemove.isNotEmpty()) {
             servers.removeAll(toRemove)
             saveToConfig()
+            // 同步清理 PasswordSafe 中的密码凭据
+            ConfigManager.getInstance().removePassword(id)
         }
         LOG.info("Deleted server: $id")
     }
