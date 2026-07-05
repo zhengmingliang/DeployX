@@ -17,6 +17,9 @@
 - **服务器选择对话框搜索框**：在 `Alt+Shift+Z` 菜单、"打开 SSH 终端"、"部署"、"同步到服务器"等弹出的服务器选择对话框中新增搜索框，支持按 id / 名称 / 主机 / 用户名 实时过滤（不区分大小写）
 - **键盘自动聚焦搜索框**：服务器选择对话框打开后无需点击搜索框，直接输入字母/数字即可自动聚焦到搜索框并输入；仅一个匹配结果时按 `Enter` 直接确认
 - **密钥文件输入框浏览按钮**：服务器编辑对话框中的密钥文件输入框支持手动输入和文件选择器两种方式
+- **服务器选择对话框双击确认**：双击列表项直接确认选择，无需再点 OK 按钮
+- **设置面板搜索过滤**：服务器管理 / 映射管理设置面板顶部新增搜索框，支持按 ID / 名称 / 主机 / 用户名（服务器）或名称 / 本地目录 / 服务器 / 远程目录（映射）实时过滤
+- **服务器密码加密存储**：服务器密码通过 IntelliJ `PasswordSafe` 加密存储，不再以明文写入 `servers.json`；兼容旧版明文密码，首次加载时自动迁移到 PasswordSafe 并清空 JSON 中的明文
 
 ### 🎨 优化改进
 - 改进了工具窗口 UI 布局，支持动态语言切换
@@ -32,12 +35,20 @@
 - **认证方式联动**：服务器编辑对话框中认证方式选择 `PASSWORD` 时仅显示密码输入框，选择 `KEY` 时仅显示密钥文件输入框，避免误填不相关字段
 - **服务器选择对话框尺寸加大**：列表高度由 200 加大到 320，对话框宽度由 460 加大到 580，便于浏览较多服务器
 - 服务器选择对话框在过滤后保留之前选中的服务器（按 id 恢复），减少切换焦点
+- **DeployService 移除 `!!` 强制非空**：9 处 `sshConnection!!` 改为局部非空变量（forEach 内用 `?: return@forEach` 优雅退出，函数体内用 `requireNotNull`），避免后续重构时 NPE
+- **抽取 AbstractDeployAction 模板方法**：DeployAction / SyncFileAction / QuickPushAction 三个 Action 共有的"获取文件 → 解析映射 → 选择服务器 → 显示工具窗口 → 执行批处理"流程抽取到 `AbstractDeployAction<T>` 基类，公共方法（`getSelectedFiles` / `showNotification` / `buildCommandAvailability`）移到 `ActionUtils`；三个 Action 从 100+ 行精简到 50 行左右
+- **Script 搜索统一改为实时过滤**：`ScriptPickerDialog` / `ScriptSettingsPanel` 的搜索框从 `addActionListener`（需按 Enter）改为 `DocumentListener` 实时过滤，与服务器选择对话框行为一致
+- **RemotePathChooserDialog 改用 ProgressManager**：将裸线程 `thread(start=true, isDaemon=true)` 改为 `ProgressManager.run(Task.Backgroundable, canBeCancelled=true)`，支持用户取消；新增 `@Volatile isCancelled` 标志，`dispose()` 时通知后台任务退出，避免对话框关闭后访问失效的 UI 组件
+- **Manager 线程安全改造**：`ServerManager` / `MappingManager` 内部列表从 `mutableListOf` 改为 `CopyOnWriteArrayList`，读操作无锁、写操作复制数组；API 完全兼容，避免后台 Action 与 EDT 并发导致的 `ConcurrentModificationException`
+- **抽取硬编码中文到 i18n**：把 `SshConnection` / `DeployService` / `ScriptManager` / `SyncService` / `UpdateReportFormatter` / `SftpTransferClient` / `RsyncWrapper` / `ScriptConfig` 等 8 个文件中约 143 处硬编码中文字符串抽取到 `DeployXBundle.properties` / `DeployXBundle_zh_CN.properties`，英文用户不再看到中文残留
 
 ### 🐛 Bug 修复
 - 修复英文状态下语言设置菜单显示原始 key（如 `%settings.language.configurableName`）的问题
 - 修复切换语言后已打开的工具窗口面板未刷新文案的问题
 - 修复打开设置页面时的 PluginException 异常
 - 修复服务器选择对话框过滤后选中索引越界的问题（原 `doOKAction` 和 `updateCommandOptions` 基于 `servers` 而非过滤后的列表）
+- 删除 `SshConnection` 中遗留的 `println("[DEBUG] ...")` 和 `printStackTrace()` 调试输出，避免污染控制台和泄露内部细节
+- 修复 `RemotePathChooserDialog` 关闭对话框后后台线程仍访问失效 UI 组件的潜在问题
 
 ---
 

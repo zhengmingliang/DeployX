@@ -10,12 +10,15 @@ DeployX 是一个 JetBrains IntelliJ IDEA 插件，用于在 IDE 内完成本地
   - 添加/编辑服务器对话框内联"测试连接"按钮，配置完成后可直接验证连通性，无需先保存到列表
   - 认证方式联动：选择 `PASSWORD` 时仅显示密码输入框，选择 `KEY` 时仅显示密钥文件输入框
   - 密钥文件输入框支持手动输入路径和文件选择器两种方式
+  - 服务器密码通过 IntelliJ `PasswordSafe` 加密存储，不写入 `servers.json` 明文；兼容旧版明文密码，首次加载自动迁移
+  - 服务器列表表格支持实时搜索过滤（按 ID / 名称 / 主机 / 用户名）
 
 - **目录映射**
   - 配置本地目录与远程目录的映射关系
   - 映射使用自动生成的唯一 ID 管理，名称允许重复
   - 支持复制映射配置，便于快速新增相似配置
   - 兼容旧版本无 ID 的历史映射数据
+  - 映射列表表格支持实时搜索过滤（按名称 / 本地目录 / 服务器 / 远程目录）
 
 - **文件同步与部署**
   - 支持 `AUTO` / `RSYNC_ONLY` / `SFTP_ONLY` 三种传输模式
@@ -60,11 +63,13 @@ DeployX 是一个 JetBrains IntelliJ IDEA 插件，用于在 IDE 内完成本地
     - `Ctrl+Alt+Shift+P` / `Alt+Shift+3`：Quick Push（快速推送）
     - `Ctrl+Alt+T` / `Alt+Shift+4`：Open SSH Terminal（打开终端）
   - 服务器选择对话框支持实时搜索过滤（按 id / 名称 / 主机 / 用户名匹配），适配较多服务器场景；列表尺寸加大，对话框打开后键盘输入字母/数字会自动聚焦到搜索框
+  - 服务器选择对话框支持双击列表项直接确认选择
 
 - **国际化支持**
   - 支持中英文双语界面
   - 可在 `Settings → Tools → DeployX → Language` 中切换语言（English / 简体中文 / 跟随系统）
   - 免重启切换，所有 UI 文案即时刷新
+  - 日志、错误消息、Markdown 更新报告等所有面向用户的文案均已国际化，英文用户不会看到中文残留
 
 ## 环境要求
 
@@ -191,6 +196,8 @@ Settings / Preferences → Tools → DeployX → 服务器管理
 - **密钥文件**：既可手动输入路径，也可点击右侧浏览按钮通过文件选择器选取
 - **测试连接**：对话框内嵌"测试连接"按钮，填完配置后可直接验证 SSH 连通性，无需先保存到服务器列表；测试过程在后台执行，不会阻塞 UI
 - 列表工具栏同样提供"测试连接"按钮，用于验证已保存的服务器配置
+- **密码安全存储**：服务器密码通过 IntelliJ `PasswordSafe` 加密保存，不写入 `servers.json` 明文；旧版本中的明文密码会在首次加载时自动迁移到 PasswordSafe 并清空明文
+- 服务器列表顶部提供**搜索框**，支持按 ID / 名称 / 主机 / 用户名实时过滤
 
 ### 2. 配置目录映射
 
@@ -279,10 +286,12 @@ DeployX → Preview Sync
 
 ```text
 ~/.deploy-x/
-├── servers.json
+├── servers.json   # 服务器配置（不含密码明文）
 ├── mappings.json
 └── history.json
 ```
+
+服务器密码通过 IntelliJ `PasswordSafe` 加密存储，保存在 IDE 的凭据存储中（具体位置取决于 IDE 的 PasswordSafe 配置：默认 keyring、KeePassXC 或系统 keychain），不会出现在 `servers.json` 中。
 
 IDE 持久化设置会写入 IntelliJ 配置目录中的 `FileSyncTool.xml`。
 
@@ -324,3 +333,5 @@ IDE 持久化设置会写入 IntelliJ 配置目录中的 `FileSyncTool.xml`。
 2. 远程命令执行依赖服务器 shell 环境，若使用别名或自定义函数，请确保服务器登录 shell 能加载相关配置。
 3. 备份源如果不填写，插件会根据上传文件/目录自动推断远程备份对象。
 4. 上传目录时不会自动追加尾部 `/`，因此会上传目录本身。
+5. 服务器密码通过 IntelliJ `PasswordSafe` 加密存储，迁移到其他机器时需重新配置密码（`servers.json` 中不含密码）。
+6. 旧版本升级后，`servers.json` 中的明文密码会在首次启动时自动迁移到 PasswordSafe，原明文会被清空。
