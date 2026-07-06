@@ -40,9 +40,17 @@ class ShowDeployXMenuAction : AnAction() {
         val items = ACTION_IDS.mapNotNull { id ->
             val action = actionManager.getAction(id) ?: return@mapNotNull null
             val presentation = action.templatePresentation.clone()
-            // 直接使用 AnActionEvent 来更新，这是兼容的方式
+            // 使用兼容的方式更新 action 状态：优先调用新版 API，降级到旧版
             val dummyEvent = AnActionEvent.createFromAnAction(action, null, "ShowDeployXMenuAction", e.dataContext)
-            ActionUtil.performDumbAwareUpdate(action, dummyEvent, false)
+            try {
+                // 新版 API (2024.1+)
+                ActionUtil::class.java.getMethod("updateAction", AnAction::class.java, AnActionEvent::class.java)
+                    .invoke(null, action, dummyEvent)
+            } catch (e: Exception) {
+                // 降级到旧版 API (2023.x 及之前)
+                @Suppress("DEPRECATION")
+                ActionUtil.performDumbAwareUpdate(action, dummyEvent, false)
+            }
             if (!dummyEvent.presentation.isEnabledAndVisible) return@mapNotNull null
             MenuItem(id, action, dummyEvent.presentation)
         }
@@ -65,7 +73,17 @@ class ShowDeployXMenuAction : AnAction() {
             .setItemChosenCallback { item ->
                 val actionManager = ActionManager.getInstance()
                 val action = actionManager.getAction(item.id) ?: return@setItemChosenCallback
-                ActionUtil.invokeAction(action, dataContext, "ShowDeployXMenuAction", null, null)
+                // 使用兼容的方式执行 action
+                try {
+                    // 新版 API (2024.1+): performAction(action, event)
+                    val event = AnActionEvent.createFromAnAction(action, null, "ShowDeployXMenuAction", dataContext)
+                    ActionUtil::class.java.getMethod("performAction", AnAction::class.java, AnActionEvent::class.java)
+                        .invoke(null, action, event)
+                } catch (e: Exception) {
+                    // 降级到旧版 API (2023.x 及之前)
+                    @Suppress("DEPRECATION")
+                    ActionUtil.invokeAction(action, dataContext, "ShowDeployXMenuAction", null, null)
+                }
             }
             .createPopup()
         popup.showInFocusCenter()

@@ -70,9 +70,10 @@ class TerminalService : Disposable {
                     indicator.fraction = 0.8
 
                     // 3. 构建 TtyConnector + CloudTerminal 适配
+                    // 使用工厂方法创建 SshCloudTerminalRunner，确保新旧 IDEA 版本兼容
                     val ttyConnector = SshTtyConnector(serverConfig, channel, title)
                     val cloudProcess = SshCloudTerminalProcess(ttyConnector)
-                    val runner = SshCloudTerminalRunner(project, pipeName, cloudProcess, ttyConnector)
+                    val runner = SshCloudTerminalRunner.create(project, pipeName, cloudProcess, ttyConnector)
 
                     // 4. 在 EDT 创建终端会话
                     opened = true

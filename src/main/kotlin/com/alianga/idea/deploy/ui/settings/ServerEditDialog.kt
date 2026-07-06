@@ -22,6 +22,7 @@ import com.intellij.util.ui.FormBuilder
 import java.awt.CardLayout
 import java.awt.Dimension
 import java.awt.event.ItemEvent
+import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -45,6 +46,8 @@ class ServerEditDialog(
     private val authTypeCombo = JComboBox(ServerConfig.AuthType.entries.toTypedArray())
     private val passwordField = JBPasswordField()
     private val keyFileField = TextFieldWithBrowseButton()
+    private val showPasswordCheck = JBCheckBox(DeployXBundle.message("dialog.server.checkbox.showPassword"))
+    private val defaultEchoChar = passwordField.echoChar
     private val isDefaultCheck = JBCheckBox(DeployXBundle.message("dialog.server.checkbox.setAsDefault"))
 
     // 认证方式联动：根据 authType 切换显示密码框 / 密钥文件框
@@ -64,8 +67,16 @@ class ServerEditDialog(
             else -> DeployXBundle.message("dialog.server.add.title")
         }
 
-        // 卡片面板：密码 / 密钥文件
-        authFieldPanel.add(passwordField, ServerConfig.AuthType.PASSWORD.name)
+        // 密码卡片：密码输入框 + 显示明文复选框
+        val passwordCard = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(passwordField)
+            add(showPasswordCheck)
+        }
+        showPasswordCheck.addItemListener {
+            passwordField.echoChar = if (showPasswordCheck.isSelected) 0.toChar() else defaultEchoChar
+        }
+        authFieldPanel.add(passwordCard, ServerConfig.AuthType.PASSWORD.name)
         authFieldPanel.add(keyFileField, ServerConfig.AuthType.KEY.name)
 
         // 密钥文件浏览按钮：允许手动输入，也允许通过文件选择器选择
