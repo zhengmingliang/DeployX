@@ -7,7 +7,6 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.ex.ActionUtil
-import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.SimpleTextAttributes
@@ -33,7 +32,7 @@ class ShowDeployXMenuAction : AnAction() {
     }
 
     override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
+        e.project ?: return
         val actionManager = ActionManager.getInstance()
 
         // 加载所有菜单条目，并过滤掉不可用的
@@ -57,14 +56,14 @@ class ShowDeployXMenuAction : AnAction() {
 
         if (items.isEmpty()) return
 
-        showPopup(project, e.dataContext, items)
+        showPopup(e.dataContext, items)
     }
 
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabledAndVisible = e.project != null
     }
 
-    private fun showPopup(project: Project, dataContext: DataContext, items: List<MenuItem>) {
+    private fun showPopup(dataContext: DataContext, items: List<MenuItem>) {
         val popup = JBPopupFactory.getInstance()
             .createPopupChooserBuilder(items)
             .setTitle(DeployXBundle.message("action.showMenu.title"))
@@ -86,7 +85,12 @@ class ShowDeployXMenuAction : AnAction() {
                 }
             }
             .createPopup()
-        popup.showInFocusCenter()
+        // 基于本次 action 的 dataContext 定位弹窗位置，而非"当前键盘焦点"。
+        // 多 IDEA 项目窗口时，showInFocusCenter() 会取 KeyboardFocusManager 的 focusOwner，
+        // 它可能还停留在另一个窗口的组件上，导致菜单弹到错误的窗口。
+        // guessBestPopupLocation 从 dataContext 取 CONTEXT_COMPONENT 来定位窗口，与触发
+        // 该快捷键的窗口保持一致。
+        popup.show(JBPopupFactory.getInstance().guessBestPopupLocation(dataContext))
     }
 
     /** 菜单项数据 */

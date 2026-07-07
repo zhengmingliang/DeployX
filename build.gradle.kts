@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.alianga.idea.deploy"
-version = "1.0.1"
+version = "1.0.2"
 
 // 本地 IDEA 安装路径（与 localPath 保持一致）
 val ideaHome = "/home/zml/.local/share/JetBrains/Toolbox/apps/intellij-idea-ultimate"
@@ -59,11 +59,34 @@ kotlin {
 
 tasks {
     patchPluginXml {
-        sinceBuild.set("223")
-        untilBuild.set("262.*") // 兼容性范围：2022.3 - 2026.2
+        sinceBuild.set("233")
+        untilBuild.set("262.*") // 兼容性范围：2023.3 - 2026.2
         changeNotes.set(
             """
                 <ul>
+                    <li>v1.0.2 - 脚本库增强与 Windows rsync 优化
+                        <ul>
+                            <li><b>脚本导出优化：</b>未选中任何脚本时导出全部脚本，选中多个脚本时仅导出选中的脚本（JSON 数组）</li>
+                            <li><b>脚本批量删除：</b>支持一次性删除所有选中的脚本（此前仅删除第一个选中的）</li>
+                            <li><b>脚本导入冲突处理：</b>导入时若 id 已存在，提示用户「覆盖重复项」或「全部作为新脚本新增」</li>
+                            <li><b>Windows rsync 同步优化：</b>
+                                <ul>
+                                    <li><code>-e</code> 后的 ssh 命令整体加引号，避免被错误拆分</li>
+                                    <li>Windows 盘符路径（如 <code>C:\Users\...</code>）转换为 Cygwin 风格（<code>/cygdrive/c/Users/...</code>），避免盘符被误识别为远程主机</li>
+                                    <li><code>--files-from</code> 改用临时文件（自动删除）替代 stdin 传入</li>
+                                </ul>
+                            </li>
+                            <li><b>Windows rsync 密码认证修复：</b>修复 Windows 无 sshpass 时密码认证同步报 <code>exit code 12</code> / <code>0 bytes received</code>（三个根因，均已实测验证修复）：
+                                <ul>
+                                    <li><b>askpass 脚本格式：</b>精简 Cygwin rsync 包不含 <code>sh.exe</code>，cygwin ssh 用 <code>posix_spawnp</code> 调用 askpass（不解析 shebang），<code>.sh</code> 脚本报 <code>No such file or directory</code>。改用 <code>.cmd</code> 脚本（<code>@type "路径"</code>）由 <code>cmd.exe /c</code> 执行</li>
+                                    <li><b>ssh 来源错误：</b>rsync <code>-e "ssh ..."</code> 用裸 <code>ssh</code> 会找到 Windows 原生 <code>ssh.exe</code> 而非 cygwin ssh，导致 SSH_ASKPASS 不兼容。改为显式使用 <code>rsync.exe</code> 同目录下的 <code>ssh.exe</code></li>
+                                    <li><b>缺少递归：</b><code>-a</code> 在 <code>--files-from</code> 模式下不展开为 <code>-r</code>，选中目录只创建空子目录不传文件。现已显式补加 <code>-r</code></li>
+                                </ul>
+                            </li>
+                            <li><b>目录同步修复（全平台）：</b>修复选中目录同步时只创建空子目录、不传输目录内文件的问题（同 <code>-a</code>/<code>-r</code> 根因，Linux/macOS 同样受影响）</li>
+                            <li><b>SSH 优化：</b>新增 <code>-o UserKnownHostsFile=/dev/null</code>，消除精简 Cygwin 环境下 <code>Could not create directory '/home/&lt;user&gt;/.ssh'</code> 警告</li>
+                        </ul>
+                    </li>
                     <li>v1.0.1 - 兼容性修复、密码存储增强与体验优化
                         <ul>
                             <li><b>IDE 兼容性优化：</b>修复 IntelliJ IDEA 2024.1+ (IU-241.19416.15) 版本 CloudTerminalRunner 构造函数不兼容问题，支持从 2022.3 到 2025.1 的所有版本</li>

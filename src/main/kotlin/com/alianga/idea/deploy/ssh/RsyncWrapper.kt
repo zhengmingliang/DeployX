@@ -64,6 +64,7 @@ class RsyncWrapper {
     ): SyncResult {
         val startTime = System.currentTimeMillis()
 
+        val auth = prepareAuthContext(serverConfig)
         try {
             // 验证本地路径
             val localFile = File(localPath)
@@ -74,15 +75,15 @@ class RsyncWrapper {
             }
 
             // 构建 rsync 命令
-            val cmd = buildRsyncCommand(localPath, remotePath, serverConfig, options)
+            val cmd = buildRsyncCommand(localPath, remotePath, serverConfig, options, auth.commandPrefix)
             val cmdStr = maskPassword(cmd).joinToString(" ")
             LOG.info("Executing rsync: ${maskPassword(cmd).joinToString(" ")}")
             logCallback?.invoke("[CMD] $cmdStr")
 
             // 执行命令
-            val process = ProcessBuilder(cmd)
-                .redirectErrorStream(true)
-                .start()
+            val pb = ProcessBuilder(cmd).redirectErrorStream(true)
+            auth.environment.forEach { (k, v) -> pb.environment()[k] = v }
+            val process = pb.start()
 
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val outputBuilder = StringBuilder()
@@ -157,6 +158,8 @@ class RsyncWrapper {
                 duration = System.currentTimeMillis() - startTime,
                 error = errMsg
             )
+        } finally {
+            auth.cleanup()
         }
     }
 
@@ -178,7 +181,21 @@ class RsyncWrapper {
             return SyncResult(false, error = DeployXBundle.message("ssh.rsync.filesFromEmpty"))
         }
 
+        val auth = prepareAuthContext(serverConfig)
+        // 临时文件存放要同步的相对路径列表（NUL 分隔，配合 --from0）。
+        // 改用 --files-from=FILE 而非 --files-from=- 通过 stdin 传入，
+        // 避免 Windows 下与 cygwin rsync 的 stdin 交互出现编码/阻塞问题；
+        // 使用完毕后自动删除。
+        val filesFromTemp = File.createTempFile("deployx_files_from_", ".txt").apply { deleteOnExit() }
         try {
+            filesFromTemp.outputStream().use { output ->
+                relativePaths.forEach { path ->
+                    output.write(path.toByteArray(StandardCharsets.UTF_8))
+                    output.write(0)
+                }
+                output.flush()
+            }
+
             val sourceBase = sourceBaseDir.trimEnd('/') + "/"
             val remoteBase = remoteBaseDir.trimEnd('/') + "/"
             val baseDir = File(sourceBase)
@@ -188,24 +205,18 @@ class RsyncWrapper {
                 return SyncResult(false, error = msg)
             }
 
-            val cmd = buildRsyncFilesFromCommand(sourceBase, remoteBase, serverConfig, options)
+            val cmd = buildRsyncFilesFromCommand(
+                sourceBase, remoteBase, serverConfig, options, auth.commandPrefix, filesFromTemp
+            )
             val cmdStr = maskPassword(cmd).joinToString(" ")
             LOG.info("Executing rsync files-from: $cmdStr")
             logCallback?.invoke("[CMD] $cmdStr")
             logCallback?.invoke("[FILES-FROM]")
             relativePaths.forEach { logCallback?.invoke("  $it") }
 
-            val process = ProcessBuilder(cmd)
-                .redirectErrorStream(true)
-                .start()
-
-            process.outputStream.use { output ->
-                relativePaths.forEach { path ->
-                    output.write(path.toByteArray(StandardCharsets.UTF_8))
-                    output.write(0)
-                }
-                output.flush()
-            }
+            val pb = ProcessBuilder(cmd).redirectErrorStream(true)
+            auth.environment.forEach { (k, v) -> pb.environment()[k] = v }
+            val process = pb.start()
 
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val outputBuilder = StringBuilder()
@@ -259,34 +270,55 @@ class RsyncWrapper {
             val errMsg = DeployXBundle.message("ssh.rsync.filesFromException", e.message ?: "")
             logCallback?.invoke("[ERROR] $errMsg")
             return SyncResult(false, duration = System.currentTimeMillis() - startTime, error = errMsg)
+        } finally {
+            runCatching { filesFromTemp.delete() }
+            auth.cleanup()
         }
     }
 
     /**
+     * 判断当前是否运行在 Windows 环境下。
+     * Windows 下的 cygwin rsync 需要对路径和命令做特殊处理：
+     *  - 本地路径要转换为 /cygdrive/<drive>/... 形式，否则盘符 `C:` 会被 rsync 误识别为远程主机；
+     *  - `-e` 后的 ssh 命令需要用引号整体包裹。
+     */
+    private fun isWindows(): Boolean =
+        System.getProperty("os.name").lowercase().contains("win")
+
+    /**
+     * 将 Windows 本地路径转换为 Cygwin 风格路径。
+     *
+     * 例：`C:\Users\zml\...\src/` → `/cygdrive/c/Users/zml/.../src/`
+     * 仅在 Windows 环境下转换；其他平台原样返回。
+     * 已是 /cygdrive/ 开头的路径不重复转换。
+     */
+    private fun toCygwinPath(path: String): String {
+        if (!isWindows()) return path
+        if (path.startsWith("/cygdrive/", ignoreCase = true)) return path
+        // 匹配形如 C:\ 或 C:/ 的盘符前缀，捕获盘符后的剩余部分（含尾部斜杠）
+        val driveRegex = Regex("^([a-zA-Z]):[/\\\\](.*)$", RegexOption.IGNORE_CASE)
+        val match = driveRegex.find(path) ?: return path
+        val drive = match.groupValues[1].lowercase()
+        val rest = match.groupValues[2].replace('\\', '/')
+        return "/cygdrive/$drive/$rest"
+    }
+
+    /**
      * 构建 rsync 命令参数
+     * @param commandPrefix 认证相关的前缀命令（sshpass 或为空，由 [prepareAuthContext] 决定）
      */
     private fun buildRsyncCommand(
         localPath: String,
         remotePath: String,
         serverConfig: ServerConfig,
-        options: SyncOptions
+        options: SyncOptions,
+        commandPrefix: List<String>
     ): List<String> {
         val settings = FileSyncSettings.getInstance()
         val rsyncPath = settings.rsyncPath.ifEmpty { "rsync" }
 
-        // 如果服务器使用密码认证且 sshpass 可用，用 sshpass 包装
-        val useSshpass = serverConfig.authType == ServerConfig.AuthType.PASSWORD &&
-                serverConfig.password.isNotEmpty() &&
-                settings.sshpassAvailable
-
         val cmd = mutableListOf<String>()
-
-        if (useSshpass) {
-            cmd.add("sshpass")
-            cmd.add("-p")
-            cmd.add(serverConfig.password)
-        }
-
+        cmd.addAll(commandPrefix)
         cmd.add(rsyncPath)
 
         // 从设置读取 rsync 选项（用户可自定义）
@@ -306,7 +338,9 @@ class RsyncWrapper {
         // SSH 配置
         val sshOpts = buildSshOptions(serverConfig)
         cmd.add("-e")
-        cmd.add(sshOpts)
+        // Windows 下 cygwin rsync 会对 -e 后的值按空格重新拆分，
+        // 用引号整体包裹 ssh 命令，避免被错误拆分。
+        cmd.add(if (isWindows()) "\"$sshOpts\"" else sshOpts)
 
         // 排除规则
         for (pattern in options.excludePatterns) {
@@ -324,7 +358,8 @@ class RsyncWrapper {
         }
 
         // 源路径（注意：rsync 中 /path/dir 表示上传目录本身，/path/dir/ 表示只上传目录内容）
-        val source = localPath.trimEnd('/')
+        // Windows 下需转换为 Cygwin 风格路径，否则盘符 `C:` 会被 rsync 误识别为远程主机
+        val source = toCygwinPath(localPath).trimEnd('/')
         cmd.add(source)
 
         // 目标路径
@@ -335,25 +370,22 @@ class RsyncWrapper {
 
     /**
      * 构建 --files-from 模式的 rsync 命令参数
+     * @param commandPrefix 认证相关的前缀命令（sshpass 或为空，由 [prepareAuthContext] 决定）
+     * @param filesFromFile 存放要同步的相对路径列表的临时文件（NUL 分隔，配合 --from0）
      */
     private fun buildRsyncFilesFromCommand(
         sourceBaseDir: String,
         remoteBaseDir: String,
         serverConfig: ServerConfig,
-        options: SyncOptions
+        options: SyncOptions,
+        commandPrefix: List<String>,
+        filesFromFile: File
     ): List<String> {
         val settings = FileSyncSettings.getInstance()
         val rsyncPath = settings.rsyncPath.ifEmpty { "rsync" }
-        val useSshpass = serverConfig.authType == ServerConfig.AuthType.PASSWORD &&
-                serverConfig.password.isNotEmpty() &&
-                settings.sshpassAvailable
 
         val cmd = mutableListOf<String>()
-        if (useSshpass) {
-            cmd.add("sshpass")
-            cmd.add("-p")
-            cmd.add(serverConfig.password)
-        }
+        cmd.addAll(commandPrefix)
         cmd.add(rsyncPath)
 
         val userOptions = settings.rsyncOptions.trim()
@@ -365,16 +397,22 @@ class RsyncWrapper {
             cmd.add("--stats")
         }
 
-        // files-from 模式显式启用递归，并用 NUL 分隔路径
+        // files-from 模式必须显式启用递归：-a 在该模式下不会展开出 -r，
+        // 缺少 -r 时选中目录只会创建目录结构，不会传输目录内的文件。
+        // hasRecursiveOption 仅检测显式 -r/--recursive，故 -avz 也会补加 -r。
         if (!hasRecursiveOption(cmd)) {
             cmd.add("-r")
         }
-        cmd.add("--files-from=-")
+        // 从临时文件读取要同步的文件列表（NUL 分隔，配合 --from0）
+        // Windows 下该文件路径同样需转为 Cygwin 风格，否则盘符会被 rsync 误识别为远程主机
+        cmd.add("--files-from=${toCygwinPath(filesFromFile.absolutePath)}")
         cmd.add("--from0")
 
         val sshOpts = buildSshOptions(serverConfig)
         cmd.add("-e")
-        cmd.add(sshOpts)
+        // Windows 下 cygwin rsync 会对 -e 后的值按空格重新拆分，
+        // 用引号整体包裹 ssh 命令，避免被错误拆分。
+        cmd.add(if (isWindows()) "\"$sshOpts\"" else sshOpts)
 
         for (pattern in options.excludePatterns) {
             cmd.add("--exclude=$pattern")
@@ -382,18 +420,120 @@ class RsyncWrapper {
         if (options.dryRun) cmd.add("--dry-run")
         if (options.deleteRemote) cmd.add("--delete")
 
-        cmd.add(sourceBaseDir.trimEnd('/') + "/")
+        // Windows 下需转换为 Cygwin 风格路径，否则盘符 `C:` 会被 rsync 误识别为远程主机
+        cmd.add(toCygwinPath(sourceBaseDir).trimEnd('/') + "/")
         cmd.add("${serverConfig.user}@${serverConfig.host}:${remoteBaseDir.trimEnd('/')}/")
         return cmd
     }
 
+    /**
+     * 判断命令参数中是否包含显式的递归选项。
+     *
+     * 注意：仅检测 `-r` / `--recursive`，**不把 `-a` 视为递归**。
+     * 原因：`-a`（archive）虽在普通模式下等价于 `-rlptgoD`（含 `-r`），但在 `--files-from`
+     * 模式下 rsync 不会从 `-a` 展开递归——实测 `-avz --files-from` 只会创建目录结构而不会
+     * 递归传输目录内的文件（rsync 3.2.7 验证）。因此 [buildRsyncFilesFromCommand] 必须在
+     * 仅有 `-a` 而无显式 `-r` 时补加 `-r`，否则选中目录同步时子目录下的文件不会被传输。
+     */
     private fun hasRecursiveOption(cmd: List<String>): Boolean {
         return cmd.any { arg ->
             arg == "-r" || arg == "--recursive" ||
-                    (arg.startsWith("-") && !arg.startsWith("--") && arg.drop(1).contains('r')) ||
-                    (arg.startsWith("-") && !arg.startsWith("--") && arg.drop(1).contains('a'))
+                    (arg.startsWith("-") && !arg.startsWith("--") && arg.drop(1).contains('r'))
         }
     }
+
+    /**
+     * 准备认证上下文。
+     *
+     * - 若 sshpass 可用，优先用 `sshpass -p <password>` 包装命令。
+     * - 若使用密码认证但 sshpass 不可用（例如 Windows 上只装了 rsync 没有 sshpass），
+     *   则回退到 `SSH_ASKPASS` 机制：现代 OpenSSH（含 Windows 原生 OpenSSH）支持通过该环境变量
+     *   在非交互场景下提供密码，从而无需 sshpass 也能用 rsync 完成密码认证传输。
+     * - 密钥认证无需任何包装，返回空上下文。
+     *
+     * @return 包含命令前缀、额外环境变量以及执行后需清理的临时文件的上下文
+     */
+    private fun prepareAuthContext(serverConfig: ServerConfig): AuthContext {
+        val needsPassword = serverConfig.authType == ServerConfig.AuthType.PASSWORD &&
+                serverConfig.password.isNotEmpty()
+        if (!needsPassword) {
+            return AuthContext(emptyList(), emptyMap())
+        }
+
+        // 优先使用 sshpass（实时检测，避免依赖过期的缓存标志）
+        if (RsyncWrapper.isSshpassAvailable()) {
+            return AuthContext(
+                commandPrefix = listOf("sshpass", "-p", serverConfig.password),
+                environment = emptyMap()
+            )
+        }
+
+        // 回退：使用 SSH_ASKPASS 机制提供密码
+        return buildAskpassContext(serverConfig.password)
+    }
+
+    /**
+     * 构建基于 SSH_ASKPASS 的认证上下文。
+     *
+     * 将密码写入临时文件，并生成一个极简的辅助脚本，该脚本只是把密码文件内容输出到标准输出。
+     * 随后通过环境变量 SSH_ASKPASS / SSH_ASKPASS_REQUIRE 让底层 ssh 在需要密码时调用该脚本。
+     * 传输结束后清理临时文件。
+     *
+     * 平台差异（均已实测验证）：
+     * - Linux/macOS：用 `.sh` 脚本（`#!/bin/sh\ncat "路径"`），ssh 通过 execl 执行，支持 shebang。
+     * - Windows：必须用 `.cmd` 脚本（`@type "Windows路径"`）。常见的 cygwin rsync 精简包只含
+     *   rsync.exe + ssh.exe + cygwin DLL，**不含 sh.exe**，cygwin ssh 调用 askpass 时用的是
+     *   `posix_spawnp`（而非 fork+execl），该函数不解析 shebang，遇到 `.sh` 脚本会因找不到
+     *   `/bin/sh` 报 `posix_spawnp: No such file or directory`；而 `.cmd` 可经 cygwin 的扩展名
+     *   关联由 `cmd.exe /c` 执行。SSH_ASKPASS 与脚本内密码文件路径均用 Windows 路径（实测 cygwin
+     *   ssh 的 posix_spawnp 能正确解析并执行 `C:\...\askpass.cmd`，密码被成功读取）。
+     */
+    private fun buildAskpassContext(password: String): AuthContext {
+        val pwFile = File.createTempFile("deployx_askpass_pw_", ".tmp").apply {
+            deleteOnExit()
+            // 不写入换行符，保证 @type / cat 输出的密码与原始密码逐字节一致
+            writeBytes(password.toByteArray(StandardCharsets.UTF_8))
+        }
+        val isWin = isWindows()
+        // Windows 用 .cmd（posix_spawnp 能执行，内容用 Windows 路径）；
+        // 其他平台用 .sh（execl 支持 shebang）。
+        val helperExt = if (isWin) ".cmd" else ".sh"
+        val helper = File.createTempFile("deployx_askpass_", helperExt).apply {
+            deleteOnExit()
+            if (isWin) {
+                // @type 输出文件原始字节，无额外字符；\r\n 为 cmd 脚本标准换行
+                writeText("@type \"${pwFile.absolutePath}\"\r\n")
+            } else {
+                writeText("#!/bin/sh\ncat \"${pwFile.absolutePath}\"\n")
+                setExecutable(true)
+            }
+        }
+        // SSH_ASKPASS 的值需是执行环境可解析的路径：
+        // Windows 用 Windows 路径（cygwin posix_spawnp 能解析）；其他平台用 POSIX 路径。
+        val askpassEnv = helper.absolutePath
+        val environment = mapOf(
+            "SSH_ASKPASS" to askpassEnv,
+            "SSH_ASKPASS_REQUIRE" to "force",
+            "DISPLAY" to ":0"
+        )
+        return AuthContext(
+            commandPrefix = emptyList(),
+            environment = environment,
+            cleanup = {
+                runCatching { pwFile.delete() }
+                runCatching { helper.delete() }
+            }
+        )
+    }
+
+    /**
+     * rsync 认证上下文：命令前缀、额外环境变量、执行后清理回调。
+     */
+    private data class AuthContext(
+        val commandPrefix: List<String>,
+        val environment: Map<String, String>,
+        val cleanup: () -> Unit = {}
+    )
 
     /**
      * 构建 SSH 选项字符串
@@ -401,8 +541,11 @@ class RsyncWrapper {
      * 密钥认证时添加 -i 参数
      */
     private fun buildSshOptions(serverConfig: ServerConfig): String {
-        val opts = StringBuilder("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=")
+        val opts = StringBuilder("${resolveSshCommand()} -o StrictHostKeyChecking=no -o ConnectTimeout=")
         opts.append(FileSyncSettings.getInstance().connectTimeout / 1000) // 转为秒
+        // 不写 known_hosts：cygwin ssh 默认写 /home/<user>/.ssh/known_hosts，精简 cygwin 包可能无此目录，
+        // 报 "Could not create directory" 警告；显式指向 /dev/null 可消除（StrictHostKeyChecking=no 已禁用校验）
+        opts.append(" -o UserKnownHostsFile=/dev/null")
 
         if (serverConfig.port != 22) {
             opts.append(" -p ${serverConfig.port}")
@@ -413,6 +556,32 @@ class RsyncWrapper {
         }
 
         return opts.toString()
+    }
+
+    /**
+     * 解析 ssh 命令。
+     *
+     * Windows 下 cygwin rsync 执行 `-e ssh ...` 时，会从 PATH 中查找 ssh，而 Windows 系统 PATH
+     * 里的 `C:\Windows\System32\OpenSSH\ssh.exe`（Windows 原生 OpenSSH）通常优先于 cygwin 的 ssh.exe。
+     * Windows 原生 ssh 与 cygwin rsync 混用会导致 SSH_ASKPASS 机制不兼容（原生 ssh 无法执行 .cmd
+     * askpass，且路径处理与 cygwin 不一致），表现为 `0 bytes received` / exit code 12。
+     *
+     * 修复：Windows 下优先用与 rsync.exe 同目录的 cygwin ssh.exe（`<rsyncDir>/ssh.exe`），
+     * 保证 rsync 与 ssh 处于同一 cygwin 运行环境。其他平台用裸 `ssh`（由 PATH 解析）。
+     */
+    private fun resolveSshCommand(): String {
+        if (!isWindows()) return "ssh"
+        val rsyncPath = FileSyncSettings.getInstance().rsyncPath.ifEmpty { "rsync" }
+        val rsyncFile = File(rsyncPath)
+        // rsyncPath 为绝对路径时，取同目录下的 ssh.exe；否则无法定位，退回裸 ssh
+        if (rsyncFile.isAbsolute) {
+            val sshExe = File(rsyncFile.parentFile, "ssh.exe")
+            if (sshExe.exists()) {
+                // 用正斜杠，避免后续拼入 -e "..." 引号时反斜杠转义问题
+                return sshExe.absolutePath.replace('\\', '/')
+            }
+        }
+        return "ssh"
     }
 
     /**

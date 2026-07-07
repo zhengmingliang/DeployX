@@ -134,10 +134,32 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
                 gson.fromJson(text, listType)
             } catch (_: Exception) {
                 listOf(gson.fromJson(text, ScriptConfig::class.java))
+            }.filterNotNull()
+            if (imported.isEmpty()) return
+
+            val overwrite = if (scriptManager.hasIdConflict(imported)) {
+                when (Messages.showYesNoCancelDialog(
+                    DeployXBundle.message("settings.script.import.conflict"),
+                    DeployXBundle.message("settings.script.import.conflict.title"),
+                    DeployXBundle.message("settings.script.import.conflict.overwrite"),
+                    DeployXBundle.message("settings.script.import.conflict.addNew"),
+                    DeployXBundle.message("common.cancel"),
+                    Messages.getQuestionIcon()
+                )) {
+                    Messages.YES -> true
+                    Messages.NO -> false
+                    else -> return
+                }
+            } else {
+                false
             }
-            val count = scriptManager.importScripts(imported.filterNotNull())
+
+            val result = scriptManager.importScripts(imported, overwrite)
             refreshTable()
-            Messages.showInfoMessage(DeployXBundle.message("settings.script.imported", count), DeployXBundle.message("settings.script.import.complete"))
+            Messages.showInfoMessage(
+                DeployXBundle.message("settings.script.imported", result.added, result.updated),
+                DeployXBundle.message("settings.script.import.complete")
+            )
         } catch (e: Exception) {
             Messages.showErrorDialog(DeployXBundle.message("settings.script.import.failed", e.message ?: ""), DeployXBundle.message("settings.script.import.failed.title"))
         }

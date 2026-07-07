@@ -126,19 +126,59 @@ class ScriptManager {
         saveToConfig()
     }
 
-    fun importScripts(imported: List<ScriptConfig>): Int {
-        imported.forEach { script ->
-            scripts.add(
-                ScriptConfig.ensureId(script).copy(
-                    id = ScriptConfig.generateId(),
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis()
+    fun importScripts(imported: List<ScriptConfig>, overwrite: Boolean = false): ImportResult {
+        var added = 0
+        var updated = 0
+        val now = System.currentTimeMillis()
+        imported.filterNotNull().forEach { raw ->
+            val script = ScriptConfig.ensureId(raw)
+            val existingIndex = if (script.id.isNotBlank()) scripts.indexOfFirst { it.id == script.id } else -1
+            if (existingIndex >= 0) {
+                if (overwrite) {
+                    val old = scripts[existingIndex]
+                    scripts[existingIndex] = script.copy(
+                        id = old.id,
+                        createdAt = old.createdAt,
+                        updatedAt = now,
+                        lastRunAt = old.lastRunAt,
+                        lastRunStatus = old.lastRunStatus,
+                        runCount = old.runCount
+                    )
+                    updated++
+                } else {
+                    scripts.add(
+                        script.copy(
+                            id = ScriptConfig.generateId(),
+                            createdAt = if (script.createdAt > 0) script.createdAt else now,
+                            updatedAt = now
+                        )
+                    )
+                    added++
+                }
+            } else {
+                scripts.add(
+                    script.copy(
+                        id = if (script.id.isNotBlank()) script.id else ScriptConfig.generateId(),
+                        createdAt = if (script.createdAt > 0) script.createdAt else now,
+                        updatedAt = now
+                    )
                 )
-            )
+                added++
+            }
         }
-        if (imported.isNotEmpty()) saveToConfig()
-        return imported.size
+        if (added > 0 || updated > 0) saveToConfig()
+        return ImportResult(added, updated)
     }
+
+    /**
+     * 判断待导入的脚本中是否存在与已有脚本 id 相同的冲突。
+     */
+    fun hasIdConflict(imported: List<ScriptConfig>): Boolean {
+        val existingIds = scripts.map { it.id }.toSet()
+        return imported.any { it.id.isNotBlank() && it.id in existingIds }
+    }
+
+    data class ImportResult(val added: Int, val updated: Int)
 
     fun renderCommand(script: ScriptConfig, rawParams: Map<String, String>, context: ScriptRunContext = ScriptRunContext.EMPTY): String {
         if (script.command.isBlank()) throw IllegalArgumentException(DeployXBundle.message("script.error.commandEmpty"))
