@@ -657,8 +657,20 @@ class RsyncWrapper {
         }
 
         // 排除 rsync 命令行和选项输出
-        if (trimmed.startsWith("rsync ") || trimmed.startsWith("--") || 
+        if (trimmed.startsWith("rsync ") || trimmed.startsWith("--") ||
             trimmed.startsWith("- ") || trimmed.startsWith("[")) {
+            return false
+        }
+
+        // 排除 ssh / rsync 的诊断行（Warning: / Error: / Note: / Failed to ... / Could not ... 等）
+        // 这类行可能含字母和句点，会被后面的"含扩展名"判断误认为文件名，
+        // 例如 "Warning: Permanently added '172.16.18.235' (ED25519) to the list of known hosts."
+        val diagnosticPrefixes = listOf(
+            "warning:", "error:", "note:", "info:",
+            "failed to ", "could not ", "cannot ", "unable to ",
+            "permission denied", "connection ", "rsync:", "ssh:"
+        )
+        if (diagnosticPrefixes.any { trimmed.startsWith(it, ignoreCase = true) }) {
             return false
         }
 
