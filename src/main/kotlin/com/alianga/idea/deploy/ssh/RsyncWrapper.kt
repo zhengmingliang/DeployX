@@ -674,6 +674,13 @@ class RsyncWrapper {
             return false
         }
 
+        // 排除 rsync 输出的目录创建行（以 / 结尾，如 "antrun/"、"classes/db/desktop/"）。
+        // rsync 传输目录内容时会先输出目录路径行，再输出其中的文件行；
+        // 目录行不是"实际传输的文件"，不应计入 transferredFileList。
+        if (trimmed.endsWith('/')) {
+            return false
+        }
+
         // 有效的文件传输行特征：包含文件扩展名或路径分隔符
         // 文件名通常：包含 .（扩展名）或 /（路径）或只是简单的文件名
         val hasValidPathChars = trimmed.any { it.isLetterOrDigit() }
