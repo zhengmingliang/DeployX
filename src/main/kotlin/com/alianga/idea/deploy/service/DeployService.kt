@@ -745,12 +745,10 @@ class DeployService {
         backupPath: String? = null
     ): UpdateReportGroup {
         val normalizedRelativePaths = relativePaths.map { it.trim('/') }.filter { it.isNotBlank() }
-        // 如果有实际传输的文件列表，优先使用；否则回退到选择的路径
-        val transferredFiles = if (transferredFileList.isNotEmpty()) {
-            transferredFileList.map { joinRemotePath(remoteBaseDir, it) }
-        } else {
-            normalizedRelativePaths.map { joinRemotePath(remoteBaseDir, it) }
-        }
+        // transferredFiles 只包含 rsync 实际传输的文件，不回退到选中的路径。
+        // 增量同步跳过所有文件（0 transferred）时该列表为空，报告据此显示"无文件变更"，
+        // 避免把选中的目录或未变更的文件误展示为"实际更新的文件"。
+        val transferredFiles = transferredFileList.map { joinRemotePath(remoteBaseDir, it) }
         return UpdateReportGroup(
             serverId = server.id,
             serverName = server.name,

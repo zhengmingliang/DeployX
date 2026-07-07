@@ -36,13 +36,13 @@ object UpdateReportFormatter {
             appendLine(DeployXBundle.message("report.row.status", status))
             appendLine(DeployXBundle.message("report.row.groupCount", report.groups.size))
 
-            // 汇总信息 - 使用实际传输的文件数量
+            // 汇总信息
             val totalTransferredFiles = report.groups.sumOf { it.transferredFiles.size }
             val totalSelectedFiles = report.groups.sumOf { it.remotePaths.size }
             val totalDuration = report.groups.sumOf { it.duration }
             val totalSize = report.groups.sumOf { it.totalSize }
 
-            // 显示实际传输文件数（如果有）
+            // 文件数：有实际传输时显示传输数，否则显示选中数（让用户知道本次涉及多少文件）
             val displayFileCount = if (totalTransferredFiles > 0) totalTransferredFiles else totalSelectedFiles
             appendLine(DeployXBundle.message("report.row.totalFiles", displayFileCount))
             appendLine(DeployXBundle.message("report.row.totalDuration", formatDuration(totalDuration)))
@@ -65,7 +65,7 @@ object UpdateReportFormatter {
                     appendLine(DeployXBundle.message("report.row.localDir", group.sourceBaseDir))
                     appendLine(DeployXBundle.message("report.row.remoteDir", group.remoteBaseDir))
 
-                    // 显示实际传输文件数
+                    // 文件数：有实际传输时显示传输数，否则显示选中数
                     val fileCount = if (group.transferredFiles.isNotEmpty()) group.transferredFiles.size else group.remotePaths.size
                     appendLine(DeployXBundle.message("report.row.fileCount", fileCount))
                     appendLine(DeployXBundle.message("report.row.duration", formatDuration(group.duration)))
@@ -87,23 +87,18 @@ object UpdateReportFormatter {
                         appendLine()
                     }
 
-                    // 实际传输的文件列表（优先显示）
-                    val displayFiles = if (group.transferredFiles.isNotEmpty()) {
-                        group.transferredFiles
-                    } else {
-                        group.remotePaths
-                    }
-
-                    if (displayFiles.isNotEmpty()) {
-                        if (group.transferredFiles.isNotEmpty()) {
-                            appendLine(DeployXBundle.message("report.updatedFilesTitle"))
-                        } else {
-                            appendLine(DeployXBundle.message("report.uploadedFilesTitle"))
-                        }
+                    // 文件列表：仅展示 rsync 实际传输的文件。
+                    // 增量同步跳过所有文件时 transferredFiles 为空，显示"无文件变更"提示，
+                    // 不再把选中的目录或未变更的文件误展示为"实际更新的文件"。
+                    if (group.transferredFiles.isNotEmpty()) {
+                        appendLine(DeployXBundle.message("report.updatedFilesTitle"))
                         appendLine()
                         appendLine("```text")
-                        displayFiles.forEach { appendLine(it) }
+                        group.transferredFiles.forEach { appendLine(it) }
                         appendLine("```")
+                        appendLine()
+                    } else {
+                        appendLine(DeployXBundle.message("report.noFilesChanged"))
                         appendLine()
                     }
                 }
