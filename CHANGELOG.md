@@ -1,5 +1,39 @@
 # DeployX Changelog
 
+## [1.0.2] - 2026-07-08
+
+### ✨ 新功能
+- **脚本导出优化**：导出逻辑适配选中状态 - 未选中任何脚本时导出全部脚本，选中多个脚本时仅导出选中的脚本（JSON 数组形式）
+- **脚本批量删除**：删除操作现在可一次性删除所有选中的脚本（此前只会删除选中的第一个）
+- **脚本导入冲突处理**：导入时若脚本 id 已存在，提示用户选择「覆盖重复项」或「全部作为新脚本新增」
+- **SSH_ASKPASS 密码认证回退**：Windows/Linux 上已安装 rsync 但缺少 sshpass 时，自动回退使用 SSH_ASKPASS 机制提供密码，密码认证的 rsync 仍可正常工作，无需降级 SFTP
+
+### 🪟 Windows rsync 同步优化
+- `-e` 后的 ssh 命令整体加引号，避免被 cygwin rsync 错误拆分
+- Windows 盘符路径（如 `C:\Users\...`）转换为 Cygwin 风格（`/cygdrive/c/Users/...`），避免盘符被误识别为远程主机
+- `--files-from` 改用临时文件（使用完自动删除）替代 stdin 传入
+
+### 🐛 Windows rsync 密码认证修复
+修复 Windows 无 sshpass 时密码认证同步报 `exit code 12` / `0 bytes received` 的问题（三个根因，均已实测验证修复）：
+- **askpass 脚本格式**：精简 Cygwin rsync 包不含 `sh.exe`，cygwin ssh 通过 `posix_spawnp` 调用 askpass（不解析 shebang），`.sh` 脚本因找不到 `/bin/sh` 报 `No such file or directory`。改用 `.cmd` 脚本（`@type "路径"`），由 `cmd.exe /c` 执行
+- **ssh 来源错误**：rsync `-e "ssh ..."` 用裸 `ssh` 时会找到 Windows 原生 `C:\Windows\System32\OpenSSH\ssh.exe` 而非 cygwin ssh，导致 SSH_ASKPASS 机制不兼容。改为显式使用 `rsync.exe` 同目录下的 `ssh.exe`
+- **缺少递归**：`-a` 在 `--files-from` 模式下不会展开为 `-r`，选中目录同步时只创建空子目录、不传文件。现已显式补加 `-r`
+
+### 🐛 目录同步修复（全平台）
+- 修复选中目录同步时只创建空子目录、不传输目录内文件的问题（同上 `-a`/`-r` 根因，Linux/macOS 同样受影响）
+
+### 🐛 更新报告修复
+- **rsync 诊断行误判**：修复 SSH 的 `Warning: Permanently added ...` 等诊断行被误判为文件传输行、拼成远程路径写入报告"实际更新的文件"的问题
+- **目录创建行误判**：修复 rsync 输出的目录创建行（如 `antrun/`、`classes/db/desktop/`，以 `/` 结尾）被误判为文件传输行的问题，报告现在只列出实际传输的文件，与 rsync 统计 `Number of regular files transferred` 一致
+- **空传输回退问题**：修复增量同步跳过所有文件（0 transferred）时，报告"实际更新的文件"回退到选中路径（含目录）的问题。现在 0 传输时显示"无文件变更"提示，不再误列选中目录或未变更文件
+
+### 🎨 优化改进
+- **SSH 优化**：新增 `-o UserKnownHostsFile=/dev/null`，消除精简 Cygwin 环境下 `Could not create directory '/home/<user>/.ssh'` 警告
+- **Alt+Shift+Z 菜单定位修复**：改用 `guessBestPopupLocation(dataContext)` 定位弹窗，修复多个 IDEA 项目窗口时菜单弹到错误窗口的问题
+- **changelog 统一**：统一 `build.gradle.kts` 与 `plugin.xml` 的 changelog 内容，插件市场显示完整中英文双语版本
+
+---
+
 ## [1.0.1] - 2026-07-05
 
 ### ✨ 新功能
@@ -108,5 +142,6 @@
 - 次版本号：向下兼容的功能性新增
 - 修订号：向下兼容的问题修正
 
+[1.0.2]: https://github.com/zhengmingliang/DeployX/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/zhengmingliang/DeployX/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/zhengmingliang/DeployX/releases/tag/v1.0.0
