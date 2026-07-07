@@ -18,6 +18,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.swing.JFileChooser
+import javax.swing.ListSelectionModel
 import javax.swing.JPanel
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -30,7 +31,9 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
 
     private val scriptManager = ScriptManager.getInstance()
     private val tableModel = ScriptTableModel()
-    private val table = JBTable(tableModel)
+    private val table = JBTable(tableModel).apply {
+        setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION)
+    }
     private val searchField = JBTextField()
     private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
 
@@ -67,7 +70,7 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
                 DeployXBundle.lazyMessage("settings.script.action.export"),
                 DeployXBundle.lazyMessage("settings.script.action.export.desc"),
                 AllIcons.ToolbarDecorator.Export
-            ) { override fun actionPerformed(e: AnActionEvent) { exportSelected() } })
+            ) { override fun actionPerformed(e: AnActionEvent) { exportScripts() } })
             .addExtraAction(object : AnAction(
                 DeployXBundle.lazyMessage("settings.script.action.refresh"),
                 DeployXBundle.lazyMessage("settings.script.action.refresh.desc"),
@@ -105,16 +108,18 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun removeScript() {
-        val script = selectedScript() ?: return
+        val scripts = selectedScripts()
+        if (scripts.isEmpty()) return
+        val names = scripts.joinToString(", ") { it.name }
         val result = Messages.showYesNoDialog(
-            DeployXBundle.message("settings.script.confirm.delete", script.name),
+            DeployXBundle.message("settings.script.confirm.delete.multi", names, scripts.size),
             DeployXBundle.message("settings.script.confirm.delete.title"),
             DeployXBundle.message("settings.script.confirm.delete.yes"),
             DeployXBundle.message("common.cancel"),
             Messages.getQuestionIcon()
         )
         if (result == Messages.YES) {
-            scriptManager.deleteScript(script.id)
+            scriptManager.deleteScripts(scripts.map { it.id })
             refreshTable()
         }
     }
@@ -138,21 +143,29 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
         }
     }
 
-    private fun exportSelected() {
-        val script = selectedScript() ?: return
+    private fun exportScripts() {
+        val scripts = selectedScripts().ifEmpty { scriptManager.getScripts() }
+        if (scripts.isEmpty()) return
         val chooser = JFileChooser().apply {
-            selectedFile = File("deployx-script-${script.name.ifBlank { script.id }}.json")
+            selectedFile = if (scripts.size == 1) {
+                File("deployx-script-${scripts[0].name.ifBlank { scripts[0].id }}.json")
+            } else {
+                File("deployx-scripts.json")
+            }
         }
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return
-        chooser.selectedFile.writeText(gson.toJson(script))
+        val json = if (scripts.size == 1) gson.toJson(scripts[0]) else gson.toJson(scripts)
+        chooser.selectedFile.writeText(json)
         Messages.showInfoMessage(DeployXBundle.message("settings.script.exported", chooser.selectedFile.absolutePath), DeployXBundle.message("settings.script.export.complete"))
     }
 
-    private fun selectedScript(): ScriptConfig? {
-        val row = table.selectedRow
-        if (row < 0) return null
-        return tableModel.getScriptAt(table.convertRowIndexToModel(row))
+    private fun selectedScripts(): List<ScriptConfig> {
+        return table.selectedRows.map { row ->
+            tableModel.getScriptAt(table.convertRowIndexToModel(row))
+        }.filterNotNull()
     }
+
+    private fun selectedScript(): ScriptConfig? = selectedScripts().firstOrNull()
 
     fun isModified(): Boolean = false
     fun apply() {}

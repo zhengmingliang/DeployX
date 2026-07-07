@@ -96,6 +96,15 @@ class ScriptManager {
         return removed
     }
 
+    fun deleteScripts(ids: List<String>): Int {
+        val idSet = ids.toSet()
+        val before = scripts.size
+        scripts.removeAll { it.id in idSet }
+        val removed = before - scripts.size
+        if (removed > 0) saveToConfig()
+        return removed
+    }
+
     fun copyScript(id: String): ScriptConfig? {
         val source = getScript(id) ?: return null
         return addScript(
