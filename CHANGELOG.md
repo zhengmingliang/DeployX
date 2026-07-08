@@ -7,6 +7,8 @@
 - **脚本批量删除**：删除操作现在可一次性删除所有选中的脚本（此前只会删除选中的第一个）
 - **脚本导入冲突处理**：导入时若脚本 id 已存在，提示用户选择「覆盖重复项」或「全部作为新脚本新增」
 - **SSH_ASKPASS 密码认证回退**：Windows/Linux 上已安装 rsync 但缺少 sshpass 时，自动回退使用 SSH_ASKPASS 机制提供密码，密码认证的 rsync 仍可正常工作，无需降级 SFTP
+- **rsync 一键下载安装（Windows）**：设置面板检测到未安装 rsync 时显示「一键下载安装」按钮，自动下载（GitHub releases，失败切换国内镜像）、解压到 `~/.deployx/rsync-win/`、自动配置路径；下载失败提供手动下载链接
+- **首次传输安装提示（Windows）**：首次传输时未检测到 rsync 则弹窗询问是否自动安装。选「是」下载安装；选「否」记住选择并静默降级 SFTP（不再提示）。`RSYNC_ONLY` 模式下用户拒绝后也降级 SFTP
 
 ### 🪟 Windows rsync 同步优化
 - `-e` 后的 ssh 命令整体加引号，避免被 cygwin rsync 错误拆分

@@ -40,6 +40,9 @@
             <li><b>📚 Script Export:</b> Export now adapts to selection - exports all scripts when nothing is selected, and only the selected scripts (as a JSON array) when multiple are selected</li>
             <li><b>🗑️ Script Multi-Delete:</b> Deleting now removes all selected scripts at once (previously only the first selected was deleted)</li>
             <li><b>📥 Script Import - Conflict Handling:</b> On import, if a script id already exists, the user is prompted to either overwrite the duplicate or import all as new scripts</li>
+            <li><b>🔐 SSH_ASKPASS Fallback:</b> When rsync is present but sshpass is missing (common on Windows), password auth automatically falls back to the SSH_ASKPASS mechanism - no SFTP downgrade needed</li>
+            <li><b>⬇️ rsync One-Click Download & Install (Windows):</b> When rsync is not detected on Windows, a "Download &amp; Install rsync" button appears in settings; it auto-downloads (GitHub releases, with China mirror fallback), extracts to <code>~/.deployx/rsync-win/</code>, and configures the path automatically. On failure, manual download links are provided</li>
+            <li><b>💡 First-Run rsync Install Prompt (Windows):</b> On the first transfer with rsync missing, a dialog asks whether to auto-install. "Yes" downloads and installs; "No" remembers the choice and falls back to SFTP silently (never asks again). <code>RSYNC_ONLY</code> mode also degrades to SFTP after the user declines</li>
             <li><b>🪟 Windows rsync Optimization:</b> Fixed rsync failing on Windows Cygwin builds:
                 <ul>
                     <li>Quote the ssh command passed to <code>-e</code> so it is not split incorrectly</li>
@@ -55,7 +58,16 @@
                 </ul>
             </li>
             <li><b>🐛 Directory Sync Fix (all platforms):</b> Fixed selecting a directory and syncing only created empty subdirectories without transferring the files inside (same <code>-a</code>/<code>-r</code> root cause as above, affects Linux/macOS too)</li>
+            <li><b>🐛 Update Report Fixes:</b>
+                <ul>
+                    <li>Fixed SSH diagnostic lines (e.g. <code>Warning: Permanently added ...</code>) being misidentified as transferred files in the report</li>
+                    <li>Fixed rsync directory creation lines (ending with <code>/</code>) being misidentified as transferred files - report now lists only actual files, matching rsync's <code>Number of regular files transferred</code></li>
+                    <li>Fixed "Actually updated files" showing selected directories or unchanged files when 0 files were transferred (incremental skip) - now shows "No files changed" instead</li>
+                </ul>
+            </li>
             <li><b>🎨 SSH Clean-up:</b> Added <code>-o UserKnownHostsFile=/dev/null</code> to suppress the <code>Could not create directory '/home/&lt;user&gt;/.ssh'</code> warning from Cygwin ssh on minimal installs</li>
+            <li><b>🎨 Alt+Shift+Z Menu Fix:</b> Fixed the quick menu popping up in the wrong IDEA window when multiple project windows are open - now uses <code>guessBestPopupLocation(dataContext)</code> for correct positioning</li>
+            <li><b>🎨 Changelog Unification:</b> Synced <code>build.gradle.kts</code> and <code>plugin.xml</code> changelog content - plugin marketplace now shows the full bilingual version</li>
         </ul>
 
         <h3>v1.0.1 - Internationalization & Enhancements</h3>
@@ -103,6 +115,9 @@
             <li><b>📚 脚本导出优化：</b>导出逻辑适配选中状态 - 未选中任何脚本时导出全部脚本，选中多个脚本时仅导出选中的脚本（JSON 数组形式）</li>
             <li><b>🗑️ 脚本批量删除：</b>删除操作现在可一次性删除所有选中的脚本（此前只会删除选中的第一个）</li>
             <li><b>📥 脚本导入冲突处理：</b>导入时若脚本 id 已存在，提示用户选择「覆盖重复项」或「全部作为新脚本新增」</li>
+            <li><b>🔐 SSH_ASKPASS 密码认证回退：</b>已安装 rsync 但缺少 sshpass 时（Windows 常见），密码认证自动回退使用 SSH_ASKPASS 机制，无需降级 SFTP</li>
+            <li><b>⬇️ rsync 一键下载安装（Windows）：</b>设置面板检测到未安装 rsync 时显示「一键下载安装」按钮，自动下载（GitHub releases，失败切换国内镜像）、解压到 <code>~/.deployx/rsync-win/</code>、自动配置路径；下载失败提供手动下载链接</li>
+            <li><b>💡 首次传输安装提示（Windows）：</b>首次传输时未检测到 rsync 则弹窗询问是否自动安装。选「是」下载安装；选「否」记住选择并静默降级 SFTP（不再提示）。<code>RSYNC_ONLY</code> 模式下用户拒绝后也降级 SFTP</li>
             <li><b>🪟 Windows rsync 同步优化：</b>修复 Windows Cygwin 版 rsync 同步失败的问题：
                 <ul>
                     <li><code>-e</code> 后的 ssh 命令整体加引号，避免被错误拆分</li>
@@ -118,7 +133,16 @@
                 </ul>
             </li>
             <li><b>🐛 目录同步修复（全平台）：</b>修复选中目录同步时只创建空子目录、不传输目录内文件的问题（同上 <code>-a</code>/<code>-r</code> 根因，Linux/macOS 同样受影响）</li>
+            <li><b>🐛 更新报告修复：</b>
+                <ul>
+                    <li>修复 SSH 诊断行（如 <code>Warning: Permanently added ...</code>）被误判为传输文件、拼成远程路径写入报告的问题</li>
+                    <li>修复 rsync 目录创建行（以 <code>/</code> 结尾）被误判为传输文件的问题 - 报告现在只列出实际传输的文件，与 rsync 统计 <code>Number of regular files transferred</code> 一致</li>
+                    <li>修复增量同步跳过所有文件（0 传输）时报告"实际更新的文件"回退到选中路径（含目录）的问题 - 现在显示"无文件变更"提示</li>
+                </ul>
+            </li>
             <li><b>🎨 SSH 优化：</b>新增 <code>-o UserKnownHostsFile=/dev/null</code>，消除精简 Cygwin 环境下 <code>Could not create directory '/home/&lt;user&gt;/.ssh'</code> 警告</li>
+            <li><b>🎨 Alt+Shift+Z 菜单修复：</b>修复多个 IDEA 项目窗口时快捷菜单弹到错误窗口的问题 - 改用 <code>guessBestPopupLocation(dataContext)</code> 正确定位</li>
+            <li><b>🎨 Changelog 统一：</b>统一 <code>build.gradle.kts</code> 与 <code>plugin.xml</code> 的 changelog 内容，插件市场显示完整中英文双语版本</li>
         </ul>
 
         <h3>v1.0.1 - 国际化与体验优化</h3>
