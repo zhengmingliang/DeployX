@@ -73,10 +73,13 @@ class TransferService {
         val sshpassAvailable = RsyncWrapper.isSshpassAvailable()
 
         // Windows 下首次检测到 rsync 不可用时，提示用户是否一键安装
+        var userDeclinedInstall = false
         if (!rsyncAvailable && SystemInfo.isWindows && !settings.declinedRsyncAutoInstall) {
             val installed = promptAndInstallRsync(logCallback)
             if (installed) {
                 rsyncAvailable = RsyncWrapper.isRsyncAvailable()
+            } else {
+                userDeclinedInstall = true
             }
         }
 
@@ -87,8 +90,14 @@ class TransferService {
             }
             TransferMode.RSYNC_ONLY -> {
                 if (!rsyncAvailable) {
-                    logCallback?.invoke("[ERROR] RSYNC_ONLY 模式下未检测到 rsync，请安装 rsync 或切换到 AUTO/SFTP_ONLY")
-                    "rsync"
+                    if (userDeclinedInstall) {
+                        // 用户已明确拒绝安装 rsync，降级 SFTP 而非硬失败
+                        logCallback?.invoke("[TRANSFER] 用户跳过 rsync 安装，RSYNC_ONLY 模式降级为 SFTP 上传")
+                        "sftp"
+                    } else {
+                        logCallback?.invoke("[ERROR] RSYNC_ONLY 模式下未检测到 rsync，请安装 rsync 或切换到 AUTO/SFTP_ONLY")
+                        "rsync"
+                    }
                 } else {
                     if (needsSshpass && !sshpassAvailable) {
                         logCallback?.invoke(DeployXBundle.message("ssh.rsync.askpassFallback"))
