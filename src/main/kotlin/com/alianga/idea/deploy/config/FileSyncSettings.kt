@@ -32,7 +32,9 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
         var sshpassAvailable: Boolean = true,
         var transferMode: String = "AUTO",
         // language settings: "system" | "en" | "zh_CN"
-        var language: String = "system"
+        var language: String = "system",
+        // 首次传输时检测到 Windows 未安装 rsync，用户选择"否"后置为 true，不再提示
+        var declinedRsyncAutoInstall: Boolean = false
     )
 
     private var myState = State()
@@ -99,4 +101,8 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
     var language: String
         get() = myState.language
         set(value) { myState.language = value }
+
+    var declinedRsyncAutoInstall: Boolean
+        get() = myState.declinedRsyncAutoInstall
+        set(value) { myState.declinedRsyncAutoInstall = value }
 }

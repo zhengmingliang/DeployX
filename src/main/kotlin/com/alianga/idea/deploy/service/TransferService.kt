@@ -7,8 +7,12 @@ import com.alianga.idea.deploy.model.SyncOptions
 import com.alianga.idea.deploy.model.SyncResult
 import com.alianga.idea.deploy.ssh.RsyncWrapper
 import com.alianga.idea.deploy.ssh.SftpTransferClient
+import com.alianga.idea.deploy.util.RsyncDownloader
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.util.SystemInfo
 
 /**
  * 传输服务：根据配置自动选择 rsync 或 SFTP fallback。
@@ -19,6 +23,8 @@ class TransferService {
     enum class TransferMode { AUTO, RSYNC_ONLY, SFTP_ONLY }
 
     companion object {
+        private val LOG = Logger.getInstance(TransferService::class.java)
+
         fun getInstance(): TransferService =
             ApplicationManager.getApplication().getService(TransferService::class.java)
     }
@@ -62,9 +68,17 @@ class TransferService {
     private fun chooseMethod(serverConfig: ServerConfig, logCallback: ((String) -> Unit)?): String {
         val settings = FileSyncSettings.getInstance()
         val mode = runCatching { TransferMode.valueOf(settings.transferMode) }.getOrDefault(TransferMode.AUTO)
-        val rsyncAvailable = RsyncWrapper.isRsyncAvailable()
+        var rsyncAvailable = RsyncWrapper.isRsyncAvailable()
         val needsSshpass = serverConfig.authType == ServerConfig.AuthType.PASSWORD && serverConfig.password.isNotBlank()
         val sshpassAvailable = RsyncWrapper.isSshpassAvailable()
+
+        // Windows 下首次检测到 rsync 不可用时，提示用户是否一键安装
+        if (!rsyncAvailable && SystemInfo.isWindows && !settings.declinedRsyncAutoInstall) {
+            val installed = promptAndInstallRsync(logCallback)
+            if (installed) {
+                rsyncAvailable = RsyncWrapper.isRsyncAvailable()
+            }
+        }
 
         return when (mode) {
             TransferMode.SFTP_ONLY -> {
@@ -97,6 +111,61 @@ class TransferService {
                     "rsync"
                 }
             }
+        }
+    }
+
+    /**
+     * Windows 下首次未检测到 rsync 时，弹窗询问用户是否自动安装。
+     *
+     * - 用户选"是"：后台下载安装 rsync，成功后更新 rsyncPath 并返回 true
+     * - 用户选"否"：标记 declinedRsyncAutoInstall=true，返回 false（后续不再提示，自动降级 SFTP）
+     *
+     * 本方法在后台线程调用，通过 invokeAndWait 弹窗阻塞等待用户选择。
+     */
+    private fun promptAndInstallRsync(logCallback: ((String) -> Unit)?): Boolean {
+        val settings = FileSyncSettings.getInstance()
+
+        // 在 EDT 上弹窗，阻塞等待用户选择
+        val userChoice = IntArray(1)
+        ApplicationManager.getApplication().invokeAndWait {
+            userChoice[0] = Messages.showYesNoDialog(
+                DeployXBundle.message("settings.rsync.prompt.message"),
+                DeployXBundle.message("settings.rsync.prompt.title"),
+                Messages.getQuestionIcon()
+            )
+        }
+
+        if (userChoice[0] != Messages.YES) {
+            // 用户选择"否"，标记不再提示
+            settings.declinedRsyncAutoInstall = true
+            logCallback?.invoke("[TRANSFER] 用户跳过 rsync 安装，后续将使用 SFTP 上传")
+            return false
+        }
+
+        // 用户选择"是"，执行下载安装
+        logCallback?.invoke(DeployXBundle.message("settings.rsync.download.installing"))
+        return try {
+            val result = RsyncDownloader.downloadAndInstall()
+            result.fold(
+                onSuccess = { rsyncExe ->
+                    val path = rsyncExe.absolutePath.replace('\\', '/')
+                    settings.rsyncPath = path
+                    logCallback?.invoke(DeployXBundle.message("settings.rsync.download.success", path))
+                    true
+                },
+                onFailure = { error ->
+                    LOG.warn("rsync auto-install failed: ${error.message}")
+                    logCallback?.invoke(DeployXBundle.message("settings.rsync.download.failed", error.message ?: ""))
+                    // 安装失败也标记为已提示，避免每次传输都弹窗（用户可在设置面板手动重试）
+                    settings.declinedRsyncAutoInstall = true
+                    false
+                }
+            )
+        } catch (e: Exception) {
+            LOG.warn("rsync auto-install exception", e)
+            logCallback?.invoke(DeployXBundle.message("settings.rsync.download.failed", e.message ?: ""))
+            settings.declinedRsyncAutoInstall = true
+            false
         }
     }
 }
