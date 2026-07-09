@@ -4,6 +4,7 @@ import com.alianga.idea.deploy.config.ConfigManager
 import com.alianga.idea.deploy.model.MappingConfig
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ServerConfig
+import com.alianga.idea.deploy.model.ServerConfigDeserializer
 import com.alianga.idea.deploy.service.MappingManager
 import com.alianga.idea.deploy.service.ScriptManager
 import com.alianga.idea.deploy.service.ServerManager
@@ -31,7 +32,9 @@ import java.util.Base64
  */
 object ConfigExporter {
 
-    private val GSON: Gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
+    private val GSON: Gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping()
+        .registerTypeAdapter(ServerConfig::class.java, ServerConfigDeserializer)
+        .create()
     private const val PBKDF2_ITERATIONS = 65536
     private const val KEY_LENGTH = 256
     private const val GCM_TAG_LENGTH = 128

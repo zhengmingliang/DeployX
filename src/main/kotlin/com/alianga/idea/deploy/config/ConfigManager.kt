@@ -4,6 +4,7 @@ import com.alianga.idea.deploy.model.HistoryRecord
 import com.alianga.idea.deploy.model.MappingConfig
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ServerConfig
+import com.alianga.idea.deploy.model.ServerConfigDeserializer
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.reflect.TypeToken
@@ -49,6 +50,7 @@ class ConfigManager {
         private val GSON: Gson = GsonBuilder()
             .setPrettyPrinting()
             .disableHtmlEscaping()
+            .registerTypeAdapter(ServerConfig::class.java, ServerConfigDeserializer)
             .create()
 
         fun getInstance(): ConfigManager =

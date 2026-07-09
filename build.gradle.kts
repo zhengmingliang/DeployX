@@ -31,6 +31,14 @@ dependencies {
 
     // CloudTerminalRunner/CloudTerminalProcess 等类（运行时由 IDE terminal 插件提供）
     compileOnly(files(terminalCloudJar))
+
+    // Test
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testImplementation("com.google.code.gson:gson:2.10.1")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 intellij {
