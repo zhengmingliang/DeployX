@@ -2,9 +2,12 @@ package com.alianga.idea.deploy.ui.settings
 
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.MappingConfig
+import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.service.ServerManager
+import com.alianga.idea.deploy.ui.CommandFieldWithScriptButton
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.TextBrowseFolderListener
@@ -22,8 +25,9 @@ import javax.swing.JComponent
 class MappingEditDialog(
     private val existingMapping: MappingConfig?,
     private val isCopyMode: Boolean = false,
-    private val prefillData: MappingConfig? = null
-) : DialogWrapper(null) {
+    private val prefillData: MappingConfig? = null,
+    private val project: Project? = null
+) : DialogWrapper(project) {
 
     private val nameField = JBTextField()
     private val localDirField = TextFieldWithBrowseButton()
@@ -36,10 +40,26 @@ class MappingEditDialog(
     private val unzipDestField = JBTextField()
     private val excludeField = JBTextField()
     private val preCommandEnabledCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.enablePreCommand"))
-    private val preCommandField = JBTextField()
     private val postCommandEnabledCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.enablePostCommand"))
-    private val postCommandField = JBTextField()
     private val autoCdCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.autoCd"), false)
+
+    /** 带脚本库选择按钮的上传前命令输入组件（多行编辑，含行号，支持全屏） */
+    private val preCommandField = CommandFieldWithScriptButton(
+        project = project,
+        contextProvider = { buildContext() },
+        multiline = true,
+        preferredScrollSize = Dimension(560, 130),
+        fullscreenTitle = DeployXBundle.message("dialog.mapping.fullscreen.preCommandTitle")
+    )
+
+    /** 带脚本库选择按钮的上传后命令输入组件（多行编辑，含行号，支持全屏） */
+    private val postCommandField = CommandFieldWithScriptButton(
+        project = project,
+        contextProvider = { buildContext() },
+        multiline = true,
+        preferredScrollSize = Dimension(560, 130),
+        fullscreenTitle = DeployXBundle.message("dialog.mapping.fullscreen.postCommandTitle")
+    )
 
     // 保存原始ID，编辑时保留，复制/新建时生成新ID
     private val mappingId: String
@@ -88,6 +108,21 @@ class MappingEditDialog(
             prefillData != null -> fillData(prefillData, nameEditable = true)
             existingMapping != null -> fillData(existingMapping, nameEditable = isCopyMode)
         }
+    }
+
+    /**
+     * 构建脚本运行的上下文，供 CommandFieldWithScriptButton 打开脚本选择对话框时使用。
+     */
+    private fun buildContext(): ScriptRunContext {
+        val selectedServerStr = serverCombo.selectedItem?.toString() ?: ""
+        val serverId = selectedServerStr.substringBefore(" - ").takeIf { it.isNotBlank() }
+        val server = serverId?.let { ServerManager.getInstance().getServer(it) }
+        val remoteDir = remoteDirField.text.trim()
+        return ScriptRunContext(
+            server = server,
+            mapping = existingMapping,
+            remoteDir = remoteDir.ifBlank { existingMapping?.remoteDir }
+        )
     }
 
     private fun setupServerCombo() {
@@ -190,15 +225,16 @@ class MappingEditDialog(
             .addComponent(unzipEnabledCheck)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.unzipDestination"), unzipDestField)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.excludeRules"), excludeField)
-            .addVerticalGap(8)
+            .addVerticalGap(12)
             .addComponent(preCommandEnabledCheck)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.preUploadCommand"), preCommandField)
+            .addVerticalGap(4)
             .addComponent(postCommandEnabledCheck)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.postUploadCommand"), postCommandField)
             .addComponent(autoCdCheck)
             .panel
 
-        panel.preferredSize = Dimension(520, 600)
+        panel.preferredSize = Dimension(700, 800)
         return panel
     }
 
@@ -221,8 +257,8 @@ class MappingEditDialog(
         val serverId = selectedServer.substringBefore(" - ")
         val remoteDir = remoteDirField.text.trim()
 
-        val rawPreCommand = preCommandField.text.trim()
-        val rawPostCommand = postCommandField.text.trim()
+        val rawPreCommand = preCommandField.trimmedText()
+        val rawPostCommand = postCommandField.trimmedText()
         val preCommand = if (autoCdCheck.isSelected && rawPreCommand.isNotBlank()) {
             "cd $remoteDir && $rawPreCommand"
         } else {

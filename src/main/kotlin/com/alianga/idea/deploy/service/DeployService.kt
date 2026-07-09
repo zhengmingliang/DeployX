@@ -4,6 +4,7 @@ import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.*
 import com.alianga.idea.deploy.ssh.RsyncWrapper
 import com.alianga.idea.deploy.ssh.SshConnection
+import com.alianga.idea.deploy.util.ScriptRefResolver
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
@@ -150,9 +151,10 @@ class DeployService {
                 }
 
                 if (!dryRun && !key.preCommand.isNullOrBlank()) {
-                    groupLog(DeployXBundle.message("deploy.log.preCommand", key.preCommand))
+                    val resolvedPreCommand = ScriptRefResolver.resolve(key.preCommand, server, key.remoteBaseDir)
+                    groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                     val conn = sshConnection ?: return
-                    val preResult = conn.executeCommand(key.preCommand)
+                    val preResult = conn.executeCommand(resolvedPreCommand)
                     if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                     if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandFailedBatch", preResult.exitCode, preResult.error))
                 }
@@ -188,9 +190,10 @@ class DeployService {
                 results.add(resultWithReport)
 
                 if (!dryRun && !key.postCommand.isNullOrBlank()) {
-                    groupLog(DeployXBundle.message("deploy.log.postCommand", key.postCommand))
+                    val resolvedPostCommand = ScriptRefResolver.resolve(key.postCommand, server, key.remoteBaseDir)
+                    groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                     val conn = sshConnection ?: return
-                    val postResult = conn.executeCommand(key.postCommand)
+                    val postResult = conn.executeCommand(resolvedPostCommand)
                     if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                     if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandFailedBatch", postResult.exitCode, postResult.error))
                 }
@@ -283,9 +286,10 @@ class DeployService {
             try {
                 // 步骤 1: 上传前命令（在备份和上传之前执行）
                 if (!key.preCommand.isNullOrBlank()) {
-                    groupLog(DeployXBundle.message("deploy.log.preCommand", key.preCommand))
+                    val resolvedPreCommand = ScriptRefResolver.resolve(key.preCommand, server, key.remoteBaseDir)
+                    groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                     val conn = sshConnection ?: return@forEach
-                    val preResult = conn.executeCommand(key.preCommand)
+                    val preResult = conn.executeCommand(resolvedPreCommand)
                     if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                     if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandExecuteFailed", preResult.exitCode, preResult.error))
                     else groupLog(DeployXBundle.message("deploy.log.preCommandSuccess"))
@@ -420,9 +424,10 @@ class DeployService {
 
                 // 步骤 5: 上传后命令
                 if (!key.postCommand.isNullOrBlank()) {
-                    groupLog(DeployXBundle.message("deploy.log.postCommand", key.postCommand))
+                    val resolvedPostCommand = ScriptRefResolver.resolve(key.postCommand, server, key.remoteBaseDir)
+                    groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                     val conn = sshConnection ?: return@forEach
-                    val postResult = conn.executeCommand(key.postCommand)
+                    val postResult = conn.executeCommand(resolvedPostCommand)
                     if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                     if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandExecuteFailed", postResult.exitCode, postResult.error))
                     else groupLog(DeployXBundle.message("deploy.log.postCommandSuccess"))
@@ -525,9 +530,10 @@ class DeployService {
         try {
             // 步骤 1: 执行上传前命令（在备份和上传之前执行）
             if (!request.preCommand.isNullOrBlank()) {
-                logCallback?.invoke(DeployXBundle.message("deploy.log.preCommand", request.preCommand))
+                val resolvedPreCommand = ScriptRefResolver.resolve(request.preCommand, server, request.remotePath)
+                logCallback?.invoke(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
-                val preResult = conn.executeCommand(request.preCommand)
+                val preResult = conn.executeCommand(resolvedPreCommand)
                 if (preResult.output.isNotBlank()) {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                 }
@@ -651,9 +657,10 @@ class DeployService {
 
             // 步骤 5: 执行上传后命令（可选）
             if (!request.postCommand.isNullOrBlank()) {
-                logCallback?.invoke(DeployXBundle.message("deploy.log.postCommand", request.postCommand))
+                val resolvedPostCommand = ScriptRefResolver.resolve(request.postCommand, server, request.remotePath)
+                logCallback?.invoke(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
-                val postResult = conn.executeCommand(request.postCommand)
+                val postResult = conn.executeCommand(resolvedPostCommand)
                 if (postResult.output.isNotBlank()) {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                 }

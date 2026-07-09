@@ -11,12 +11,17 @@
 - **服务器分组/标签**：服务器新增分组（`group`）字段和逗号分隔标签（`tags`），`ServerManager` 提供 `getGroups()`/`getAllTags()` 用于过滤
 - **配置导入导出（加密）**：一键导出全部插件配置（服务器含密码、映射、脚本）为 AES-256-GCM 加密 JSON 文件，在另一台机器上用密码解密导入；ID 冲突可选覆盖或新增
 - **多服务器并行部署**：服务器选择对话框支持多选，部署到多个服务器时分组并行执行（线程池，最多 4 并发），`HistoryManager` 加 `synchronized` 保证线程安全
+- **命令输入框脚本集成**：上传前/上传后命令输入框统一支持三种操作模式——手动输入命令、从脚本库引用脚本（ScriptRef 标记）、将脚本内容插入到编辑光标位置。该优化统一应用于添加/编辑映射界面和侧边栏操作面板
+- **映射编辑对话框脚本输入区域重新设计**：命令输入框从单行升级为多行（带行号边栏 + 代码滚动），字体 13pt Monospaced，对话框 700×800。输入框末端新增全屏按钮，点击后弹出专属全屏编辑对话框（右上角恢复按钮），方便编辑长脚本。全屏/暗色主题下使用 `JBColor` 自动适配
 
 ### 🐛 修复
 - **服务器列表加载为空**：修复新增服务器 `group`/`tags` 字段后，升级到 1.0.3 的用户打开"服务器管理"看不到任何已保存服务器的问题。根因：旧 `servers.json` 缺失这两个字段，Gson 反序列化时将其设为 `null`（不触发 Kotlin 默认值），随后 `ConfigManager.loadServers` 调用 `server.copy(password = pwd)` 触发 `NullPointerException: parameter group`，异常被吞掉后返回空列表。新增 `ServerConfigDeserializer` 对所有可空/缺失字段做兜底（`group->""`、`tags->[]`），并在 `ConfigManager`/`ConfigExporter` 的 Gson 实例上注册，覆盖配置加载与加密导入两条路径
+- **ScriptRef 引用脚本不执行**：修复 `# DeployX ScriptRef: {...}` 标记在 SSH 执行前未被解析、bash 当作注释跳过导致脚本不执行的问题。新增 `ScriptRefResolver`，在 DeployService 的 6 处执行点统一注入解析逻辑——将标记行替换为实际渲染命令后发送到 SSH；脚本不存在时生成 echo 警告而非静默失败
 
 ### 🎨 优化改进
 - IDE 最低兼容版本从 233 调整为 233.8（IntelliJ IDEA 2023.3.8+）
+- **命令输入框交互优化**：ScriptRef 引用标记在文本框中以人类可读格式显示（`#[DeployX] 脚本引用: echo — name=张三` + JSON 标记），替代原始 JSON 字符串；脚本库按钮、全屏/恢复按钮分别使用语义化图标（`AddMulticaret`/`ExpandComponent`/`CollapseComponent`）
+- **Dark 主题适配**：行号边栏使用 `JBColor` 自动适配暗色/亮色主题，Dark 下背景为编辑器 gutter 标准暗色（`#313335`），无需手动切换
 
 ---
 

@@ -173,12 +173,21 @@ class ScriptPickerDialog(
     }
 
     private fun buildReference(script: ScriptConfig): String {
+        val params = collectParams()
         val payload = mapOf(
             "scriptId" to script.id,
             "scriptName" to script.name,
-            "params" to collectParams()
+            "params" to params
         )
-        return "# DeployX ScriptRef: ${gson.toJson(payload)}"
+
+        // 生成人类可读的描述行
+        val nonEmptyParams = params.filter { it.value.isNotBlank() }
+        val paramSummary = if (nonEmptyParams.isNotEmpty()) {
+            " — " + nonEmptyParams.entries.joinToString(", ") { "${it.key}=${it.value}" }
+        } else ""
+
+        return "# [DeployX] ${DeployXBundle.message("dialog.script.picker.refLabel", script.name)}$paramSummary\n" +
+                "# DeployX ScriptRef: ${gson.toJson(payload)}"
     }
 
     override fun doOKAction() {

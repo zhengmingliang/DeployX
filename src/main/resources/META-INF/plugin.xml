@@ -45,7 +45,10 @@
             <li><b>🏷️ Server Groups & Tags:</b> Servers now support a group field and comma-separated tags. ServerManager exposes <code>getGroups()</code>/<code>getAllTags()</code> for filtering</li>
             <li><b>📦 Config Import/Export (Encrypted):</b> Export all plugin config (servers with passwords, mappings, scripts) to an AES-256-GCM encrypted JSON file. Import on another machine with password decryption; ID conflicts can be overwritten or imported as new</li>
             <li><b>⚡ Multi-Server Parallel Deploy:</b> Server selection dialog now supports multi-select. When deploying to multiple servers, groups execute in parallel (thread pool, max 4 concurrent). HistoryManager is thread-safe</li>
+            <li><b>🖊️ Script Command Field Integration:</b> Pre/post-upload command fields now support three operation modes — manual entry, script reference (ScriptRef marker), and insert script content at the cursor position. Consistently applied across the mapping edit dialog and the sidebar operation panel</li>
+            <li><b>🪟 Command Editor Redesign:</b> Command input fields in the mapping edit dialog are now multi-line with line numbers and scroll support (13pt Monospaced font, 700×800 dialog). A new fullscreen button at the end of each field opens a dedicated fullscreen editor (with restore button top-right) for editing long scripts. Automatically adapts to light/dark themes via <code>JBColor</code></li>
             <li><b>🐛 Server List Empty Fix:</b> Fixed an issue where users saw an empty server management page. The new <code>group</code>/<code>tags</code> fields were null in legacy <code>servers.json</code>, causing an NPE in <code>server.copy()</code> that silently wiped the server list. A <code>ServerConfigDeserializer</code> now backfills missing/null fields</li>
+            <li><b>🐛 ScriptRef Execution Fix:</b> Fixed ScriptRef markers (<code># DeployX ScriptRef: {...}</code>) being sent raw to SSH and treated as bash comments — referenced scripts never actually ran. New <code>ScriptRefResolver</code> resolves markers to real commands at all 6 execution points in DeployService before SSH execution</li>
         </ul>
 
         <h3>v1.0.2 - Script Library & Windows rsync Enhancements</h3>
@@ -133,7 +136,10 @@
             <li><b>🏷️ 服务器分组/标签：</b>服务器新增分组字段和逗号分隔标签，ServerManager 提供 <code>getGroups()</code>/<code>getAllTags()</code> 用于过滤</li>
             <li><b>📦 配置导入导出（加密）：</b>一键导出全部插件配置（服务器含密码、映射、脚本）为 AES-256-GCM 加密 JSON 文件，在另一台机器上用密码解密导入；ID 冲突可选覆盖或新增</li>
             <li><b>⚡ 多服务器并行部署：</b>服务器选择对话框支持多选，部署到多个服务器时分组并行执行（线程池，最多 4 并发），HistoryManager 线程安全</li>
+            <li><b>🖊️ 脚本命令输入增强：</b>上传前/上传后命令输入框新增三种操作模式——手动输入、从脚本库引用脚本（ScriptRef 标记）、将脚本内容插入到编辑光标位置。统一应用于添加/编辑映射界面和侧边栏操作面板</li>
+            <li><b>🪟 脚本输入区域重新设计：</b>映射编辑对话框中的命令输入框升级为多行编辑（带行号边栏 + 代码滚动），字体 13pt，对话框 700×800。输入框末端新增全屏按钮，点击后弹出专属全屏编辑对话框（右上角恢复按钮），方便编辑长脚本。全屏/暗色主题下自动适配</li>
             <li><b>🐛 服务器列表为空修复：</b>修复"服务器管理"页面看不到任何已保存服务器的问题。新增的 <code>group</code>/<code>tags</code> 字段在旧 <code>servers.json</code> 中为 null，导致 <code>server.copy()</code> 抛 NPE 并被静默吞掉、返回空列表。新增 <code>ServerConfigDeserializer</code> 对缺失/null 字段做兜底</li>
+            <li><b>🐛 ScriptRef 执行修复：</b>修复 <code># DeployX ScriptRef: {...}</code> 标记被原样发送到 SSH、bash 当作注释跳过的问题。新增 <code>ScriptRefResolver</code>，在 DeployService 的 6 处执行点将标记解析为实际命令后再执行；脚本不存在时生成 echo 警告而非静默失败</li>
         </ul>
 
         <h3>v1.0.2 - 脚本库增强与 Windows rsync 优化</h3>

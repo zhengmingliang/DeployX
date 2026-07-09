@@ -17,6 +17,7 @@ import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.service.SyncService
 import com.alianga.idea.deploy.service.TerminalService
 import com.alianga.idea.deploy.service.UpdateReportFormatter
+import com.alianga.idea.deploy.ui.CommandFieldWithScriptButton
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
 import com.alianga.idea.deploy.ui.script.ScriptTabPanel
 import com.alianga.idea.deploy.ui.settings.MappingEditDialog
@@ -83,8 +84,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val backupDirField = JBTextField()
     private val unzipCheck = JBCheckBox(DeployXBundle.message("toolwindow.checkbox.unzipAfterUpload"))
     private val unzipDestField = JBTextField()
-    private val preCommandField = JBTextArea(3, 60)
-    private val postCommandField = JBTextArea(3, 60)
+    private val preCommandField = CommandFieldWithScriptButton(
+        project = project,
+        contextProvider = { buildScriptRunContext() },
+        multiline = true,
+        preferredScrollSize = Dimension(600, 72)
+    )
+    private val postCommandField = CommandFieldWithScriptButton(
+        project = project,
+        contextProvider = { buildScriptRunContext() },
+        multiline = true,
+        preferredScrollSize = Dimension(600, 72)
+    )
 
     // 操作面板标签（保留引用以便语言切换时刷新文案）
     private val targetServerLabel = JBLabel(DeployXBundle.message("toolwindow.label.targetServer"))
@@ -187,21 +198,14 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             .addLabeledComponent(remotePathLabel, remotePathField)
             .panel
 
-        preCommandField.font = Font("Monospaced", Font.PLAIN, 12)
-        postCommandField.font = Font("Monospaced", Font.PLAIN, 12)
-        preCommandField.lineWrap = true
-        postCommandField.lineWrap = true
-        preCommandField.wrapStyleWord = true
-        postCommandField.wrapStyleWord = true
-
         val deployPanel = FormBuilder.createFormBuilder()
             .addComponent(backupCheck)
             .addLabeledComponent(backupDirLabel, backupDirField)
             .addComponent(unzipCheck)
             .addLabeledComponent(unzipDirLabel, unzipDestField)
             .addVerticalGap(8)
-            .addLabeledComponent(preCommandLabel, JBScrollPane(preCommandField).apply { preferredSize = Dimension(600, 72) })
-            .addLabeledComponent(postCommandLabel, JBScrollPane(postCommandField).apply { preferredSize = Dimension(600, 72) })
+            .addLabeledComponent(preCommandLabel, preCommandField)
+            .addLabeledComponent(postCommandLabel, postCommandField)
             .panel
 
         val buttonPanel = JPanel().apply {
@@ -346,6 +350,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // 脚本子面板刷新文案
         scriptTabPanel.relocalize()
+
+        // 刷新脚本选择按钮的 tooltip
+        preCommandField.updateTooltip()
+        postCommandField.updateTooltip()
 
         // 刷新工具栏渲染
         revalidate()
@@ -999,7 +1007,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             postCommand = postCommandField.text.trim()
         )
 
-        val dialog = MappingEditDialog(null, prefillData = prefill)
+        val dialog = MappingEditDialog(null, prefillData = prefill, project = project)
         if (dialog.showAndGet()) {
             MappingManager.getInstance().addMapping(dialog.getMappingConfig())
             appendLog(DeployXBundle.message("toolwindow.log.mappedSaved", dialog.getMappingConfig().name))
