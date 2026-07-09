@@ -7,11 +7,11 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VirtualFile
-import java.awt.SystemTray
-import java.awt.TrayIcon
-import javax.swing.ImageIcon
+import com.intellij.ui.SystemNotifications
 
 /**
  * Action 公共工具方法
@@ -19,10 +19,6 @@ import javax.swing.ImageIcon
  * 提取 DeployAction / SyncFileAction / QuickPushAction 共用的辅助逻辑，避免代码重复。
  */
 object ActionUtils {
-
-    /** 系统托盘图标（惰性初始化，仅创建一次） */
-    @Volatile
-    private var trayIcon: TrayIcon? = null
 
     /**
      * 获取当前事件选中的文件/目录数组
@@ -41,17 +37,22 @@ object ActionUtils {
     }
 
     /**
-     * 显示系统级通知。
+     * 显示传输完成通知。
      *
-     * 优先使用 OS 系统托盘（java.awt.SystemTray），让用户在 IDE 窗口未聚焦时也能收到提醒；
-     * 系统托盘不可用时回退到 IntelliJ Balloon 通知。
+     * 双通道策略，保证用户总能收到提醒：
+     * 1. **OS 系统通知**（仅当 IDE 窗口未激活时）：通过 IntelliJ Platform 的
+     *    [SystemNotifications] API 触发，Linux 走 libnotify（Cinnamon/GNOME 通知中心），
+     *    macOS 走通知中心，Windows 走系统托盘通知。不依赖 java.awt.SystemTray，
+     *    图标由平台解析为应用光栅图标，绕过 SVG 无法被 ImageIcon 加载的问题。
+     *    平台仅在 IDE 未聚焦时才真正弹出 OS 通知（聚焦时由下方 Balloon 承担）。
+     * 2. **IDE Balloon 通知**（始终）：IDE 右下角气泡，聚焦时可见。
      *
      * 受 [FileSyncSettings.systemNotification] 开关控制：关闭时不弹任何通知。
      *
-     * @param project 用于 Balloon 回退通知的 project 上下文
-     * @param title 通知标题
+     * @param project 用于 Balloon 通知的 project 上下文
+     * @param title 通知标题（OS 通知用）
      * @param message 通知内容
-     * @param type 通知类型（决定图标）
+     * @param type 通知类型（决定 Balloon 图标）
      */
     fun showSystemNotification(
         project: Project?,
@@ -61,55 +62,22 @@ object ActionUtils {
     ) {
         if (!FileSyncSettings.getInstance().systemNotification) return
 
-        // 尝试系统托盘
-        if (SystemTray.isSupported()) {
+        // 1) OS 系统通知中心（仅在 IDE 窗口未激活时由平台决定是否弹出）
+        //    SystemNotifications 内部：Linux 经 JNA 调 libnotify，无 libnotify/JNA 时静默 no-op
+        if (!ApplicationManager.getApplication().isActive) {
             try {
-                val icon = getOrCreateTrayIcon() ?: return showBalloonNotification(project, message, type)
-                val msgType = when (type) {
-                    NotificationType.ERROR -> TrayIcon.MessageType.ERROR
-                    NotificationType.WARNING -> TrayIcon.MessageType.WARNING
-                    else -> TrayIcon.MessageType.INFO
-                }
-                icon.displayMessage(title, message, msgType)
-                return
-            } catch (_: Exception) {
-                // 系统托盘异常，回退到 Balloon
+                SystemNotifications.getInstance()
+                    .notify("DeployX", title, StringUtil.stripHtml(message, true))
+            } catch (_: Throwable) {
+                // 平台 OS 通知不可用，忽略；下面仍会走 Balloon
             }
         }
-        showBalloonNotification(project, message, type)
-    }
 
-    private fun showBalloonNotification(project: Project?, content: String, type: NotificationType) {
+        // 2) 始终同时给一条 IDE 内 Balloon，保证 IDE 聚焦时也能看到
         NotificationGroupManager.getInstance()
             .getNotificationGroup("DeployX")
-            .createNotification(content, type)
+            .createNotification(title, message, type)
             .notify(project)
-    }
-
-    /**
-     * 获取或创建系统托盘图标。
-     * 使用插件的 toolWindow 图标，找不到时返回 null。
-     */
-    private fun getOrCreateTrayIcon(): TrayIcon? {
-        trayIcon?.let { return it }
-        return try {
-            val url = ActionUtils::class.java.getResource("/icons/toolWindow.svg")
-                ?: ActionUtils::class.java.getResource("/icons/toolWindow.png")
-            val image = if (url != null) ImageIcon(url).image else null
-            val icon = if (image != null) {
-                TrayIcon(image, "DeployX")
-            } else {
-                // 无图标资源时用一个 1x1 透明像素（部分 OS 不允许 null image）
-                val img = java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB)
-                TrayIcon(img, "DeployX")
-            }
-            icon.isImageAutoSize = true
-            SystemTray.getSystemTray().add(icon)
-            trayIcon = icon
-            icon
-        } catch (_: Exception) {
-            null
-        }
     }
 
     /**
@@ -131,3 +99,4 @@ object ActionUtils {
         }
     }
 }
+
