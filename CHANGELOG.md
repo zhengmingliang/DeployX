@@ -1,5 +1,21 @@
 # DeployX Changelog
 
+## [1.0.3] - 2026-07-08
+
+### ✨ 新功能
+- **历史记录复制/导出报告**：历史记录 Tab 新增"复制报告"和"导出报告"按钮，可从任意历史记录复制/导出 Markdown 报告（不再仅限最新一次）
+- **SFTP 支持 dry-run**：SFTP 降级模式现在支持 dry-run 预览（列出待上传文件而不实际传输），预览同步不再强制要求 rsync
+- **传输失败自动重试**：传输失败时自动重试最多 3 次（间隔 2 秒），仅对网络/连接类失败重试，认证失败和路径不存在不重试。`SyncResult` 新增 `attempts` 字段
+- **部署后系统通知**：批量上传/部署完成后弹出 OS 级系统托盘通知（可在设置中开关），系统托盘不可用时回退到 IDE 气泡通知
+- **服务器分组/标签**：服务器新增分组（`group`）字段和逗号分隔标签（`tags`），`ServerManager` 提供 `getGroups()`/`getAllTags()` 用于过滤
+- **配置导入导出（加密）**：一键导出全部插件配置（服务器含密码、映射、脚本）为 AES-256-GCM 加密 JSON 文件，在另一台机器上用密码解密导入；ID 冲突可选覆盖或新增
+- **多服务器并行部署**：服务器选择对话框支持多选，部署到多个服务器时分组并行执行（线程池，最多 4 并发），`HistoryManager` 加 `synchronized` 保证线程安全
+
+### 🎨 优化改进
+- IDE 最低兼容版本从 233 调整为 233.8（IntelliJ IDEA 2023.3.8+）
+
+---
+
 ## [1.0.2] - 2026-07-08
 
 ### ✨ 新功能
@@ -144,6 +160,7 @@
 - 次版本号：向下兼容的功能性新增
 - 修订号：向下兼容的问题修正
 
+[1.0.3]: https://github.com/zhengmingliang/DeployX/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/zhengmingliang/DeployX/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/zhengmingliang/DeployX/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/zhengmingliang/DeployX/releases/tag/v1.0.0

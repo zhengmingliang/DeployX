@@ -35,6 +35,17 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>v1.0.3 - Transfer Enhancements & Multi-Server Deploy</h3>
+        <ul>
+            <li><b>📋 History Report Copy/Export:</b> Added "Copy Report" and "Export Report" buttons to the History tab - copy/export the Markdown report from any history entry (not just the latest one)</li>
+            <li><b>🔍 SFTP Dry-Run Support:</b> SFTP fallback mode now supports dry-run preview (listing files that would be uploaded without actual transfer). Preview sync works even without rsync installed</li>
+            <li><b>🔄 Transfer Auto-Retry:</b> Transfers now automatically retry up to 3 times (2s interval) on network/connection failures. Authentication failures and missing-path errors are not retried</li>
+            <li><b>🔔 System Notifications:</b> After batch upload/deploy completes, an OS-level system tray notification is shown (configurable in settings). Falls back to IDE balloon if system tray is unavailable</li>
+            <li><b>🏷️ Server Groups & Tags:</b> Servers now support a group field and comma-separated tags. ServerManager exposes <code>getGroups()</code>/<code>getAllTags()</code> for filtering</li>
+            <li><b>📦 Config Import/Export (Encrypted):</b> Export all plugin config (servers with passwords, mappings, scripts) to an AES-256-GCM encrypted JSON file. Import on another machine with password decryption; ID conflicts can be overwritten or imported as new</li>
+            <li><b>⚡ Multi-Server Parallel Deploy:</b> Server selection dialog now supports multi-select. When deploying to multiple servers, groups execute in parallel (thread pool, max 4 concurrent). HistoryManager is thread-safe</li>
+        </ul>
+
         <h3>v1.0.2 - Script Library & Windows rsync Enhancements</h3>
         <ul>
             <li><b>📚 Script Export:</b> Export now adapts to selection - exports all scripts when nothing is selected, and only the selected scripts (as a JSON array) when multiple are selected</li>
@@ -110,6 +121,17 @@
         <br>
         <h4>中文更新说明</h4>
 
+        <h3>v1.0.3 - 传输增强与多服务器并行部署</h3>
+        <ul>
+            <li><b>📋 历史记录复制/导出报告：</b>历史记录 Tab 新增"复制报告"和"导出报告"按钮，可从任意历史记录复制/导出 Markdown 报告（不再仅限最新一次）</li>
+            <li><b>🔍 SFTP 支持 dry-run：</b>SFTP 降级模式现在支持 dry-run 预览（列出待上传文件而不实际传输），预览同步不再强制要求 rsync</li>
+            <li><b>🔄 传输失败自动重试：</b>传输失败时自动重试最多 3 次（间隔 2 秒），仅对网络/连接类失败重试，认证失败和路径不存在不重试</li>
+            <li><b>🔔 部署后系统通知：</b>批量上传/部署完成后弹出 OS 级系统托盘通知（可在设置中开关），系统托盘不可用时回退到 IDE 气泡通知</li>
+            <li><b>🏷️ 服务器分组/标签：</b>服务器新增分组字段和逗号分隔标签，ServerManager 提供 <code>getGroups()</code>/<code>getAllTags()</code> 用于过滤</li>
+            <li><b>📦 配置导入导出（加密）：</b>一键导出全部插件配置（服务器含密码、映射、脚本）为 AES-256-GCM 加密 JSON 文件，在另一台机器上用密码解密导入；ID 冲突可选覆盖或新增</li>
+            <li><b>⚡ 多服务器并行部署：</b>服务器选择对话框支持多选，部署到多个服务器时分组并行执行（线程池，最多 4 并发），HistoryManager 线程安全</li>
+        </ul>
+
         <h3>v1.0.2 - 脚本库增强与 Windows rsync 优化</h3>
         <ul>
             <li><b>📚 脚本导出优化：</b>导出逻辑适配选中状态 - 未选中任何脚本时导出全部脚本，选中多个脚本时仅导出选中的脚本（JSON 数组形式）</li>
@@ -183,7 +205,7 @@
         </ul>
     ]]></change-notes>
 
-    <idea-version since-build="233" until-build="262.*"/>
+    <idea-version since-build="233.8" until-build="262.*"/>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
