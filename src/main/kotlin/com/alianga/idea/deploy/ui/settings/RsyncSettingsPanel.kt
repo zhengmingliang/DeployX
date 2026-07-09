@@ -34,7 +34,6 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
     private val rsyncOptionsField = JBTextField(settings.rsyncOptions)
     private val compressCheck = JBCheckBox(DeployXBundle.message("settings.rsync.compress"), settings.compress)
     private val showProgressCheck = JBCheckBox(DeployXBundle.message("settings.rsync.showProgress"), settings.showProgress)
-    private val systemNotificationCheck = JBCheckBox(DeployXBundle.message("settings.rsync.systemNotification"), settings.systemNotification)
     private val connectTimeoutField = JBTextField(settings.connectTimeout.toString())
     private val rsyncStatusLabel = JBLabel("")
     private val sshpassStatusLabel = JBLabel("")
@@ -78,7 +77,6 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
             .addVerticalGap(4)
             .addComponent(compressCheck)
             .addComponent(showProgressCheck)
-            .addComponent(systemNotificationCheck)
             .addVerticalGap(8)
             .addLabeledComponent(DeployXBundle.message("settings.rsync.connectTimeout"), connectTimeoutField)
             .addVerticalGap(8)
@@ -215,7 +213,6 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
                 rsyncOptionsField.text != settings.rsyncOptions ||
                 compressCheck.isSelected != settings.compress ||
                 showProgressCheck.isSelected != settings.showProgress ||
-                systemNotificationCheck.isSelected != settings.systemNotification ||
                 connectTimeoutField.text.toIntOrNull() != settings.connectTimeout
     }
 
@@ -225,7 +222,6 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
         settings.rsyncOptions = rsyncOptionsField.text.trim()
         settings.compress = compressCheck.isSelected
         settings.showProgress = showProgressCheck.isSelected
-        settings.systemNotification = systemNotificationCheck.isSelected
         settings.connectTimeout = connectTimeoutField.text.toIntOrNull() ?: 10000
         settings.sshpassAvailable = RsyncWrapper.isSshpassAvailable()
     }
@@ -236,7 +232,6 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
         rsyncOptionsField.text = settings.rsyncOptions
         compressCheck.isSelected = settings.compress
         showProgressCheck.isSelected = settings.showProgress
-        systemNotificationCheck.isSelected = settings.systemNotification
         connectTimeoutField.text = settings.connectTimeout.toString()
     }
 }

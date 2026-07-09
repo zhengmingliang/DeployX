@@ -7,9 +7,13 @@
 - **SFTP 支持 dry-run**：SFTP 降级模式现在支持 dry-run 预览（列出待上传文件而不实际传输），预览同步不再强制要求 rsync
 - **传输失败自动重试**：传输失败时自动重试最多 3 次（间隔 2 秒），仅对网络/连接类失败重试，认证失败和路径不存在不重试。`SyncResult` 新增 `attempts` 字段
 - **部署后系统通知**：批量上传/部署完成后弹出 OS 级系统托盘通知（可在设置中开关），系统托盘不可用时回退到 IDE 气泡通知
+- **新增「通用」设置 Tab**：在 DeployX 主设置页最前面新增「通用」Tab，集中放置语言、系统通知等跨模块通用设置项，后续可继续扩展。语言设置从独立子页并入此处，「部署后系统通知」开关从 rsync Tab 迁入此处（解决该开关埋在 rsync Tab、用户找不到的问题）
 - **服务器分组/标签**：服务器新增分组（`group`）字段和逗号分隔标签（`tags`），`ServerManager` 提供 `getGroups()`/`getAllTags()` 用于过滤
 - **配置导入导出（加密）**：一键导出全部插件配置（服务器含密码、映射、脚本）为 AES-256-GCM 加密 JSON 文件，在另一台机器上用密码解密导入；ID 冲突可选覆盖或新增
 - **多服务器并行部署**：服务器选择对话框支持多选，部署到多个服务器时分组并行执行（线程池，最多 4 并发），`HistoryManager` 加 `synchronized` 保证线程安全
+
+### 🐛 修复
+- **服务器列表加载为空**：修复新增服务器 `group`/`tags` 字段后，升级到 1.0.3 的用户打开"服务器管理"看不到任何已保存服务器的问题。根因：旧 `servers.json` 缺失这两个字段，Gson 反序列化时将其设为 `null`（不触发 Kotlin 默认值），随后 `ConfigManager.loadServers` 调用 `server.copy(password = pwd)` 触发 `NullPointerException: parameter group`，异常被吞掉后返回空列表。新增 `ServerConfigDeserializer` 对所有可空/缺失字段做兜底（`group->""`、`tags->[]`），并在 `ConfigManager`/`ConfigExporter` 的 Gson 实例上注册，覆盖配置加载与加密导入两条路径
 
 ### 🎨 优化改进
 - IDE 最低兼容版本从 233 调整为 233.8（IntelliJ IDEA 2023.3.8+）

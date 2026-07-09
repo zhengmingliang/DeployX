@@ -19,6 +19,7 @@ import javax.swing.JComponent
 class FileSyncSettingsConfigurable : Configurable {
 
     private var mainPanel: JPanel? = null
+    private val generalPanel = GeneralSettingsPanel()
     private val serverPanel = ServerSettingsPanel()
     private val mappingPanel = MappingSettingsPanel()
     private val rsyncPanel = RsyncSettingsPanel()
@@ -30,6 +31,7 @@ class FileSyncSettingsConfigurable : Configurable {
     override fun createComponent(): JComponent {
         if (mainPanel == null) {
             tabbedPane = JBTabbedPane().apply {
+                addTab(DeployXBundle.message("settings.tab.general"), generalPanel)
                 addTab(DeployXBundle.message("settings.tab.serverManagement"), serverPanel)
                 addTab(DeployXBundle.message("settings.tab.mappingManagement"), mappingPanel)
                 addTab(DeployXBundle.message("settings.tab.rsyncConfig"), rsyncPanel)
@@ -126,10 +128,11 @@ class FileSyncSettingsConfigurable : Configurable {
     }
 
     override fun isModified(): Boolean {
-        return serverPanel.isModified() || mappingPanel.isModified() || rsyncPanel.isModified() || scriptPanel.isModified()
+        return generalPanel.isModified() || serverPanel.isModified() || mappingPanel.isModified() || rsyncPanel.isModified() || scriptPanel.isModified()
     }
 
     override fun apply() {
+        generalPanel.apply()
         serverPanel.apply()
         mappingPanel.apply()
         rsyncPanel.apply()
@@ -137,6 +140,7 @@ class FileSyncSettingsConfigurable : Configurable {
     }
 
     override fun reset() {
+        generalPanel.reset()
         serverPanel.reset()
         mappingPanel.reset()
         rsyncPanel.reset()
