@@ -3,6 +3,7 @@ package com.alianga.idea.deploy.action
 import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.service.MappingManager
 import com.alianga.idea.deploy.ui.dialog.ServerSelectionDialog
+import com.alianga.idea.deploy.util.WindowsToastNotifier
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -40,11 +41,14 @@ object ActionUtils {
      * 显示传输完成通知。
      *
      * 双通道策略，保证用户总能收到提醒：
-     * 1. **OS 系统通知**（仅当 IDE 窗口未激活时）：通过 IntelliJ Platform 的
-     *    [SystemNotifications] API 触发，Linux 走 libnotify（Cinnamon/GNOME 通知中心），
-     *    macOS 走通知中心，Windows 走系统托盘通知。不依赖 java.awt.SystemTray，
-     *    图标由平台解析为应用光栅图标，绕过 SVG 无法被 ImageIcon 加载的问题。
-     *    平台仅在 IDE 未聚焦时才真正弹出 OS 通知（聚焦时由下方 Balloon 承担）。
+     * 1. **OS 系统通知**（仅当 IDE 窗口未激活时）：
+     *    - **Windows**：走 [WindowsToastNotifier]（PowerShell 调 WinRT Toast），稳定显示在
+     *      Windows 10/11 通知中心。平台内置的 [SystemNotifications] 在 Windows 上走
+     *      `java.awt.TrayIcon` 经典托盘气泡，已废弃且不可靠（`SystemTray.isSupported()`
+     *      返回 false 或 AWTException 被吞掉时静默失败），故 Windows 不走平台 API。
+     *    - **Linux**：走平台 [SystemNotifications]（经 JNA 调 libnotify，通知中心）。
+     *    - **macOS**：走平台 [SystemNotifications]（通知中心）。
+     *    图标由平台/系统解析，绕过 SVG 无法被 ImageIcon 加载的问题。
      * 2. **IDE Balloon 通知**（始终）：IDE 右下角气泡，聚焦时可见。
      *
      * 受 [FileSyncSettings.systemNotification] 开关控制：关闭时不弹任何通知。
@@ -62,14 +66,19 @@ object ActionUtils {
     ) {
         if (!FileSyncSettings.getInstance().systemNotification) return
 
-        // 1) OS 系统通知中心（仅在 IDE 窗口未激活时由平台决定是否弹出）
-        //    SystemNotifications 内部：Linux 经 JNA 调 libnotify，无 libnotify/JNA 时静默 no-op
+        // 1) OS 系统通知中心（仅在 IDE 窗口未激活时弹出）
         if (!ApplicationManager.getApplication().isActive) {
-            try {
-                SystemNotifications.getInstance()
-                    .notify("DeployX", title, StringUtil.stripHtml(message, true))
-            } catch (_: Throwable) {
-                // 平台 OS 通知不可用，忽略；下面仍会走 Balloon
+            val plainMessage = StringUtil.stripHtml(message, true)
+            if (WindowsToastNotifier.isAvailable) {
+                // Windows：PowerShell Toast（稳定，显示在通知中心）
+                WindowsToastNotifier.notify(title, plainMessage)
+            } else {
+                // Linux/macOS：平台 SystemNotifications（Linux 走 libnotify，macOS 走通知中心）
+                try {
+                    SystemNotifications.getInstance().notify("DeployX", title, plainMessage)
+                } catch (_: Throwable) {
+                    // 平台 OS 通知不可用，忽略；下面仍会走 Balloon
+                }
             }
         }
 
