@@ -4,7 +4,7 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.util.ExecUtil
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.util.system.OS
+import com.intellij.openapi.util.SystemInfo
 
 /**
  * Windows 10/11 原生 Toast 通知（通知中心 / Action Center）。
@@ -39,7 +39,13 @@ object WindowsToastNotifier {
 
     /** 是否可用：仅 Windows 10+。更早版本无 WinRT Toast API。 */
     val isAvailable: Boolean
-        get() = OS.CURRENT == OS.Windows && OS.CURRENT.isAtLeast(10, 0)
+        get() = SystemInfo.isWindows && isWindows10OrNewer()
+
+    private fun isWindows10OrNewer(): Boolean {
+        val version = System.getProperty("os.version") ?: return false
+        val major = version.substringBefore(".").toIntOrNull() ?: return false
+        return major >= 10
+    }
 
     /**
      * 异步弹出一条 Windows Toast 通知（fire-and-forget）。
