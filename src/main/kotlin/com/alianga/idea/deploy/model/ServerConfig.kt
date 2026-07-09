@@ -31,7 +31,13 @@ data class ServerConfig(
     val keyFile: String = "",
 
     @SerializedName("is_default")
-    val isDefault: Boolean = false
+    val isDefault: Boolean = false,
+
+    @SerializedName("group")
+    val group: String = "",
+
+    @SerializedName("tags")
+    val tags: List<String> = emptyList()
 ) {
     enum class AuthType(val value: String) {
         @SerializedName("password")

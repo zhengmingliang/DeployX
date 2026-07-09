@@ -163,7 +163,7 @@ class ConfigManager {
      * 2. 然后尝试从系统密钥链 (PasswordSafe) 加载
      * 3. 最后从加密本地备份文件加载
      */
-    private fun loadPassword(serverId: String): String? {
+    fun loadPassword(serverId: String): String? {
         // 1. 优先从内存缓存加载
         passwordCache[serverId]?.let {
             LOG.debug("Loaded password for server $serverId from memory cache")
@@ -226,7 +226,7 @@ class ConfigManager {
      * 2. 保存到加密本地备份文件
      * 3. 缓存到内存
      */
-    private fun savePassword(serverId: String, password: String) {
+    fun savePassword(serverId: String, password: String) {
         // 1. 保存到系统密钥链
         savePasswordToKeychain(serverId, password)
 

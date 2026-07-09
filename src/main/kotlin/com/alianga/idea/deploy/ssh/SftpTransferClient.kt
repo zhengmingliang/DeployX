@@ -42,8 +42,10 @@ class SftpTransferClient {
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
     ): SyncResult {
         val startTime = System.currentTimeMillis()
+
+        // dry-run 模式：遍历本地文件列表，收集待上传文件，不实际传输
         if (options.dryRun) {
-            return SyncResult(false, error = DeployXBundle.message("ssh.sftp.dryRunNotSupported"))
+            return dryRunFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, options, logCallback, startTime)
         }
 
         val connection = SshConnection(serverConfig)
@@ -89,6 +91,83 @@ class SftpTransferClient {
             SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("ssh.sftp.uploadFailed", e.message ?: ""))
         } finally {
             connection.disconnect()
+        }
+    }
+
+    /**
+     * dry-run 模式：遍历本地文件，收集待上传的文件列表和总大小，不实际传输。
+     * 不需要 SSH 连接，仅扫描本地文件系统。
+     */
+    private fun dryRunFilesFrom(
+        sourceBaseDir: String,
+        remoteBaseDir: String,
+        relativePaths: List<String>,
+        options: SyncOptions,
+        logCallback: ((String) -> Unit)?,
+        startTime: Long
+    ): SyncResult {
+        val sourceBase = Paths.get(sourceBaseDir)
+        val remoteBase = remoteBaseDir.trimEnd('/')
+        val matchers = createMatchers(options.excludePatterns)
+        val transferredFiles = mutableListOf<String>()
+        var totalSize = 0L
+
+        logCallback?.invoke(DeployXBundle.message("ssh.sftp.dryRunPreview"))
+
+        relativePaths.forEach { rawRelative ->
+            val relative = rawRelative.trim('/').replace("\\", "/")
+            if (relative.isBlank()) return@forEach
+            val source = sourceBase.resolve(relative).normalize()
+            if (!Files.exists(source)) {
+                logCallback?.invoke(DeployXBundle.message("ssh.sftp.skipLocalNotFound", source))
+                return@forEach
+            }
+            collectFiles(sourceBase, source, remoteBase, matchers, logCallback, transferredFiles) { size ->
+                totalSize += size
+            }
+        }
+
+        return SyncResult(
+            success = true,
+            transferredFiles = transferredFiles.size,
+            transferredFileList = transferredFiles,
+            totalSize = totalSize,
+            duration = System.currentTimeMillis() - startTime,
+            output = "SFTP dry-run: ${transferredFiles.size} file(s) would be uploaded"
+        )
+    }
+
+    /**
+     * 递归收集待上传的文件（dry-run 用），不实际传输。
+     */
+    private fun collectFiles(
+        sourceBase: Path,
+        source: Path,
+        remoteBase: String,
+        matchers: List<PathMatcher>,
+        logCallback: ((String) -> Unit)?,
+        transferredFiles: MutableList<String>,
+        onSize: (Long) -> Unit
+    ) {
+        if (Files.isDirectory(source)) {
+            Files.walk(source).use { stream ->
+                stream.filter { !Files.isDirectory(it) }.forEach { path ->
+                    val rel = sourceBase.relativize(path).toString().replace(File.separatorChar, '/')
+                    if (rel.isBlank() || isExcluded(rel, matchers)) return@forEach
+                    val remotePath = joinRemotePath(remoteBase, rel)
+                    logCallback?.invoke("[DRY-RUN] $path -> $remotePath")
+                    transferredFiles.add(rel)
+                    onSize(Files.size(path))
+                }
+            }
+        } else {
+            val rel = sourceBase.relativize(source).toString().replace(File.separatorChar, '/')
+            if (!isExcluded(rel, matchers)) {
+                val remotePath = joinRemotePath(remoteBase, rel)
+                logCallback?.invoke("[DRY-RUN] $source -> $remotePath")
+                transferredFiles.add(rel)
+                onSize(Files.size(source))
+            }
         }
     }
 

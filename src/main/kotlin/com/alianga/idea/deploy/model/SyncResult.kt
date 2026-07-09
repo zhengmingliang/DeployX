@@ -11,5 +11,7 @@ data class SyncResult(
     val duration: Long = 0,
     val error: String? = null,
     val output: String = "",
-    val reportGroup: UpdateReportGroup? = null
+    val reportGroup: UpdateReportGroup? = null,
+    /** 实际尝试次数（含首次，自动重试时 >1） */
+    val attempts: Int = 1
 )

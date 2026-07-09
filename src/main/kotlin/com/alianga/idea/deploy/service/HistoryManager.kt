@@ -30,28 +30,32 @@ class HistoryManager {
      * 从配置文件加载历史记录
      */
     private fun loadFromConfig() {
-        records.clear()
-        records.addAll(ConfigManager.getInstance().loadHistory())
+        synchronized(records) {
+            records.clear()
+            records.addAll(ConfigManager.getInstance().loadHistory())
+        }
         LOG.info("Loaded ${records.size} history records")
     }
 
     /**
      * 获取所有历史记录（按时间倒序）
      */
-    fun getRecords(): List<HistoryRecord> = records.sortedByDescending { it.timestamp }
+    fun getRecords(): List<HistoryRecord> = synchronized(records) { records.sortedByDescending { it.timestamp } }
 
     /**
-     * 添加历史记录
+     * 添加历史记录（线程安全，支持并行部署并发调用）
      */
     fun addRecord(record: HistoryRecord) {
-        records.add(0, record) // 插入到最前面
+        synchronized(records) {
+            records.add(0, record) // 插入到最前面
 
-        // 限制历史记录数量
-        if (records.size > MAX_HISTORY_SIZE) {
-            records.subList(MAX_HISTORY_SIZE, records.size).clear()
+            // 限制历史记录数量
+            if (records.size > MAX_HISTORY_SIZE) {
+                records.subList(MAX_HISTORY_SIZE, records.size).clear()
+            }
+
+            saveToConfig()
         }
-
-        saveToConfig()
         LOG.info("Added history record: ${record.type} - ${record.sourcePath}")
     }
 
@@ -59,8 +63,10 @@ class HistoryManager {
      * 删除历史记录
      */
     fun deleteRecord(id: String) {
-        records.removeAll { it.id == id }
-        saveToConfig()
+        synchronized(records) {
+            records.removeAll { it.id == id }
+            saveToConfig()
+        }
         LOG.info("Deleted history record: $id")
     }
 
@@ -68,8 +74,10 @@ class HistoryManager {
      * 清空历史记录
      */
     fun clearHistory() {
-        records.clear()
-        saveToConfig()
+        synchronized(records) {
+            records.clear()
+            saveToConfig()
+        }
         LOG.info("Cleared all history records")
     }
 
@@ -77,6 +85,6 @@ class HistoryManager {
      * 保存到配置文件
      */
     private fun saveToConfig() {
-        ConfigManager.getInstance().saveHistory(records)
+        ConfigManager.getInstance().saveHistory(records.toList())
     }
 }

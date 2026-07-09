@@ -24,6 +24,8 @@ class TransferService {
 
     companion object {
         private val LOG = Logger.getInstance(TransferService::class.java)
+        private const val MAX_RETRIES = 3
+        private const val RETRY_DELAY_MS = 2000L
 
         fun getInstance(): TransferService =
             ApplicationManager.getApplication().getService(TransferService::class.java)
@@ -40,10 +42,12 @@ class TransferService {
         logCallback: ((String) -> Unit)? = null,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
     ): SyncResult {
-        return when (chooseMethod(serverConfig, logCallback)) {
-            "rsync" -> rsyncWrapper.sync(localPath, remotePath, serverConfig, options, logCallback, progressCallback)
-            "sftp" -> sftpClient.upload(localPath, remotePath, serverConfig, options, logCallback, progressCallback)
-            else -> SyncResult(false, error = "未知传输方式")
+        return withRetry(logCallback) {
+            when (chooseMethod(serverConfig, logCallback)) {
+                "rsync" -> rsyncWrapper.sync(localPath, remotePath, serverConfig, options, logCallback, progressCallback)
+                "sftp" -> sftpClient.upload(localPath, remotePath, serverConfig, options, logCallback, progressCallback)
+                else -> SyncResult(false, error = "未知传输方式")
+            }
         }
     }
 
@@ -56,11 +60,57 @@ class TransferService {
         logCallback: ((String) -> Unit)? = null,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
     ): SyncResult {
-        return when (chooseMethod(serverConfig, logCallback)) {
-            "rsync" -> rsyncWrapper.syncFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback)
-            "sftp" -> sftpClient.uploadFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback)
-            else -> SyncResult(false, error = "未知传输方式")
+        return withRetry(logCallback) {
+            when (chooseMethod(serverConfig, logCallback)) {
+                "rsync" -> rsyncWrapper.syncFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback)
+                "sftp" -> sftpClient.uploadFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback)
+                else -> SyncResult(false, error = "未知传输方式")
+            }
         }
+    }
+
+    /**
+     * 传输重试包装器：对可重试的失败（网络/连接中断）最多重试 [MAX_RETRIES] 次，
+     * 间隔 [RETRY_DELAY_MS] 毫秒。认证失败、路径不存在等不可重试的错误直接返回。
+     */
+    private fun withRetry(
+        logCallback: ((String) -> Unit)?,
+        block: () -> SyncResult
+    ): SyncResult {
+        var result = block()
+        var attempt = 1
+        while (!result.success && attempt < MAX_RETRIES && isRetriable(result)) {
+            attempt++
+            logCallback?.invoke(DeployXBundle.message("transfer.retry.attempt", attempt))
+            Thread.sleep(RETRY_DELAY_MS)
+            result = block()
+        }
+        return if (result.attempts == 1 && attempt > 1) result.copy(attempts = attempt) else result
+    }
+
+    /**
+     * 判断失败是否可重试。
+     * - rsync exit code 12（连接中断）、255（SSH 错误）可重试
+     * - SFTP 连接异常（error 含 "connect" / "session" / "timeout"）可重试
+     * - 认证失败（Permission denied）、路径不存在等不可重试
+     */
+    private fun isRetriable(result: SyncResult): Boolean {
+        val error = result.error ?: return false
+        // 认证失败不重试
+        if (error.contains("Permission denied", ignoreCase = true) ||
+            error.contains("Auth fail", ignoreCase = true)) return false
+        // 本地路径不存在不重试
+        if (error.contains("not found", ignoreCase = true) ||
+            error.contains("不存在", ignoreCase = true)) return false
+        // rsync exit code 12 / 255 可重试
+        if (error.contains("code 12") || error.contains("code 255")) return true
+        // SFTP 连接/会话/超时异常可重试
+        if (error.contains("connect", ignoreCase = true) ||
+            error.contains("session", ignoreCase = true) ||
+            error.contains("timeout", ignoreCase = true) ||
+            error.contains("reset", ignoreCase = true) ||
+            error.contains("broken pipe", ignoreCase = true)) return true
+        return false
     }
 
     fun canPreviewWithRsync(): Boolean = RsyncWrapper.isRsyncAvailable()

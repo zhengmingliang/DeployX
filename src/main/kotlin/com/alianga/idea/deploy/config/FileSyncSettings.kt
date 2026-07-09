@@ -34,7 +34,9 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
         // language settings: "system" | "en" | "zh_CN"
         var language: String = "system",
         // 首次传输时检测到 Windows 未安装 rsync，用户选择"否"后置为 true，不再提示
-        var declinedRsyncAutoInstall: Boolean = false
+        var declinedRsyncAutoInstall: Boolean = false,
+        // 部署/上传完成后是否弹出系统通知
+        var systemNotification: Boolean = true
     )
 
     private var myState = State()
@@ -105,4 +107,8 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
     var declinedRsyncAutoInstall: Boolean
         get() = myState.declinedRsyncAutoInstall
         set(value) { myState.declinedRsyncAutoInstall = value }
+
+    var systemNotification: Boolean
+        get() = myState.systemNotification
+        set(value) { myState.systemNotification = value }
 }

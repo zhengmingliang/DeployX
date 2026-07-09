@@ -21,8 +21,6 @@ class SyncService {
             ApplicationManager.getApplication().getService(SyncService::class.java)
     }
 
-    private val rsyncWrapper = RsyncWrapper()
-
     /**
      * 同步文件
      * @param logCallback 实时日志回调
@@ -45,7 +43,10 @@ class SyncService {
     }
 
     /**
-     * 预览同步（干跑模式）
+     * 预览同步（干跑模式）。
+     *
+     * 通过 TransferService 统一调度：rsync 可用时走 rsync --dry-run，
+     * 不可用时走 SFTP dry-run（遍历本地文件列表，不实际传输）。
      */
     fun previewSync(
         localPath: String,
@@ -59,11 +60,8 @@ class SyncService {
         val server = ServerManager.getInstance().getServer(serverId)
             ?: return SyncResult(false, error = DeployXBundle.message("sync.error.serverNotFound", serverId))
 
-        if (!TransferService.getInstance().canPreviewWithRsync()) {
-            return SyncResult(false, error = DeployXBundle.message("sync.error.previewRequiresRsync"))
-        }
         val dryRunOptions = options.copy(dryRun = true)
-        return rsyncWrapper.sync(localPath, remotePath, server, dryRunOptions, logCallback)
+        return TransferService.getInstance().transfer(localPath, remotePath, server, dryRunOptions, logCallback)
     }
 
     /**

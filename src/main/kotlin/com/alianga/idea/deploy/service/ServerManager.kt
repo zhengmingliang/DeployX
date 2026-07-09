@@ -45,6 +45,12 @@ class ServerManager {
      */
     fun getServers(): List<ServerConfig> = servers.toList()
 
+    /** 获取所有非空分组名（去重排序） */
+    fun getGroups(): List<String> = servers.map { it.group }.filter { it.isNotBlank() }.distinct().sorted()
+
+    /** 获取所有标签（去重排序） */
+    fun getAllTags(): List<String> = servers.flatMap { it.tags }.filter { it.isNotBlank() }.distinct().sorted()
+
     /**
      * 根据 ID 获取服务器
      */

@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.ui.toolwindow
 
+import com.alianga.idea.deploy.action.ActionUtils
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.DeployItem
 import com.alianga.idea.deploy.model.DeployRequest
@@ -20,6 +21,7 @@ import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
 import com.alianga.idea.deploy.ui.script.ScriptTabPanel
 import com.alianga.idea.deploy.ui.settings.MappingEditDialog
 import com.intellij.icons.AllIcons
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.ide.CopyPasteManager
@@ -122,6 +124,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val historyRefreshButton = JButton(DeployXBundle.message("toolwindow.history.refresh"), AllIcons.Actions.Refresh)
     private val historyRedeployButton = JButton(DeployXBundle.message("toolwindow.history.redeploy"), AllIcons.Actions.Execute)
     private val historyFillConfigButton = JButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit)
+    private val historyCopyReportButton = JButton(DeployXBundle.message("toolwindow.history.copyReport"), AllIcons.Actions.Copy)
+    private val historyExportReportButton = JButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download)
     private val historyClearButton = JButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Vcs.History)
 
     // Tab 面板
@@ -243,6 +247,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         historyRefreshButton.addActionListener { refreshHistory() }
         historyRedeployButton.addActionListener { redeployFromHistory() }
         historyFillConfigButton.addActionListener { fillFromHistory() }
+        historyCopyReportButton.addActionListener { copyReportFromHistory() }
+        historyExportReportButton.addActionListener { exportReportFromHistory() }
         historyClearButton.addActionListener { clearHistory() }
 
         val historyButtonPanel = JPanel().apply {
@@ -252,6 +258,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(historyRedeployButton)
             add(Box.createHorizontalStrut(4))
             add(historyFillConfigButton)
+            add(Box.createHorizontalStrut(4))
+            add(historyCopyReportButton)
+            add(Box.createHorizontalStrut(4))
+            add(historyExportReportButton)
             add(Box.createHorizontalStrut(8))
             add(historyClearButton)
         }
@@ -318,6 +328,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         historyRefreshButton.text = DeployXBundle.message("toolwindow.history.refresh")
         historyRedeployButton.text = DeployXBundle.message("toolwindow.history.redeploy")
         historyFillConfigButton.text = DeployXBundle.message("toolwindow.history.fillConfig")
+        historyCopyReportButton.text = DeployXBundle.message("toolwindow.history.copyReport")
+        historyExportReportButton.text = DeployXBundle.message("toolwindow.history.exportReport")
         historyClearButton.text = DeployXBundle.message("toolwindow.history.clear")
 
         // Tab 标题（operation=0, log=1, history=2, script=3）
@@ -532,6 +544,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     progressBar.value = 100
                     progressLabel.text = DeployXBundle.message("toolwindow.progress.uploadComplete", successCount, results.size)
                     refreshHistory()
+                    notifyTransferResult(successCount, results.size)
                 }
             }
         })
@@ -568,6 +581,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     progressBar.value = 100
                     progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDeployComplete", successCount, results.size)
                     refreshHistory()
+                    notifyTransferResult(successCount, results.size)
                 }
             }
         })
@@ -701,6 +715,19 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         appendLog(DeployXBundle.message("toolwindow.report.generated"))
     }
 
+    /**
+     * 批量传输完成后弹出系统通知。
+     */
+    private fun notifyTransferResult(successCount: Int, total: Int) {
+        val failCount = total - successCount
+        val (message, type) = when {
+            failCount == 0 -> DeployXBundle.message("notification.transfer.allSuccess", successCount) to NotificationType.INFORMATION
+            successCount == 0 -> DeployXBundle.message("notification.transfer.allFailed", total) to NotificationType.ERROR
+            else -> DeployXBundle.message("notification.transfer.partial", successCount, failCount) to NotificationType.WARNING
+        }
+        ActionUtils.showSystemNotification(project, "DeployX", message, type)
+    }
+
     private fun copyLastReport() {
         if (lastUpdateReportText.isBlank()) {
             Messages.showWarningDialog(DeployXBundle.message("toolwindow.report.noReportToCopy"), DeployXBundle.message("toolwindow.report.copy.title"))
@@ -721,6 +748,50 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val result = chooser.showSaveDialog(this)
         if (result == JFileChooser.APPROVE_OPTION) {
             chooser.selectedFile.writeText(lastUpdateReportText)
+            Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.exported", chooser.selectedFile.absolutePath), DeployXBundle.message("toolwindow.report.export.title"))
+        }
+    }
+
+    /**
+     * 从选中的历史记录复制报告到剪贴板。
+     * 历史记录的 reportText 在创建时已预格式化为 Markdown。
+     */
+    private fun copyReportFromHistory() {
+        val idx = historyList.selectedIndex
+        if (idx < 0 || idx >= historyRecords.size) {
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.log.selectHistoryFirst"), DeployXBundle.message("toolwindow.report.copy.title"))
+            return
+        }
+        val reportText = historyRecords[idx].reportText
+        if (reportText.isBlank()) {
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.report.noReportToCopy"), DeployXBundle.message("toolwindow.report.copy.title"))
+            return
+        }
+        CopyPasteManager.getInstance().setContents(StringSelection(reportText))
+        Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.copied"), DeployXBundle.message("toolwindow.report.copy.title"))
+    }
+
+    /**
+     * 从选中的历史记录导出报告到文件。
+     */
+    private fun exportReportFromHistory() {
+        val idx = historyList.selectedIndex
+        if (idx < 0 || idx >= historyRecords.size) {
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.log.selectHistoryFirst"), DeployXBundle.message("toolwindow.report.export.title"))
+            return
+        }
+        val reportText = historyRecords[idx].reportText
+        if (reportText.isBlank()) {
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.report.noReportToExport"), DeployXBundle.message("toolwindow.report.export.title"))
+            return
+        }
+        val record = historyRecords[idx]
+        val chooser = JFileChooser().apply {
+            selectedFile = java.io.File("deployx-report-${record.formattedDate.replace("[ :/]".toRegex(), "-")}.md")
+        }
+        val result = chooser.showSaveDialog(this)
+        if (result == JFileChooser.APPROVE_OPTION) {
+            chooser.selectedFile.writeText(reportText)
             Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.exported", chooser.selectedFile.absolutePath), DeployXBundle.message("toolwindow.report.export.title"))
         }
     }

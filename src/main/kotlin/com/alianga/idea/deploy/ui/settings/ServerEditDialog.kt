@@ -49,6 +49,8 @@ class ServerEditDialog(
     private val showPasswordCheck = JBCheckBox(DeployXBundle.message("dialog.server.checkbox.showPassword"))
     private val defaultEchoChar = passwordField.echoChar
     private val isDefaultCheck = JBCheckBox(DeployXBundle.message("dialog.server.checkbox.setAsDefault"))
+    private val groupField = JBTextField()
+    private val tagsField = JBTextField()
 
     // 认证方式联动：根据 authType 切换显示密码框 / 密钥文件框
     private val authFieldLabel = JBLabel(DeployXBundle.message("dialog.server.label.password"))
@@ -135,6 +137,8 @@ class ServerEditDialog(
         passwordField.text = server.password
         keyFileField.text = server.keyFile
         isDefaultCheck.isSelected = false // 复制时默认不设为默认
+        groupField.text = server.group
+        tagsField.text = server.tags.joinToString(", ")
     }
 
     override fun createCenterPanel(): JComponent {
@@ -148,9 +152,11 @@ class ServerEditDialog(
             .addLabeledComponent(authFieldLabel, authFieldPanel)
             .addComponent(testConnectionButton)
             .addComponent(isDefaultCheck)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.group"), groupField)
+            .addLabeledComponent(DeployXBundle.message("dialog.server.label.tags"), tagsField)
             .panel
 
-        panel.preferredSize = Dimension(400, 350)
+        panel.preferredSize = Dimension(400, 400)
         return panel
     }
 
@@ -231,7 +237,9 @@ class ServerEditDialog(
             authType = authTypeCombo.selectedItem as ServerConfig.AuthType,
             password = String(passwordField.password),
             keyFile = keyFileField.text.trim(),
-            isDefault = isDefaultCheck.isSelected
+            isDefault = isDefaultCheck.isSelected,
+            group = groupField.text.trim(),
+            tags = tagsField.text.split(",").map { it.trim() }.filter { it.isNotBlank() }
         )
     }
 }

@@ -39,6 +39,15 @@ abstract class AbstractDeployAction<T> : AnAction() {
         val executePostCommand: Boolean
     )
 
+    /**
+     * 多服务器选择结果（支持并行部署）
+     */
+    data class MultiServerSelectionResult(
+        val servers: List<ServerConfig>,
+        val executePreCommand: Boolean,
+        val executePostCommand: Boolean
+    )
+
     final override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     final override fun actionPerformed(e: AnActionEvent) {
@@ -66,18 +75,24 @@ abstract class AbstractDeployAction<T> : AnAction() {
             .distinct()
             .mapNotNull { ServerManager.getInstance().getServer(it) }
 
-        val selection = selectServer(availableServers, resolvedByFile, files.size) ?: return
-        val targetServer = selection.server
+        val multiSelection = selectServers(availableServers, resolvedByFile, files.size) ?: return
 
         ToolWindowManager.getInstance(project).getToolWindow("DeployX")?.show()
 
-        val items = buildItems(resolvedByFile, targetServer, selection)
+        // 遍历每个选中的服务器，构建执行项
+        val items = multiSelection.servers.flatMap { targetServer ->
+            buildItems(resolvedByFile, targetServer, ServerSelectionResult(
+                server = targetServer,
+                executePreCommand = multiSelection.executePreCommand,
+                executePostCommand = multiSelection.executePostCommand
+            ))
+        }
         val skipped = files.size - items.size
         val panel = FileSyncToolWindowPanel.getPanel(project)
         if (panel != null) {
             if (skipped > 0) {
                 panel.appendLog(
-                    DeployXBundle.message("toolwindow.log.skippedNoMapping", skipped, targetServer.id)
+                    DeployXBundle.message("toolwindow.log.skippedNoMapping", skipped, multiSelection.servers.joinToString { it.id })
                 )
             }
             executeBatch(panel, items)
@@ -112,6 +127,31 @@ abstract class AbstractDeployAction<T> : AnAction() {
         if (!dialog.showAndGet()) return null
         val server = dialog.selectedServer ?: return null
         return ServerSelectionResult(server, dialog.executePreCommand, dialog.executePostCommand)
+    }
+
+    /**
+     * 选择目标服务器（多选模式，支持并行部署）。
+     *
+     * 默认实现弹出多选对话框；QuickPushAction 等可重写以跳过对话框。
+     */
+    protected open fun selectServers(
+        servers: List<ServerConfig>,
+        resolvedByFile: Map<VirtualFile, List<MappingManager.ResolvedMapping>>,
+        fileCount: Int
+    ): MultiServerSelectionResult? {
+        if (servers.isEmpty()) return null
+        val commandAvailability = ActionUtils.buildCommandAvailability(resolvedByFile.values.flatten())
+        val dialog = ServerSelectionDialog(
+            servers,
+            dialogTitle(),
+            dialogMessage(fileCount),
+            showCommandOptions = showCommandOptions(),
+            commandAvailabilityByServerId = commandAvailability
+        )
+        if (!dialog.showAndGet()) return null
+        val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }
+        if (selected.isEmpty()) return null
+        return MultiServerSelectionResult(selected, dialog.executePreCommand, dialog.executePostCommand)
     }
 
     /**

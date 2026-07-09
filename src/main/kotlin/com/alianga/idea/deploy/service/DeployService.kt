@@ -10,6 +10,8 @@ import com.intellij.openapi.diagnostic.Logger
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 
 /**
  * 部署服务 - 负责完整部署流程（备份 + 上传 + 解压）
@@ -73,17 +75,52 @@ class DeployService {
             )
         }
 
-        val results = mutableListOf<SyncResult>()
-        groups.forEach { (key, groupItems) ->
-            val groupLog: (String) -> Unit = { line ->
-                if (serverLogCallback != null) serverLogCallback.invoke(key.serverId, line) else logCallback?.invoke(line)
+        val results = Collections.synchronizedList(mutableListOf<SyncResult>())
+        // 多服务器分组并行执行（每组内部串行，不同服务器并行）
+        if (groups.size > 1) {
+            val executor = Executors.newFixedThreadPool(groups.size.coerceAtMost(4))
+            val latch = CountDownLatch(groups.size)
+            groups.forEach { (key, groupItems) ->
+                executor.submit {
+                    try {
+                        processUploadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun)
+                    } finally {
+                        latch.countDown()
+                    }
+                }
             }
-            val server = ServerManager.getInstance().getServer(key.serverId)
-            if (server == null) {
-                val result = SyncResult(false, error = DeployXBundle.message("deploy.error.serverNotFound", key.serverId))
+            latch.await()
+            executor.shutdown()
+        } else {
+            groups.forEach { (key, groupItems) ->
+                processUploadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun)
+            }
+        }
+
+        return results
+    }
+
+    /**
+     * 处理单个上传分组（从 uploadBatch 抽取，支持并行调用）。
+     */
+    private fun processUploadGroup(
+        key: UploadGroupKey,
+        groupItems: List<UploadItem>,
+        results: MutableList<SyncResult>,
+        serverLogCallback: ((serverId: String, line: String) -> Unit)?,
+        logCallback: ((String) -> Unit)?,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)?,
+        dryRun: Boolean
+    ) {
+        val groupLog: (String) -> Unit = { line ->
+            if (serverLogCallback != null) serverLogCallback.invoke(key.serverId, line) else logCallback?.invoke(line)
+        }
+        val server = ServerManager.getInstance().getServer(key.serverId)
+        if (server == null) {
+            val result = SyncResult(false, error = DeployXBundle.message("deploy.error.serverNotFound", key.serverId))
                 results.add(result)
                 groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
-                return@forEach
+                return
             }
 
             groupLog(DeployXBundle.message(if (dryRun) "deploy.log.previewGroupHeader" else "deploy.log.uploadGroupHeader"))
@@ -108,13 +145,13 @@ class DeployService {
                         if (connectResult.errorMessage != null) {
                             groupLog(DeployXBundle.message("deploy.log.detail", connectResult.errorMessage))
                         }
-                        return@forEach
+                        return
                     }
                 }
 
                 if (!dryRun && !key.preCommand.isNullOrBlank()) {
                     groupLog(DeployXBundle.message("deploy.log.preCommand", key.preCommand))
-                    val conn = sshConnection ?: return@forEach
+                    val conn = sshConnection ?: return
                     val preResult = conn.executeCommand(key.preCommand)
                     if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                     if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandFailedBatch", preResult.exitCode, preResult.error))
@@ -152,7 +189,7 @@ class DeployService {
 
                 if (!dryRun && !key.postCommand.isNullOrBlank()) {
                     groupLog(DeployXBundle.message("deploy.log.postCommand", key.postCommand))
-                    val conn = sshConnection ?: return@forEach
+                    val conn = sshConnection ?: return
                     val postResult = conn.executeCommand(key.postCommand)
                     if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                     if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandFailedBatch", postResult.exitCode, postResult.error))
@@ -160,9 +197,6 @@ class DeployService {
             } finally {
                 sshConnection?.disconnect()
             }
-        }
-
-        return results
     }
 
     /**

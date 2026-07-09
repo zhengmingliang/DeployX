@@ -59,6 +59,10 @@ class ServerSelectionDialog(
     var selectedServer: ServerConfig? = null
         private set
 
+    /** 多选模式：选中的服务器列表（单选时只有一个元素） */
+    var selectedServers: List<ServerConfig> = emptyList()
+        private set
+
     var executePreCommand: Boolean = false
         private set
 
@@ -67,7 +71,7 @@ class ServerSelectionDialog(
 
     init {
         title = titleText
-        serverList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        serverList.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
         if (servers.isNotEmpty()) {
             serverList.selectedIndex = 0
         }
@@ -182,10 +186,12 @@ class ServerSelectionDialog(
     }
 
     override fun doOKAction() {
-        val selectedIndex = serverList.selectedIndex
-        if (selectedIndex >= 0 && selectedIndex < filteredServers.size) {
-            selectedServer = filteredServers[selectedIndex]
-        }
+        // 多选模式：收集所有选中的服务器
+        val selectedIndices = serverList.selectedIndices
+        selectedServers = selectedIndices.filter { it >= 0 && it < filteredServers.size }
+            .map { filteredServers[it] }
+        // 向后兼容：selectedServer 取第一个
+        selectedServer = selectedServers.firstOrNull()
         executePreCommand = showCommandOptions && executePreCommandCheck.isEnabled && executePreCommandCheck.isSelected
         executePostCommand = showCommandOptions && executePostCommandCheck.isEnabled && executePostCommandCheck.isSelected
         super.doOKAction()
