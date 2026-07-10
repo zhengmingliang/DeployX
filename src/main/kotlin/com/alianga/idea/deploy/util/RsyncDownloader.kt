@@ -98,8 +98,6 @@ object RsyncDownloader {
         }
     }
 
-    ...
-
     /**
      * 下载 zip 文件到临时目录。
      */

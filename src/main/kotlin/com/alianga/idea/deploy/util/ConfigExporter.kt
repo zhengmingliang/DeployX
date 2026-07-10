@@ -14,8 +14,6 @@ import com.google.gson.reflect.TypeToken
 import java.io.File
 import java.security.SecureRandom
 import java.util.Base64
-import java.util.Collections
-import java.util.Collections.synchronizedList
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -133,8 +131,8 @@ object ConfigExporter {
             val encrypted = encrypt(json, password)
 
             // 如需导出密钥，读取并加密
-            val keysList = synchronizedList mutableListOf<KeyFileEntry>()
-            val missingKeys = synchronizedList mutableListOf<String>()
+            val keysList = mutableListOf<KeyFileEntry>()
+            val missingKeys = mutableListOf<String>()
 
             if (exportKeys) {
                 servers.forEach { server ->
@@ -160,13 +158,13 @@ object ConfigExporter {
             }
 
             // 构建导出 JSON
-            val exportMap = mutableMapOf(
-                "version" to if (exportKeys) EXPORT_VERSION_WITH_KEYS else EXPORT_VERSION_BASE,
-                "encrypted" to true,
-                "data" to encrypted
-            )
-            if (exportKeys && keysList.isNotEmpty()) {
-                exportMap["keys"] = keysList
+            val exportMap = HashMap<String, Any>().apply {
+                put("version", if (exportKeys) EXPORT_VERSION_WITH_KEYS else EXPORT_VERSION_BASE)
+                put("encrypted", true)
+                put("data", encrypted)
+                if (exportKeys && keysList.isNotEmpty()) {
+                    put("keys", keysList)
+                }
             }
             val exportJson = GSON.toJson(exportMap)
 

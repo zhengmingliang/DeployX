@@ -1,6 +1,8 @@
 package com.alianga.idea.deploy.ui.settings
 
 import com.alianga.idea.deploy.DeployXBundle
+import com.alianga.idea.deploy.model.ServerConfig
+import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.util.ConfigExporter
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.options.Configurable
@@ -14,7 +16,7 @@ import javax.swing.JPanel
 import javax.swing.JComponent
 
 /**
- * 文件同步工具设置页面 - 注册在 Settings > Tools > DeployX
+ * 文件同步工具设置页面 - 注册在 Settings > Tools → DeployX
  */
 class FileSyncSettingsConfigurable : Configurable {
 
@@ -55,6 +57,7 @@ class FileSyncSettingsConfigurable : Configurable {
 
     /**
      * 导出所有配置（加密）。
+     * 若存在使用密钥认证的服务器，先询问用户是否导出密钥文件内容。
      */
     private fun exportConfig() {
         val password = Messages.showPasswordDialog(
@@ -63,17 +66,48 @@ class FileSyncSettingsConfigurable : Configurable {
         )
         if (password.isNullOrBlank()) return
 
+        // 检测是否有使用密钥认证的服务器
+        val hasKeyServers = ServerManager.getInstance().getServers().any {
+            it.authType == ServerConfig.AuthType.KEY && it.keyFile.isNotBlank()
+        }
+        val exportKeys = if (hasKeyServers) {
+            val choice = Messages.showYesNoCancelDialog(
+                DeployXBundle.message("settings.config.export.keyFilePrompt"),
+                DeployXBundle.message("settings.config.export.keyFileTitle"),
+                Messages.getQuestionIcon()
+            )
+            when (choice) {
+                Messages.YES -> true
+                Messages.NO -> false
+                else -> return  // CANCEL
+            }
+        } else {
+            false
+        }
+
         val chooser = JFileChooser().apply {
             selectedFile = File("deployx-config-${System.currentTimeMillis()}.json")
         }
         if (chooser.showSaveDialog(mainPanel) != JFileChooser.APPROVE_OPTION) return
 
-        val result = ConfigExporter.exportConfig(chooser.selectedFile, password)
+        val result = ConfigExporter.exportConfig(chooser.selectedFile, password, exportKeys)
         if (result.success) {
-            Messages.showInfoMessage(
-                DeployXBundle.message("settings.config.export.success", result.file?.absolutePath ?: ""),
-                DeployXBundle.message("settings.button.exportConfig")
-            )
+            val message = if (result.keysExported > 0) {
+                DeployXBundle.message(
+                    "settings.config.export.withKeysSuccess",
+                    result.keysExported,
+                    result.file?.absolutePath ?: ""
+                )
+            } else {
+                DeployXBundle.message("settings.config.export.success", result.file?.absolutePath ?: "")
+            }
+            // 若有缺失的密钥文件，附加提示
+            val finalMessage = if (result.keysMissing.isNotEmpty()) {
+                "$message\n\n${DeployXBundle.message("settings.config.export.keysMissing")}\n${result.keysMissing.joinToString("\n") { "• $it" }}"
+            } else {
+                message
+            }
+            Messages.showInfoMessage(finalMessage, DeployXBundle.message("settings.button.exportConfig"))
         } else {
             Messages.showErrorDialog(
                 DeployXBundle.message("settings.config.export.failed", result.error ?: ""),
@@ -108,13 +142,32 @@ class FileSyncSettingsConfigurable : Configurable {
             } else false
 
             val result = ConfigExporter.importConfig(chooser.selectedFile, password, overwrite, overwrite, overwrite)
-            Messages.showInfoMessage(
-                DeployXBundle.message("settings.config.import.success",
-                    result.serversAdded, result.serversUpdated,
-                    result.mappingsAdded, result.mappingsUpdated,
-                    result.scriptsAdded, result.scriptsUpdated),
-                DeployXBundle.message("settings.button.importConfig")
+
+            // 构建成功消息
+            val baseMessage = DeployXBundle.message(
+                "settings.config.import.success",
+                result.serversAdded, result.serversUpdated,
+                result.mappingsAdded, result.mappingsUpdated,
+                result.scriptsAdded, result.scriptsUpdated
             )
+            val finalMessage = buildString {
+                append(baseMessage)
+                if (result.keysImported > 0) {
+                    append("\n\n")
+                    append(DeployXBundle.message(
+                        "settings.config.import.keysSuccess",
+                        result.keysImported
+                    ))
+                }
+                if (result.keyMissingServers.isNotEmpty()) {
+                    append("\n")
+                    append(DeployXBundle.message("settings.config.import.keysMissing"))
+                    result.keyMissingServers.forEach { missing ->
+                        append("\n• $missing")
+                    }
+                }
+            }
+            Messages.showInfoMessage(finalMessage, DeployXBundle.message("settings.button.importConfig"))
             // 刷新面板
             serverPanel.reset()
             mappingPanel.reset()

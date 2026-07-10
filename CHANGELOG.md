@@ -2,6 +2,12 @@
 
 ## [1.0.4] - 2026-07-10
 
+
+### ✨ 新功能
+- **导出配置时包含 SSH 密钥文件**：导出加密配置时，若存在使用密钥认证的服务器，会提示用户是否将密钥文件内容一并加密导出。导入到另一台机器时自动解密并保存到本地密钥目录（`~/.deploy-x/keys/`），服务器配置的密钥路径自动指向本地文件，无需手动复制密钥。若不选择导出密钥文件，仍按原有方式仅导出服务器配置（密钥路径保留但内容不导出）
+
+
+
 ### 🐛 Bug 修复
 - **配置导入后服务器丢失密码**：修复导入加密配置后，服务器密码在内存中丢失导致 SSH 连接失败的问题。根因：`ConfigExporter.importConfig` 在保存密码到 PasswordSafe / `.passwords.dat` 后，传给 `ServerManager` 的是 `server.copy(password = "")` 的副本，导致内存中的 `ServerConfig.password` 为空，SSH 密码认证失败。现已改为直接传入带密码的 `ServerConfig`，`ConfigManager.saveServers()` 仍会在写入 `servers.json` 时清空密码字段，行为与现有逻辑完全一致
 
