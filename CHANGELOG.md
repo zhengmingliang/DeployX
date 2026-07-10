@@ -5,6 +5,9 @@
 ### 🐛 Bug 修复
 - **配置导入后服务器丢失密码**：修复导入加密配置后，服务器密码在内存中丢失导致 SSH 连接失败的问题。根因：`ConfigExporter.importConfig` 在保存密码到 PasswordSafe / `.passwords.dat` 后，传给 `ServerManager` 的是 `server.copy(password = "")` 的副本，导致内存中的 `ServerConfig.password` 为空，SSH 密码认证失败。现已改为直接传入带密码的 `ServerConfig`，`ConfigManager.saveServers()` 仍会在写入 `servers.json` 时清空密码字段，行为与现有逻辑完全一致
 
+### 🛠 重构
+- **rsync 下载目录统一**：Windows 下 rsync 自动下载解压目录从 `~/.deployx/rsync-win/` 迁移至 `~/.deploy-x/rsync-win/`，与插件其他配置文件（`servers.json`、`.passwords.dat` 等）统一使用 `.deploy-x` 目录。首次访问时自动检测并迁移旧的 `.deployx/rsync-win/` 目录（若存在），用户无需手动操作
+
 ---
 
 ## [1.0.3] - 2026-07-08
@@ -39,7 +42,7 @@
 - **脚本批量删除**：删除操作现在可一次性删除所有选中的脚本（此前只会删除选中的第一个）
 - **脚本导入冲突处理**：导入时若脚本 id 已存在，提示用户选择「覆盖重复项」或「全部作为新脚本新增」
 - **SSH_ASKPASS 密码认证回退**：Windows/Linux 上已安装 rsync 但缺少 sshpass 时，自动回退使用 SSH_ASKPASS 机制提供密码，密码认证的 rsync 仍可正常工作，无需降级 SFTP
-- **rsync 一键下载安装（Windows）**：设置面板检测到未安装 rsync 时显示「一键下载安装」按钮，自动下载（GitHub releases，失败切换国内镜像）、解压到 `~/.deployx/rsync-win/`、自动配置路径；下载失败提供手动下载链接
+- **rsync 一键下载安装（Windows）**：设置面板检测到未安装 rsync 时显示「一键下载安装」按钮，自动下载（GitHub releases，失败切换国内镜像）、解压到 `~/.deploy-x/rsync-win/`、自动配置路径；下载失败提供手动下载链接
 - **首次传输安装提示（Windows）**：首次传输时未检测到 rsync 则弹窗询问是否自动安装。选「是」下载安装；选「否」记住选择并静默降级 SFTP（不再提示）。`RSYNC_ONLY` 模式下用户拒绝后也降级 SFTP
 
 ### 🪟 Windows rsync 同步优化

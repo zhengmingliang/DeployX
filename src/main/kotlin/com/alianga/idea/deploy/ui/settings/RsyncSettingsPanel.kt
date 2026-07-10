@@ -123,7 +123,7 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
     /**
      * 一键下载安装 rsync（仅 Windows）。
      *
-     * 后台下载 zip 并解压到 ~/.deployx/rsync-win/，成功后自动填充 rsyncPath 并重新检测；
+     * 后台下载 zip 并解压到 ~/.deploy-x/rsync-win/，成功后自动填充 rsyncPath 并重新检测；
      * 失败则弹出对话框给出手动下载链接。
      */
     private fun startDownloadAndInstall() {

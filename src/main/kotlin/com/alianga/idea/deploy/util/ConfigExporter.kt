@@ -10,23 +10,39 @@ import com.alianga.idea.deploy.service.ScriptManager
 import com.alianga.idea.deploy.service.ServerManager
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
+import com.google.gson.reflect.TypeToken
 import java.io.File
 import java.security.SecureRandom
+import java.util.Base64
+import java.util.Collections
+import java.util.Collections.synchronizedList
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
-import java.util.Base64
 
 /**
  * 插件配置导入导出工具（AES-256-GCM 加密）。
  *
- * 导出格式：
+ * 导出格式（v1.0）：
  * ```json
  * { "version": "1.0", "encrypted": true, "data": "<Base64(AES/GCM加密的JSON)>" }
  * ```
+ *
+ * 导出格式（v1.1，包含密钥）：
+ * ```json
+ * {
+ *   "version": "1.1",
+ *   "encrypted": true,
+ *   "data": "<Base64(AES/GCM加密的JSON)>",
+ *   "keys": [
+ *     { "serverId": "server1", "fileName": "id_rsa", "content": "<Base64(AES/GCM加密的密钥内容)>" }
+ *   ]
+ * }
+ * ```
  * 解密后的 JSON 包含 servers（含密码）、mappings、scripts 三个数组。
+ * `keys` 字段可选，旧版导出文件不含此字段，导入器兼容处理。
  *
  * 加密方案：用户密码 -> PBKDF2WithHmacSHA256 派生 AES 密钥 -> AES/GCM/NoPadding 加密。
  */
@@ -41,23 +57,66 @@ object ConfigExporter {
     private const val SALT_LENGTH = 16
     private const val IV_LENGTH = 12
 
+    private const val EXPORT_VERSION_WITH_KEYS = "1.1"
+    private const val EXPORT_VERSION_BASE = "1.0"
+
+    /** 导入的密钥文件存储目录 */
+    private val KEYS_DIR by lazy {
+        val dir = File(ConfigManager.getInstance().getConfigDir(), "keys")
+        if (!dir.exists()) {
+            dir.mkdirs()
+            try {
+                dir.setReadable(true, false)
+                dir.setWritable(true, false)
+                dir.setExecutable(true, false)
+            } catch (_: Exception) {
+                // 设置权限失败，继续运行
+            }
+        }
+        dir
+    }
+
     data class ConfigBundle(
         val servers: List<ServerConfig>,
         val mappings: List<MappingConfig>,
         val scripts: List<ScriptConfig>
     )
 
-    data class ExportResult(val success: Boolean, val file: File? = null, val error: String? = null)
-    data class ImportResult(val serversAdded: Int, val serversUpdated: Int, val mappingsAdded: Int, val mappingsUpdated: Int, val scriptsAdded: Int, val scriptsUpdated: Int)
+    /** 导出文件中的密钥条目 */
+    data class KeyFileEntry(
+        val serverId: String,
+        val fileName: String,
+        val content: String  // AES-256-GCM 加密后的 Base64 字符串
+    )
+
+    data class ExportResult(
+        val success: Boolean,
+        val file: File? = null,
+        val error: String? = null,
+        val keysExported: Int = 0,
+        val keysMissing: List<String> = emptyList()
+    )
+
+    data class ImportResult(
+        val serversAdded: Int,
+        val serversUpdated: Int,
+        val mappingsAdded: Int,
+        val mappingsUpdated: Int,
+        val scriptsAdded: Int,
+        val scriptsUpdated: Int,
+        val keysImported: Int = 0,
+        val keyMissingServers: List<String> = emptyList()
+    )
 
     /**
      * 导出所有配置到加密文件。
      *
      * @param outputFile 目标文件
      * @param password 用户输入的加密密码
+     * @param exportKeys 是否导出 SSH 密钥文件内容
      * @return 导出结果
      */
-    fun exportConfig(outputFile: File, password: String): ExportResult {
+    fun exportConfig(outputFile: File, password: String, exportKeys: Boolean = false): ExportResult {
         return try {
             val configManager = ConfigManager.getInstance()
             val servers = ServerManager.getInstance().getServers().map { server ->
@@ -72,14 +131,52 @@ object ConfigExporter {
             val json = GSON.toJson(bundle)
 
             val encrypted = encrypt(json, password)
-            val exportJson = GSON.toJson(mapOf(
-                "version" to "1.0",
+
+            // 如需导出密钥，读取并加密
+            val keysList = synchronizedList mutableListOf<KeyFileEntry>()
+            val missingKeys = synchronizedList mutableListOf<String>()
+
+            if (exportKeys) {
+                servers.forEach { server ->
+                    if (server.authType == ServerConfig.AuthType.KEY && server.keyFile.isNotBlank()) {
+                        val keyFile = File(server.keyFile)
+                        if (keyFile.exists() && keyFile.isFile) {
+                            try {
+                                val keyContent = keyFile.readBytes().toString(Charsets.UTF_8)
+                                val encryptedContent = encrypt(keyContent, password)
+                                keysList.add(KeyFileEntry(
+                                    serverId = server.id,
+                                    fileName = keyFile.name,
+                                    content = encryptedContent
+                                ))
+                            } catch (e: Exception) {
+                                missingKeys.add("${server.id} (${server.keyFile}): ${e.message}")
+                            }
+                        } else {
+                            missingKeys.add("${server.id} (${server.keyFile}): 文件不存在")
+                        }
+                    }
+                }
+            }
+
+            // 构建导出 JSON
+            val exportMap = mutableMapOf(
+                "version" to if (exportKeys) EXPORT_VERSION_WITH_KEYS else EXPORT_VERSION_BASE,
                 "encrypted" to true,
                 "data" to encrypted
-            ))
+            )
+            if (exportKeys && keysList.isNotEmpty()) {
+                exportMap["keys"] = keysList
+            }
+            val exportJson = GSON.toJson(exportMap)
 
             outputFile.writeText(exportJson)
-            ExportResult(success = true, file = outputFile)
+            ExportResult(
+                success = true,
+                file = outputFile,
+                keysExported = keysList.size,
+                keysMissing = missingKeys.toList()
+            )
         } catch (e: Exception) {
             ExportResult(success = false, error = e.message)
         }
@@ -110,6 +207,37 @@ object ConfigExporter {
 
         val bundle = GSON.fromJson(decrypted, ConfigBundle::class.java)
 
+        // 解析密钥文件（如果存在）
+        @Suppress("UNCHECKED_CAST")
+        val keysRaw = wrapper["keys"] as? List<Map<String, Any>>
+        val keyPathMap = mutableMapOf<String, String>() // serverId -> 本地密钥路径
+        val keyMissingServers = mutableListOf<String>()
+
+        if (keysRaw != null && keysRaw.isNotEmpty()) {
+            keysRaw.forEach { entry ->
+                val serverId = entry["serverId"] as? String ?: return@forEach
+                val fileName = entry["fileName"] as? String ?: return@forEach
+                val encryptedContent = entry["content"] as? String ?: return@forEach
+
+                try {
+                    val decryptedContent = decrypt(encryptedContent, password)
+                    val destFile = File(KEYS_DIR, "${serverId}_${fileName}")
+                    destFile.writeText(decryptedContent, Charsets.UTF_8)
+                    // 设置密钥文件权限为 600（仅所有者可读写）
+                    try {
+                        destFile.setReadable(true, false)
+                        destFile.setWritable(true, false)
+                        destFile.setExecutable(false, false)
+                    } catch (_: Exception) {
+                        // 设置权限失败，继续运行
+                    }
+                    keyPathMap[serverId] = destFile.absolutePath
+                } catch (e: Exception) {
+                    keyMissingServers.add("$serverId (${fileName}): ${e.message}")
+                }
+            }
+        }
+
         val configManager = ConfigManager.getInstance()
         var serversAdded = 0
         var serversUpdated = 0
@@ -118,7 +246,7 @@ object ConfigExporter {
         val existingServers = ServerManager.getInstance().getServers().associateBy { it.id }
         val serversToSave = bundle.servers.map { imported ->
             val existing = existingServers[imported.id]
-            if (existing != null) {
+            var server = if (existing != null) {
                 if (overwriteServer) {
                     serversUpdated++
                     imported
@@ -131,7 +259,21 @@ object ConfigExporter {
                 serversAdded++
                 imported
             }
+
+            // 如果密钥文件中包含该服务器的密钥，更新 keyFile 路径指向本地
+            val localKeyPath = keyPathMap[server.id]
+            if (localKeyPath != null && server.authType == ServerConfig.AuthType.KEY) {
+                server = server.copy(keyFile = localKeyPath)
+            } else if (server.authType == ServerConfig.AuthType.KEY && server.keyFile.isNotBlank() && localKeyPath == null) {
+                // 密钥认证但未包含密钥文件，记录缺失
+                if (server.keyFile.isNotBlank()) {
+                    keyMissingServers.add("${server.id}: 密钥文件未包含在导出中")
+                }
+            }
+
+            server
         }
+
         // 保存服务器（含密码）。saveServers 会自动：
         // 1. 将密码保存到 PasswordSafe + .passwords.dat
         // 2. 写入 servers.json 时清空 password 字段
@@ -175,7 +317,9 @@ object ConfigExporter {
             mappingsAdded = mappingsAdded,
             mappingsUpdated = mappingsUpdated,
             scriptsAdded = scriptResult.added,
-            scriptsUpdated = scriptResult.updated
+            scriptsUpdated = scriptResult.updated,
+            keysImported = keyPathMap.size,
+            keyMissingServers = keyMissingServers
         )
     }
 
