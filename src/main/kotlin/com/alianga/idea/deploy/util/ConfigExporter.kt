@@ -132,20 +132,15 @@ object ConfigExporter {
                 imported
             }
         }
-        // 保存密码到密钥链
-        serversToSave.forEach { server ->
-            if (server.password.isNotBlank()) {
-                configManager.savePassword(server.id, server.password)
-            }
-        }
-        // 保存服务器（不含密码）
+        // 保存服务器（含密码）。saveServers 会自动：
+        // 1. 将密码保存到 PasswordSafe + .passwords.dat
+        // 2. 写入 servers.json 时清空 password 字段
         val serverManager = ServerManager.getInstance()
         serversToSave.forEach { server ->
-            val sanitized = server.copy(password = "")
             if (serverManager.getServer(server.id) != null) {
-                serverManager.updateServer(server.id, sanitized)
+                serverManager.updateServer(server.id, server)
             } else {
-                serverManager.addServer(sanitized)
+                serverManager.addServer(server)
             }
         }
 

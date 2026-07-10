@@ -1,5 +1,12 @@
 # DeployX Changelog
 
+## [1.0.4] - 2026-07-10
+
+### 🐛 Bug 修复
+- **配置导入后服务器丢失密码**：修复导入加密配置后，服务器密码在内存中丢失导致 SSH 连接失败的问题。根因：`ConfigExporter.importConfig` 在保存密码到 PasswordSafe / `.passwords.dat` 后，传给 `ServerManager` 的是 `server.copy(password = "")` 的副本，导致内存中的 `ServerConfig.password` 为空，SSH 密码认证失败。现已改为直接传入带密码的 `ServerConfig`，`ConfigManager.saveServers()` 仍会在写入 `servers.json` 时清空密码字段，行为与现有逻辑完全一致
+
+---
+
 ## [1.0.3] - 2026-07-08
 
 ### ✨ 新功能
@@ -169,6 +176,7 @@
 - 次版本号：向下兼容的功能性新增
 - 修订号：向下兼容的问题修正
 
+[1.0.4]: https://github.com/zhengmingliang/DeployX/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/zhengmingliang/DeployX/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/zhengmingliang/DeployX/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/zhengmingliang/DeployX/compare/v1.0.0...v1.0.1

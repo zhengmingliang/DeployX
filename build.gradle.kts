@@ -71,6 +71,11 @@ tasks {
         untilBuild.set("262.*") // 兼容性范围：2023.3.8 - 2026.2
         changeNotes.set(
             """
+                <h3>v1.0.4 - Config Import Password Fix</h3>
+                <ul>
+                    <li><b>🐛 Config Import Lost Server Passwords:</b> Fixed an issue where imported servers had an empty password in memory after config import, causing SSH authentication to fail. The root cause was that <code>ConfigExporter.importConfig</code> passed <code>server.copy(password = "")</code> to <code>ServerManager</code> after saving the password to PasswordSafe / <code>.passwords.dat</code>, clearing the password from the in-memory <code>ServerConfig</code>. Now the full <code>ServerConfig</code> with password is passed through directly, and <code>saveServers()</code> continues to sanitize the password when writing <code>servers.json</code>, matching existing behavior</li>
+                </ul>
+
                 <h3>v1.0.3 - Transfer Enhancements & Multi-Server Deploy</h3>
                 <ul>
                     <li><b>📋 History Report Copy/Export:</b> Added "Copy Report" and "Export Report" buttons to the History tab - copy/export the Markdown report from any history entry (not just the latest one)</li>
@@ -158,6 +163,11 @@ tasks {
 
                 <br>
                 <h4>中文更新说明</h4>
+
+                <h3>v1.0.4 - 配置导入密码修复</h3>
+                <ul>
+                    <li><b>🐛 配置导入后服务器丢失密码修复：</b>修复导入加密配置后，服务器密码在内存中丢失导致 SSH 连接失败的问题。根因：`ConfigExporter.importConfig` 在保存密码到 PasswordSafe / `.passwords.dat` 后，传给 `ServerManager` 的是 `server.copy(password = "")` 的副本，导致内存中的 `ServerConfig.password` 为空，SSH 密码认证失败。现已改为直接传入带密码的 `ServerConfig`，`saveServers()` 仍会在写入 `servers.json` 时清空密码字段，行为与现有逻辑完全一致</li>
+                </ul>
 
                 <h3>v1.0.3 - 传输增强与多服务器并行部署</h3>
                 <ul>
