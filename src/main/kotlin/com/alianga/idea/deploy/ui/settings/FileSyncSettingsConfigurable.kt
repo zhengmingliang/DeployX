@@ -64,7 +64,13 @@ class FileSyncSettingsConfigurable : Configurable {
             DeployXBundle.message("settings.config.export.passwordPrompt"),
             DeployXBundle.message("settings.button.exportConfig")
         )
-        if (password.isNullOrBlank()) return
+        if (password.isNullOrBlank()) {
+            Messages.showWarningDialog(
+                DeployXBundle.message("settings.config.export.passwordRequired"),
+                DeployXBundle.message("settings.button.exportConfig")
+            )
+            return
+        }
 
         // 检测是否有使用密钥认证的服务器
         val hasKeyServers = ServerManager.getInstance().getServers().any {
@@ -173,8 +179,24 @@ class FileSyncSettingsConfigurable : Configurable {
             mappingPanel.reset()
             scriptPanel.refreshTable()
         } catch (e: Exception) {
+            val errorMsg = e.message ?: ""
+            val friendlyMessage = when {
+                // AES/GCM 解密失败 — 密码错误
+                errorMsg.contains("Tag mismatch", ignoreCase = true) ->
+                    DeployXBundle.message("settings.config.import.invalidPassword")
+                // 文件不存在或无法读取
+                e is java.io.FileNotFoundException ->
+                    DeployXBundle.message("settings.config.import.invalidFile")
+                // JSON 解析失败或格式不对 — 不是有效的加密配置文件
+                errorMsg.contains("Cannot invoke", ignoreCase = true) ||
+                    e is com.google.gson.JsonSyntaxException ||
+                    e is java.lang.ClassCastException ->
+                    DeployXBundle.message("settings.config.import.invalidFile")
+                else ->
+                    DeployXBundle.message("settings.config.import.failed", errorMsg)
+            }
             Messages.showErrorDialog(
-                DeployXBundle.message("settings.config.import.failed", e.message ?: ""),
+                friendlyMessage,
                 DeployXBundle.message("settings.button.importConfig")
             )
         }
