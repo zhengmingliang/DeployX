@@ -71,8 +71,9 @@ tasks {
         untilBuild.set("262.*") // 兼容性范围：2023.3.8 - 2026.2
         changeNotes.set(
             """
-                <h3>v1.0.4 - Config Import Password Fix</h3>
+                <h3>v1.0.4 - SSH Key Export & Password Import Fix</h3>
                 <ul>
+                    <li><b>🔑 SSH Key Export/Import:</b> When exporting encrypted config, if any servers use SSH key authentication, users are prompted whether to include encrypted key files in the export. On import, key files are automatically decrypted and saved to the local keys directory (<code>~/.deploy-x/keys/</code>), with server key paths updated to point to the local files. If the user chooses not to export key files, only server config is exported (key paths preserved but content not included)</li>
                     <li><b>🐛 Config Import Lost Server Passwords:</b> Fixed an issue where imported servers had an empty password in memory after config import, causing SSH authentication to fail. The root cause was that <code>ConfigExporter.importConfig</code> passed <code>server.copy(password = "")</code> to <code>ServerManager</code> after saving the password to PasswordSafe / <code>.passwords.dat</code>, clearing the password from the in-memory <code>ServerConfig</code>. Now the full <code>ServerConfig</code> with password is passed through directly, and <code>saveServers()</code> continues to sanitize the password when writing <code>servers.json</code>, matching existing behavior</li>
                 </ul>
 
@@ -164,8 +165,9 @@ tasks {
                 <br>
                 <h4>中文更新说明</h4>
 
-                <h3>v1.0.4 - 配置导入密码修复</h3>
+                <h3>v1.0.4 - SSH 密钥导出与配置导入密码修复</h3>
                 <ul>
+                    <li><b>🔑 SSH 密钥导出/导入：</b>导出加密配置时，若存在使用密钥认证的服务器，会提示用户是否将密钥文件内容一并加密导出。导入到另一台机器时自动解密并保存到本地密钥目录（<code>~/.deploy-x/keys/</code>），服务器配置的密钥路径自动指向本地文件，无需手动复制密钥。若不选择导出密钥文件，仍按原有方式仅导出服务器配置（密钥路径保留但内容不导出）</li>
                     <li><b>🐛 配置导入后服务器丢失密码修复：</b>修复导入加密配置后，服务器密码在内存中丢失导致 SSH 连接失败的问题。根因：`ConfigExporter.importConfig` 在保存密码到 PasswordSafe / `.passwords.dat` 后，传给 `ServerManager` 的是 `server.copy(password = "")` 的副本，导致内存中的 `ServerConfig.password` 为空，SSH 密码认证失败。现已改为直接传入带密码的 `ServerConfig`，`saveServers()` 仍会在写入 `servers.json` 时清空密码字段，行为与现有逻辑完全一致</li>
                 </ul>
 
