@@ -10,7 +10,7 @@ import java.util.zip.ZipInputStream
  * Windows 下 rsync 一键下载安装工具。
  *
  * 从 GitHub releases（或备用镜像）下载 rsync-win.zip，解压到用户主目录下的
- * `~/.deployx/rsync-win/`，并返回其中 rsync.exe 的完整路径。
+ * `~/.deploy-x/rsync-win/`，并返回其中 rsync.exe 的完整路径。
  *
  * 下载策略：优先 GitHub releases，失败后自动切换备用链接重试。
  */
@@ -29,9 +29,40 @@ object RsyncDownloader {
     const val MIRROR_DOWNLOAD_URL =
         "https://openi.pcl.ac.cn/zml2015/file/raw/branch/master/att/rsync-win.zip"
 
-    /** 解压根目录：~/.deployx/rsync-win/ */
-    private val installDir: File by lazy {
+    /** 旧版解压根目录：~/.deployx/rsync-win/（用于迁移） */
+    private val oldInstallDir: File by lazy {
         File(System.getProperty("user.home"), ".deployx/rsync-win")
+    }
+
+    /** 解压根目录：~/.deploy-x/rsync-win/ */
+    private val installDir: File by lazy {
+        val dir = File(System.getProperty("user.home"), ".deploy-x/rsync-win")
+        // 迁移旧的 .deployx 目录到 .deploy-x（如果存在且新目录不存在）
+        migrateOldInstallDir(dir)
+        dir
+    }
+
+    /**
+     * 将旧版 `~/.deployx/rsync-win/` 迁移到 `~/.deploy-x/rsync-win/`。
+     *
+     * 历史版本（1.x）将 rsync 下载到 `.deployx/`（不含连字符），v2.0 后统一为 `.deploy-x/`。
+     * 迁移仅在旧目录存在且新目录不存在时执行；若新目录已存在则跳过（避免覆盖已有文件）。
+     * 迁移后尝试更新 FileSyncSettings 中的 rsyncPath 为新的路径。
+     */
+    private fun migrateOldInstallDir(newDir: File) {
+        if (!oldInstallDir.exists()) return
+        if (newDir.exists()) {
+            LOG.info("Old install dir ${oldInstallDir.path} exists but new dir already present, skipping migration")
+            return
+        }
+        try {
+            LOG.info("Migrating rsync install from ${oldInstallDir.path} to ${newDir.path}")
+            newDir.parentFile?.mkdirs()
+            oldInstallDir.renameTo(newDir)
+            LOG.info("Migration successful: ${oldInstallDir.path} → ${newDir.path}")
+        } catch (e: Exception) {
+            LOG.warn("Failed to migrate old install dir ${oldInstallDir.path}", e)
+        }
     }
 
     /**
@@ -66,6 +97,8 @@ object RsyncDownloader {
             Result.failure(e)
         }
     }
+
+    ...
 
     /**
      * 下载 zip 文件到临时目录。

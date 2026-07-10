@@ -57,7 +57,7 @@
             <li><b>🗑️ Script Multi-Delete:</b> Deleting now removes all selected scripts at once (previously only the first selected was deleted)</li>
             <li><b>📥 Script Import - Conflict Handling:</b> On import, if a script id already exists, the user is prompted to either overwrite the duplicate or import all as new scripts</li>
             <li><b>🔐 SSH_ASKPASS Fallback:</b> When rsync is present but sshpass is missing (common on Windows), password auth automatically falls back to the SSH_ASKPASS mechanism - no SFTP downgrade needed</li>
-            <li><b>⬇️ rsync One-Click Download & Install (Windows):</b> When rsync is not detected on Windows, a "Download &amp; Install rsync" button appears in settings; it auto-downloads (GitHub releases, with China mirror fallback), extracts to <code>~/.deployx/rsync-win/</code>, and configures the path automatically. On failure, manual download links are provided</li>
+            <li><b>⬇️ rsync One-Click Download & Install (Windows):</b> When rsync is not detected on Windows, a "Download &amp; Install rsync" button appears in settings; it auto-downloads (GitHub releases, with China mirror fallback), extracts to <code>~/.deploy-x/rsync-win/</code>, and configures the path automatically. On failure, manual download links are provided</li>
             <li><b>💡 First-Run rsync Install Prompt (Windows):</b> On the first transfer with rsync missing, a dialog asks whether to auto-install. "Yes" downloads and installs; "No" remembers the choice and falls back to SFTP silently (never asks again). <code>RSYNC_ONLY</code> mode also degrades to SFTP after the user declines</li>
             <li><b>🪟 Windows rsync Optimization:</b> Fixed rsync failing on Windows Cygwin builds:
                 <ul>
@@ -148,7 +148,7 @@
             <li><b>🗑️ 脚本批量删除：</b>删除操作现在可一次性删除所有选中的脚本（此前只会删除选中的第一个）</li>
             <li><b>📥 脚本导入冲突处理：</b>导入时若脚本 id 已存在，提示用户选择「覆盖重复项」或「全部作为新脚本新增」</li>
             <li><b>🔐 SSH_ASKPASS 密码认证回退：</b>已安装 rsync 但缺少 sshpass 时（Windows 常见），密码认证自动回退使用 SSH_ASKPASS 机制，无需降级 SFTP</li>
-            <li><b>⬇️ rsync 一键下载安装（Windows）：</b>设置面板检测到未安装 rsync 时显示「一键下载安装」按钮，自动下载（GitHub releases，失败切换国内镜像）、解压到 <code>~/.deployx/rsync-win/</code>、自动配置路径；下载失败提供手动下载链接</li>
+            <li><b>⬇️ rsync 一键下载安装（Windows）：</b>设置面板检测到未安装 rsync 时显示「一键下载安装」按钮，自动下载（GitHub releases，失败切换国内镜像）、解压到 <code>~/.deploy-x/rsync-win/</code>、自动配置路径；下载失败提供手动下载链接</li>
             <li><b>💡 首次传输安装提示（Windows）：</b>首次传输时未检测到 rsync 则弹窗询问是否自动安装。选「是」下载安装；选「否」记住选择并静默降级 SFTP（不再提示）。<code>RSYNC_ONLY</code> 模式下用户拒绝后也降级 SFTP</li>
             <li><b>🪟 Windows rsync 同步优化：</b>修复 Windows Cygwin 版 rsync 同步失败的问题：
                 <ul>
