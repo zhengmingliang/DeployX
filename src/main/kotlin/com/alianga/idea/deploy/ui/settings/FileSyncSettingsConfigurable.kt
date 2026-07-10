@@ -129,76 +129,85 @@ class FileSyncSettingsConfigurable : Configurable {
         val chooser = JFileChooser()
         if (chooser.showOpenDialog(mainPanel) != JFileChooser.APPROVE_OPTION) return
 
-        val password = Messages.showPasswordDialog(
-            DeployXBundle.message("settings.config.import.passwordPrompt"),
-            DeployXBundle.message("settings.button.importConfig")
-        )
-        if (password.isNullOrBlank()) return
-
-        try {
-            val hasConflicts = ConfigExporter.hasIdConflicts(chooser.selectedFile, password)
-            val overwrite = if (hasConflicts) {
-                val choice = Messages.showYesNoCancelDialog(
-                    DeployXBundle.message("settings.config.import.conflictPrompt"),
-                    DeployXBundle.message("settings.button.importConfig"),
-                    Messages.getQuestionIcon()
-                )
-                if (choice == Messages.CANCEL) return
-                choice == Messages.YES
-            } else false
-
-            val result = ConfigExporter.importConfig(chooser.selectedFile, password, overwrite, overwrite, overwrite)
-
-            // 构建成功消息
-            val baseMessage = DeployXBundle.message(
-                "settings.config.import.success",
-                result.serversAdded, result.serversUpdated,
-                result.mappingsAdded, result.mappingsUpdated,
-                result.scriptsAdded, result.scriptsUpdated
-            )
-            val finalMessage = buildString {
-                append(baseMessage)
-                if (result.keysImported > 0) {
-                    append("\n\n")
-                    append(DeployXBundle.message(
-                        "settings.config.import.keysSuccess",
-                        result.keysImported
-                    ))
-                }
-                if (result.keyMissingServers.isNotEmpty()) {
-                    append("\n")
-                    append(DeployXBundle.message("settings.config.import.keysMissing"))
-                    result.keyMissingServers.forEach { missing ->
-                        append("\n• $missing")
-                    }
-                }
-            }
-            Messages.showInfoMessage(finalMessage, DeployXBundle.message("settings.button.importConfig"))
-            // 刷新面板
-            serverPanel.reset()
-            mappingPanel.reset()
-            scriptPanel.refreshTable()
-        } catch (e: Exception) {
-            val errorMsg = e.message ?: ""
-            val friendlyMessage = when {
-                // AES/GCM 解密失败 — 密码错误
-                errorMsg.contains("Tag mismatch", ignoreCase = true) ->
-                    DeployXBundle.message("settings.config.import.invalidPassword")
-                // 文件不存在或无法读取
-                e is java.io.FileNotFoundException ->
-                    DeployXBundle.message("settings.config.import.invalidFile")
-                // JSON 解析失败或格式不对 — 不是有效的加密配置文件
-                errorMsg.contains("Cannot invoke", ignoreCase = true) ||
-                    e is com.google.gson.JsonSyntaxException ||
-                    e is java.lang.ClassCastException ->
-                    DeployXBundle.message("settings.config.import.invalidFile")
-                else ->
-                    DeployXBundle.message("settings.config.import.failed", errorMsg)
-            }
-            Messages.showErrorDialog(
-                friendlyMessage,
+        // 密码重试循环：密码错误时重新输入，无需重新选择文件
+        while (true) {
+            val password = Messages.showPasswordDialog(
+                DeployXBundle.message("settings.config.import.passwordPrompt"),
                 DeployXBundle.message("settings.button.importConfig")
             )
+            if (password.isNullOrBlank()) return
+
+            try {
+                val hasConflicts = ConfigExporter.hasIdConflicts(chooser.selectedFile, password)
+                val overwrite = if (hasConflicts) {
+                    val choice = Messages.showYesNoCancelDialog(
+                        DeployXBundle.message("settings.config.import.conflictPrompt"),
+                        DeployXBundle.message("settings.button.importConfig"),
+                        Messages.getQuestionIcon()
+                    )
+                    if (choice == Messages.CANCEL) return
+                    choice == Messages.YES
+                } else false
+
+                val result = ConfigExporter.importConfig(chooser.selectedFile, password, overwrite, overwrite, overwrite)
+
+                // 构建成功消息
+                val baseMessage = DeployXBundle.message(
+                    "settings.config.import.success",
+                    result.serversAdded, result.serversUpdated,
+                    result.mappingsAdded, result.mappingsUpdated,
+                    result.scriptsAdded, result.scriptsUpdated
+                )
+                val finalMessage = buildString {
+                    append(baseMessage)
+                    if (result.keysImported > 0) {
+                        append("\n\n")
+                        append(DeployXBundle.message(
+                            "settings.config.import.keysSuccess",
+                            result.keysImported
+                        ))
+                    }
+                    if (result.keyMissingServers.isNotEmpty()) {
+                        append("\n")
+                        append(DeployXBundle.message("settings.config.import.keysMissing"))
+                        result.keyMissingServers.forEach { missing ->
+                            append("\n• $missing")
+                        }
+                    }
+                }
+                Messages.showInfoMessage(finalMessage, DeployXBundle.message("settings.button.importConfig"))
+                // 刷新面板
+                serverPanel.reset()
+                mappingPanel.reset()
+                scriptPanel.refreshTable()
+                return  // 成功导入，退出循环
+            } catch (e: Exception) {
+                val errorMsg = e.message ?: ""
+                if (errorMsg.contains("Tag mismatch", ignoreCase = true)) {
+                    // 密码错误：提示用户，继续循环重新输入密码
+                    Messages.showErrorDialog(
+                        DeployXBundle.message("settings.config.import.invalidPassword"),
+                        DeployXBundle.message("settings.button.importConfig")
+                    )
+                    continue
+                }
+                // 其他错误（文件不存在、格式不对等），显示友好提示并退出
+                val friendlyMessage = when {
+                    e is java.io.FileNotFoundException ->
+                        DeployXBundle.message("settings.config.import.invalidFile")
+                    errorMsg.contains("Cannot invoke", ignoreCase = true) ||
+                        e is com.google.gson.JsonSyntaxException ||
+                        e is java.lang.ClassCastException ->
+                        DeployXBundle.message("settings.config.import.invalidFile")
+                    else ->
+                        DeployXBundle.message("settings.config.import.failed", errorMsg)
+                }
+                Messages.showErrorDialog(
+                    friendlyMessage,
+                    DeployXBundle.message("settings.button.importConfig")
+                )
+                return
+            }
         }
     }
 
