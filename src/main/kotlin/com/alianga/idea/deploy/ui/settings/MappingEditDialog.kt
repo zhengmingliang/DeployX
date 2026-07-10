@@ -127,9 +127,18 @@ class MappingEditDialog(
 
     private fun setupServerCombo() {
         val servers = ServerManager.getInstance().getServers()
+        var maxLengthText = ""
         for (server in servers) {
-            serverCombo.addItem("${server.id} - ${server.name}")
+            val itemText = "${server.id} - ${server.name}"
+            serverCombo.addItem(itemText)
+            if (itemText.length > maxLengthText.length) {
+                maxLengthText = itemText
+            }
         }
+        
+        // 设置下拉列表宽度，足够显示最长的服务器名称，最小400px
+        serverCombo.prototypeDisplayValue = maxLengthText.padEnd(50, ' ')
+        serverCombo.preferredSize = Dimension(400, serverCombo.preferredSize.height)
     }
 
     private fun setupLocalDirBrowser() {
