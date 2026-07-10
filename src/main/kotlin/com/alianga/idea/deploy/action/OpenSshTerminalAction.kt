@@ -14,7 +14,7 @@ import com.intellij.openapi.project.Project
 
 /**
  * 打开 SSH 终端 Action
- * 支持从右键菜单和 Go to Action 打开到远程服务器的 SSH 终端
+ * 支持从右键菜单和 Go to Action 打开到远程服务器的 SSH 终端，支持多选同时打开多个终端
  */
 class OpenSshTerminalAction : AnAction() {
 
@@ -35,7 +35,7 @@ class OpenSshTerminalAction : AnAction() {
                 openTerminal(project, servers[0])
             }
             else -> {
-                // 多个服务器，显示选择对话框
+                // 多个服务器，显示选择对话框，支持多选
                 val dialog = ServerSelectionDialog(
                     servers,
                     DeployXBundle.message("dialog.server.select.title.connect"),
@@ -43,7 +43,8 @@ class OpenSshTerminalAction : AnAction() {
                     showCommandOptions = false
                 )
                 if (dialog.showAndGet()) {
-                    dialog.selectedServer?.let { server ->
+                    val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }
+                    selected.forEach { server ->
                         openTerminal(project, server)
                     }
                 }

@@ -4,6 +4,7 @@ import com.alianga.idea.deploy.action.ActionUtils
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.DeployItem
 import com.alianga.idea.deploy.model.DeployRequest
+import com.alianga.idea.deploy.model.DownloadItem
 import com.alianga.idea.deploy.model.HistoryRecord
 import com.alianga.idea.deploy.model.MappingConfig
 import com.alianga.idea.deploy.model.ScriptRunContext
