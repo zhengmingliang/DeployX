@@ -17,22 +17,19 @@ import com.intellij.openapi.vfs.VirtualFile
  */
 class QuickPushAction : AbstractDeployAction<UploadItem>() {
 
-    /**
-     * 重写服务器选择：单服务器且无命令时跳过对话框
-     */
-    override fun selectServer(
+    override fun selectServers(
         servers: List<ServerConfig>,
         resolvedByFile: Map<VirtualFile, List<MappingManager.ResolvedMapping>>,
         fileCount: Int
-    ): ServerSelectionResult? {
+    ): MultiServerSelectionResult? {
         if (servers.isEmpty()) return null
         val commandAvailability = ActionUtils.buildCommandAvailability(resolvedByFile.values.flatten())
         val hasAnyCommand = commandAvailability.values.any { it.hasPreCommand || it.hasPostCommand }
 
         // 单服务器且无任何命令：直接执行，不弹对话框
         if (servers.size == 1 && !hasAnyCommand) {
-            return ServerSelectionResult(
-                server = servers.first(),
+            return MultiServerSelectionResult(
+                servers = listOf(servers.first()),
                 executePreCommand = false,
                 executePostCommand = false
             )
@@ -46,8 +43,9 @@ class QuickPushAction : AbstractDeployAction<UploadItem>() {
             commandAvailabilityByServerId = commandAvailability
         )
         if (!dialog.showAndGet()) return null
-        val server = dialog.selectedServer ?: return null
-        return ServerSelectionResult(server, dialog.executePreCommand, dialog.executePostCommand)
+        val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }
+        if (selected.isEmpty()) return null
+        return MultiServerSelectionResult(selected, dialog.executePreCommand, dialog.executePostCommand)
     }
 
     override fun dialogTitle(): String =

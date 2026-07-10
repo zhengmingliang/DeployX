@@ -50,7 +50,16 @@ class DeployService {
         val postCommand: String?
     )
 
+    data class DownloadGroupKey(
+        val serverId: String,
+        val mappingId: String,
+        val localBaseDir: String,
+        val remoteBaseDir: String,
+        val excludePatterns: List<String>
+    )
+
     private val rsyncWrapper = RsyncWrapper()
+    private val transferService = TransferService.getInstance()
 
     /**
      * Upload-only 批量上传。按 server/mapping/root/excludes/commands 分组，使用 rsync --files-from 合并上传。
@@ -119,87 +128,87 @@ class DeployService {
         val server = ServerManager.getInstance().getServer(key.serverId)
         if (server == null) {
             val result = SyncResult(false, error = DeployXBundle.message("deploy.error.serverNotFound", key.serverId))
-                results.add(result)
-                groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
-                return
+            results.add(result)
+            groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
+            return
+        }
+
+        groupLog(DeployXBundle.message(if (dryRun) "deploy.log.previewGroupHeader" else "deploy.log.uploadGroupHeader"))
+        groupLog(DeployXBundle.message("deploy.log.server", server.displayAddress))
+        groupLog(DeployXBundle.message("deploy.log.localRootDir", key.sourceBaseDir))
+        groupLog(DeployXBundle.message("deploy.log.remoteRootDir", key.remoteBaseDir))
+        groupLog(DeployXBundle.message("deploy.log.fileCount", groupItems.size))
+
+        val sshConnection = if (!dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
+            SshConnection(server)
+        } else null
+
+        try {
+            if (sshConnection != null) {
+                groupLog(DeployXBundle.message("deploy.log.connectingServerForCommand", server.displayAddress))
+                val connectResult = sshConnection.connectWithDetails()
+                if (!connectResult.success) {
+                    val errorDetail = if (connectResult.exceptionClass != null) " (${connectResult.exceptionClass})" else ""
+                    val result = SyncResult(false, error = DeployXBundle.message("deploy.error.cannotConnectForCommand", "${server.displayAddress}$errorDetail"))
+                    results.add(result)
+                    groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
+                    if (connectResult.errorMessage != null) {
+                        groupLog(DeployXBundle.message("deploy.log.detail", connectResult.errorMessage))
+                    }
+                    return
+                }
             }
 
-            groupLog(DeployXBundle.message(if (dryRun) "deploy.log.previewGroupHeader" else "deploy.log.uploadGroupHeader"))
-            groupLog(DeployXBundle.message("deploy.log.server", server.displayAddress))
-            groupLog(DeployXBundle.message("deploy.log.localRootDir", key.sourceBaseDir))
-            groupLog(DeployXBundle.message("deploy.log.remoteRootDir", key.remoteBaseDir))
-            groupLog(DeployXBundle.message("deploy.log.fileCount", groupItems.size))
+            if (!dryRun && !key.preCommand.isNullOrBlank()) {
+                val resolvedPreCommand = ScriptRefResolver.resolve(key.preCommand, server, key.remoteBaseDir)
+                groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
+                val conn = sshConnection ?: return
+                val preResult = conn.executeCommand(resolvedPreCommand)
+                if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
+                if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandFailedBatch", preResult.exitCode, preResult.error))
+            }
 
-            val sshConnection = if (!dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
-                SshConnection(server)
-            } else null
+            val relativePaths = groupItems.map { item ->
+                if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
+            }.filter { it.isNotBlank() }
 
-            try {
-                if (sshConnection != null) {
-                    groupLog(DeployXBundle.message("deploy.log.connectingServerForCommand", server.displayAddress))
-                    val connectResult = sshConnection.connectWithDetails()
-                    if (!connectResult.success) {
-                        val errorDetail = if (connectResult.exceptionClass != null) " (${connectResult.exceptionClass})" else ""
-                        val result = SyncResult(false, error = DeployXBundle.message("deploy.error.cannotConnectForCommand", "${server.displayAddress}$errorDetail"))
-                        results.add(result)
-                        groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
-                        if (connectResult.errorMessage != null) {
-                            groupLog(DeployXBundle.message("deploy.log.detail", connectResult.errorMessage))
-                        }
-                        return
-                    }
-                }
+            val result = TransferService.getInstance().transferFilesFrom(
+                sourceBaseDir = key.sourceBaseDir,
+                remoteBaseDir = key.remoteBaseDir,
+                relativePaths = relativePaths,
+                serverConfig = server,
+                options = SyncOptions(excludePatterns = key.excludePatterns, dryRun = dryRun),
+                logCallback = groupLog,
+                progressCallback = progressCallback
+            )
 
-                if (!dryRun && !key.preCommand.isNullOrBlank()) {
-                    val resolvedPreCommand = ScriptRefResolver.resolve(key.preCommand, server, key.remoteBaseDir)
-                    groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
-                    val conn = sshConnection ?: return
-                    val preResult = conn.executeCommand(resolvedPreCommand)
-                    if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
-                    if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandFailedBatch", preResult.exitCode, preResult.error))
-                }
-
-                val relativePaths = groupItems.map { item ->
-                    if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
-                }.filter { it.isNotBlank() }
-
-                val result = TransferService.getInstance().transferFilesFrom(
+            val resultWithReport = result.copy(
+                reportGroup = buildReportGroup(
+                    server = server,
                     sourceBaseDir = key.sourceBaseDir,
                     remoteBaseDir = key.remoteBaseDir,
+                    localPaths = groupItems.map { it.localPath },
                     relativePaths = relativePaths,
-                    serverConfig = server,
-                    options = SyncOptions(excludePatterns = key.excludePatterns, dryRun = dryRun),
-                    logCallback = groupLog,
-                    progressCallback = progressCallback
+                    success = result.success,
+                    duration = result.duration,
+                    totalSize = result.totalSize,
+                    output = result.output,
+                    transferredFileList = result.transferredFileList
                 )
+            )
+            results.add(resultWithReport)
 
-                val resultWithReport = result.copy(
-                    reportGroup = buildReportGroup(
-                        server = server,
-                        sourceBaseDir = key.sourceBaseDir,
-                        remoteBaseDir = key.remoteBaseDir,
-                        localPaths = groupItems.map { it.localPath },
-                        relativePaths = relativePaths,
-                        success = result.success,
-                        duration = result.duration,
-                        totalSize = result.totalSize,
-                        output = result.output,
-                        transferredFileList = result.transferredFileList
-                    )
-                )
-                results.add(resultWithReport)
-
-                if (!dryRun && !key.postCommand.isNullOrBlank()) {
-                    val resolvedPostCommand = ScriptRefResolver.resolve(key.postCommand, server, key.remoteBaseDir)
-                    groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
-                    val conn = sshConnection ?: return
-                    val postResult = conn.executeCommand(resolvedPostCommand)
-                    if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
-                    if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandFailedBatch", postResult.exitCode, postResult.error))
-                }
-            } finally {
-                sshConnection?.disconnect()
+            if (!dryRun && !key.postCommand.isNullOrBlank()) {
+                val resolvedPostCommand = ScriptRefResolver.resolve(key.postCommand, server, key.remoteBaseDir)
+                groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
+                val conn = sshConnection ?: return
+                val postResult = conn.executeCommand(resolvedPostCommand)
+                if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
+                if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandFailedBatch", postResult.exitCode, postResult.error))
             }
+        } finally {
+            sshConnection?.disconnect()
+        }
     }
 
     /**
