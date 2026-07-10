@@ -1,6 +1,7 @@
 package com.alianga.idea.deploy.ui.settings
 
 import com.alianga.idea.deploy.DeployXBundle
+import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.util.ConfigExporter
@@ -20,6 +21,7 @@ import javax.swing.JComponent
  */
 class FileSyncSettingsConfigurable : Configurable {
 
+    private val settings = FileSyncSettings.getInstance()
     private var mainPanel: JPanel? = null
     private val generalPanel = GeneralSettingsPanel()
     private val serverPanel = ServerSettingsPanel()
@@ -92,12 +94,18 @@ class FileSyncSettingsConfigurable : Configurable {
         }
 
         val chooser = JFileChooser().apply {
+            val lastDir = settings.lastExportDir
+            if (lastDir.isNotEmpty()) {
+                currentDirectory = File(lastDir)
+            }
             selectedFile = File("deployx-config-${System.currentTimeMillis()}.json")
         }
         if (chooser.showSaveDialog(mainPanel) != JFileChooser.APPROVE_OPTION) return
 
         val result = ConfigExporter.exportConfig(chooser.selectedFile, password, exportKeys)
         if (result.success) {
+            // 记住导出目录
+            settings.lastExportDir = chooser.selectedFile.parent
             val message = if (result.keysExported > 0) {
                 DeployXBundle.message(
                     "settings.config.export.withKeysSuccess",
@@ -126,7 +134,12 @@ class FileSyncSettingsConfigurable : Configurable {
      * 导入配置（解密）。
      */
     private fun importConfig() {
-        val chooser = JFileChooser()
+        val chooser = JFileChooser().apply {
+            val lastDir = settings.lastImportDir
+            if (lastDir.isNotEmpty()) {
+                currentDirectory = File(lastDir)
+            }
+        }
         if (chooser.showOpenDialog(mainPanel) != JFileChooser.APPROVE_OPTION) return
 
         // 密码重试循环：密码错误时重新输入，无需重新选择文件
@@ -176,6 +189,8 @@ class FileSyncSettingsConfigurable : Configurable {
                     }
                 }
                 Messages.showInfoMessage(finalMessage, DeployXBundle.message("settings.button.importConfig"))
+                // 记住导入目录
+                settings.lastImportDir = chooser.selectedFile.parent
                 // 刷新面板
                 serverPanel.reset()
                 mappingPanel.reset()
