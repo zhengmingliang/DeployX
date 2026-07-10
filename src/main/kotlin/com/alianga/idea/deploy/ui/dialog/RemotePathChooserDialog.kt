@@ -10,6 +10,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.JBColor
@@ -39,6 +40,7 @@ class RemotePathChooserDialog(
     private val listModel = DefaultListModel<String>()
     private val loadButton = JButton(DeployXBundle.message("dialog.remote.path.button.loadDirectory"))
     private val upButton = JButton(DeployXBundle.message("dialog.remote.path.button.parentDirectory"))
+    private val newButton = JButton(DeployXBundle.message("dialog.remote.path.button.newDirectory"))
 
     private var currentPath: String = initialPath
     private var isLoading = false
@@ -136,6 +138,10 @@ class RemotePathChooserDialog(
             goUp()
         }
 
+        newButton.addActionListener {
+            createNewDirectory()
+        }
+
         // 路径回车直接加载
         pathField.addActionListener {
             loadDirectory(pathField.text.trim())
@@ -145,6 +151,7 @@ class RemotePathChooserDialog(
     private fun updateUIState() {
         loadButton.isEnabled = !isLoading
         upButton.isEnabled = !isLoading
+        newButton.isEnabled = !isLoading
         directoryList.isEnabled = !isLoading
         pathField.isEnabled = !isLoading
         loadButton.text = if (isLoading) {
@@ -162,6 +169,105 @@ class RemotePathChooserDialog(
         val newPath = if (parentPath.isBlank()) "/" else parentPath
         pathField.text = newPath
         loadDirectory(newPath)
+    }
+
+    private fun createNewDirectory() {
+        if (isLoading) return
+
+        val dirName = Messages.showInputDialog(
+            this@RemotePathChooserDialog.contentPanel,
+            DeployXBundle.message("dialog.remote.path.newDirectory.prompt"),
+            DeployXBundle.message("dialog.remote.path.newDirectory.title"),
+            Messages.getQuestionIcon()
+        )?.trim() ?: return
+
+        if (dirName.isBlank()) {
+            return
+        }
+
+        // 简单验证目录名，不允许包含路径分隔符
+        if (dirName.contains("/") || dirName.contains("\\")) {
+            Messages.showErrorDialog(
+                this@RemotePathChooserDialog.contentPanel,
+                DeployXBundle.message("dialog.remote.path.error.createFailed", "目录名称不能包含路径分隔符"),
+                DeployXBundle.message("dialog.remote.path.error.title")
+            )
+            return
+        }
+
+        isLoading = true
+        updateUIState()
+        isCancelled = false
+
+        ProgressManager.getInstance().run(
+            object : Task.Backgroundable(
+                null,
+                DeployXBundle.message("dialog.remote.path.newDirectory.title"),
+                /* canBeCancelled = */ true
+            ) {
+                override fun run(indicator: ProgressIndicator) {
+                    var error: String? = null
+                    val connection = SshConnection(server)
+                    val fullPath = if (currentPath.endsWith("/")) {
+                        "$currentPath$dirName"
+                    } else {
+                        "$currentPath/$dirName"
+                    }
+
+                    try {
+                        indicator.checkCanceled()
+                        indicator.text = DeployXBundle.message("dialog.remote.path.newDirectory.title")
+                        LOG.info("Creating directory: $fullPath on server ${server.displayAddress}")
+
+                        if (!connection.connect()) {
+                            error = DeployXBundle.message("dialog.remote.path.error.connectFailed")
+                            LOG.warn("Failed to connect to ${server.displayAddress}")
+                        } else {
+                            indicator.checkCanceled()
+                            val mkdirResult = connection.executeCommand("mkdir -p \"$fullPath\"")
+                            if (!mkdirResult.success) {
+                                error = DeployXBundle.message("dialog.remote.path.error.createFailed", mkdirResult.error)
+                                LOG.warn("Failed to create directory: ${mkdirResult.error}")
+                            } else {
+                                LOG.info("Directory created successfully: $fullPath")
+                            }
+                        }
+                    } catch (e: com.intellij.openapi.progress.ProcessCanceledException) {
+                        LOG.info("Directory creation was cancelled")
+                    } catch (e: Exception) {
+                        LOG.error("Failed to create directory", e)
+                        error = DeployXBundle.message("dialog.remote.path.error.createFailed", e.message ?: "")
+                    } finally {
+                        connection.disconnect()
+                    }
+
+                    // 在 UI 线程更新结果
+                    ApplicationManager.getApplication().invokeLater {
+                        if (!isShowing || isCancelled) {
+                            return@invokeLater
+                        }
+                        isLoading = false
+                        updateUIState()
+                        if (error != null) {
+                            Messages.showErrorDialog(
+                                this@RemotePathChooserDialog.contentPanel,
+                                error,
+                                DeployXBundle.message("dialog.remote.path.error.title")
+                            )
+                        } else {
+                            // 创建成功，重新加载当前目录
+                            loadDirectory(currentPath)
+                            // 选中新创建的目录
+                            val index = listModel.indexOf("$dirName/")
+                            if (index != -1) {
+                                directoryList.selectedIndex = index
+                                directoryList.ensureIndexIsVisible(index)
+                            }
+                        }
+                    }
+                }
+            }
+        )
     }
 
     private fun loadDirectory(path: String) {
@@ -262,6 +368,8 @@ class RemotePathChooserDialog(
             add(loadButton)
             add(Box.createHorizontalStrut(5))
             add(upButton)
+            add(Box.createHorizontalStrut(5))
+            add(newButton)
         }
 
         val scrollPane = JBScrollPane(directoryList).apply {
