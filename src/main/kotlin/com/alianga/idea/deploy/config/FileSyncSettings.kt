@@ -40,7 +40,11 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
         // 上次导出配置的目录（用于 JFileChooser 记住位置）
         var lastExportDir: String = "",
         // 上次导入配置的目录（用于 JFileChooser 记住位置）
-        var lastImportDir: String = ""
+        var lastImportDir: String = "",
+        // 远程文件浏览器：每个服务器上次打开的远程目录（serverId -> path）
+        var browserLastPaths: MutableMap<String, String> = java.util.LinkedHashMap(),
+        // 远程文件浏览器：每个服务器手动输入并成功进入过的路径历史（serverId -> [paths]）
+        var browserPathHistory: MutableMap<String, MutableList<String>> = java.util.LinkedHashMap()
     )
 
     private var myState = State()
@@ -123,4 +127,37 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
     var lastImportDir: String
         get() = myState.lastImportDir
         set(value) { myState.lastImportDir = value }
+
+    // ===== 远程文件浏览器持久化 =====
+
+    /** 获取服务器上次打开的远程目录，不存在返回 null */
+    fun getBrowserLastPath(serverId: String): String? = myState.browserLastPaths[serverId]
+
+    /** 记录服务器上次打开的远程目录 */
+    fun setBrowserLastPath(serverId: String, path: String) {
+        myState.browserLastPaths[serverId] = path
+    }
+
+    /** 获取服务器的路径历史（成功进入过的路径列表），返回去重副本 */
+    fun getBrowserPathHistory(serverId: String): List<String> =
+        myState.browserPathHistory[serverId]?.distinct()?.toList() ?: emptyList()
+
+    /** 追加一条路径历史（移除全部旧条目后放到最前面，最多保留 20 条） */
+    fun addBrowserPathHistory(serverId: String, path: String) {
+        val list = myState.browserPathHistory.getOrPut(serverId) { java.util.ArrayList() }
+        // 移除全部匹配的旧条目（防止 XML 序列化导致重复残留）
+        list.removeAll { it == path }
+        list.add(0, path)
+        while (list.size > 20) list.removeAt(list.size - 1)
+    }
+
+    /** 删除服务器的单条路径历史 */
+    fun removeBrowserPathHistory(serverId: String, path: String) {
+        myState.browserPathHistory[serverId]?.remove(path)
+    }
+
+    /** 清空服务器的全部路径历史 */
+    fun clearBrowserPathHistory(serverId: String) {
+        myState.browserPathHistory[serverId]?.clear()
+    }
 }

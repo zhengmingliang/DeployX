@@ -29,6 +29,7 @@ class ShowDeployXMenuAction : AnAction() {
             "DeployX.QuickPush",
             "DeployX.PreviewSync",
             "DeployX.OpenSshTerminal",
+            "DeployX.OpenRemoteBrowser",
         )
     }
 

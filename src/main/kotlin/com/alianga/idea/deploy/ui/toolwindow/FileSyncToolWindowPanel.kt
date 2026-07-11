@@ -112,6 +112,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     // 操作面板按钮（保留引用以便语言切换时刷新文案）
     private val openTerminalButton = createIconButton(DeployXBundle.message("toolwindow.button.openTerminal"), AllIcons.Nodes.Console) { openTerminal() }
+    private val browseRemoteButton = createIconButton(DeployXBundle.message("toolwindow.button.browseRemote"), AllIcons.Nodes.Folder) { browseRemote() }
     private val previewButton = createActionButton(DeployXBundle.message("toolwindow.button.preview"), AllIcons.Actions.Preview) { previewSync() }
     private val startDeployButton = createActionButton(DeployXBundle.message("toolwindow.button.startDeploy"), AllIcons.Actions.Execute) { startDeploy() }
     private val quickPushButton = createActionButton(DeployXBundle.message("toolwindow.button.quickPush"), AllIcons.Actions.Upload) { quickPush() }
@@ -197,6 +198,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // ===== 操作面板 =====
         val serverButtonsPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
+            add(browseRemoteButton)
             add(Box.createHorizontalStrut(4))
             add(openTerminalButton)
         }
@@ -349,6 +351,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         quickPushButton.text = DeployXBundle.message("toolwindow.button.quickPush")
         saveAsMappingButton.text = DeployXBundle.message("toolwindow.button.saveAsMapping")
         openTerminalButton.toolTipText = DeployXBundle.message("toolwindow.button.openTerminal")
+        browseRemoteButton.toolTipText = DeployXBundle.message("toolwindow.button.browseRemote")
         remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
 
         // 进度标签：处于空闲"就绪"态（英文 Ready 或中文 就绪）时刷新为新语言文案；
@@ -1023,6 +1026,24 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 }
             }
         })
+    }
+
+    /**
+     * 打开远程文件浏览器，浏览当前选中服务器的文件结构
+     */
+    private fun browseRemote() {
+        val serverId = getSelectedServerId()
+        if (serverId == null) {
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.validation.selectServerFirst"), DeployXBundle.message("toolwindow.log.browseRemoteTitle"))
+            return
+        }
+        val server = serverManager.getServer(serverId)
+        if (server == null) {
+            Messages.showErrorDialog(DeployXBundle.message("toolwindow.validation.serverNotFound"), DeployXBundle.message("toolwindow.log.browseRemoteTitle"))
+            return
+        }
+        com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+            .getToolWindow(RemoteFileBrowserToolWindowFactory.TOOL_WINDOW_ID)?.show()
     }
 
     /**

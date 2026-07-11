@@ -35,6 +35,22 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>v1.0.6 - Remote File Browser Upgrade</h3>
+        <ul>
+            <li><b>📂 Sidebar Tool Window:</b> Browser now opens as a non-modal sidebar tool window (<code>DeployX Remote</code>), no longer blocks editing local files</li>
+            <li><b>📝 IDE Editor Integration:</b> Double-click opens remote file in the IDE main editor with syntax highlighting; <code>Ctrl+S</code> writes back to server (fixes the empty-content dialog bug)</li>
+            <li><b>🎯 Auto-map & Remember Path:</b> Auto-locates remote dir from project mappings on first open; remembers each server's last-opened directory</li>
+            <li><b>🕘 Path History:</b> Per-server path history with jump/delete-individual/clear-all via a history popup</li>
+            <li><b>🖱️ Drag & Drop Upload:</b> Drag local files onto the browser tree to upload</li>
+            <li><b>🖱️ Drag & Drop Download:</b> Drag remote files from the tree to the project view to download</li>
+        </ul>
+
+        <h3>v1.0.5 - Remote File Browser</h3>
+        <ul>
+            <li><b>📂 Remote File Browser:</b> Browse remote server file systems directly in the IDE with a tree view. Supports <b>viewing</b> (lazy-loaded directory tree with file size/modification time and icons), <b>editing</b> (double-click a text file to view/modify content and save it back to the server; files over 10MB prompt to use download instead), <b>downloading</b> (right-click to download a file or recursively download an entire directory), and <b>directory management</b> (create new directories, delete files/directories, copy remote path, refresh). Uses a persistent reusable SFTP channel with auto-reconnect. Accessible via the right-click menu, the <code>Alt+Shift+Z</code> quick menu, and the DeployX tool window. Full bilingual (English / 简体中文) support</li>
+            <li><b>📂 远程文件浏览器：</b>在 IDE 内以树形结构直接浏览远程服务器文件系统，支持查看（懒加载目录树）、编辑（双击文本文件查看/修改并保存回服务器）、下载（右键下载文件或递归下载整个目录）、目录管理（新建/删除/复制路径/刷新）。持久化 SFTP 通道复用，浏览延迟低。入口：右键菜单、Alt+Shift+Z 快捷菜单、工具窗口按钮。完整中英文双语支持</li>
+        </ul>
+
         <h3>v1.0.3 - Transfer Enhancements & Multi-Server Deploy</h3>
         <ul>
             <li><b>📋 History Report Copy/Export:</b> Added "Copy Report" and "Export Report" buttons to the History tab - copy/export the Markdown report from any history entry (not just the latest one)</li>
@@ -246,6 +262,8 @@
             serviceImplementation="com.alianga.idea.deploy.service.HistoryManager"/>
         <applicationService
             serviceImplementation="com.alianga.idea.deploy.service.TerminalService"/>
+        <applicationService
+            serviceImplementation="com.alianga.idea.deploy.service.RemoteFileBrowserService"/>
 
         <!-- Settings Page -->
         <applicationConfigurable
@@ -260,6 +278,13 @@
             icon="/icons/toolWindow.svg"
             factoryClass="com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowFactory"
             anchor="right"/>
+
+        <!-- Remote File Browser Tool Window (sidebar, non-modal) -->
+        <toolWindow
+            id="DeployX Remote"
+            icon="/icons/toolWindow.svg"
+            factoryClass="com.alianga.idea.deploy.ui.toolwindow.RemoteFileBrowserToolWindowFactory"
+            anchor="left"/>
 
         <!-- Notification Group -->
         <notificationGroup id="DeployX"
@@ -326,6 +351,14 @@
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt T"/>
         </action>
 
+        <!-- Open Remote File Browser Action -->
+        <action id="DeployX.OpenRemoteBrowser"
+                class="com.alianga.idea.deploy.action.OpenRemoteFileBrowserAction"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+
         <!-- Open Script Library Action -->
         <action id="DeployX.OpenScriptLibrary"
                 class="com.alianga.idea.deploy.action.OpenScriptLibraryAction"
@@ -364,6 +397,8 @@
             <reference id="DeployX.PreviewSync"/>
             <separator/>
             <reference id="DeployX.OpenSshTerminal"/>
+            <separator/>
+            <reference id="DeployX.OpenRemoteBrowser"/>
             <separator/>
             <reference id="DeployX.OpenScriptLibrary"/>
             <reference id="DeployX.RunScriptOnSelection"/>

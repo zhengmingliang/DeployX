@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.alianga.idea.deploy"
-version = "1.0.4"
+version = "1.0."
 
 // 本地 IDEA 安装路径（与 localPath 保持一致）
 val ideaHome = "/home/zml/.local/share/JetBrains/Toolbox/apps/intellij-idea-ultimate"
