@@ -76,7 +76,7 @@ class RollbackDialog(
             foreground = warningColor
         }
 
-        val warningText = JBLabel("<html><b>${DeployXBundle.message("rollback.dialog.warningTitle")}</b><br>" +
+        val warningText = JBLabel("<html>${DeployXBundle.message("rollback.dialog.warningTitle")}<br>" +
                 DeployXBundle.message("rollback.dialog.warningMessage") + "</html>").apply {
             foreground = warningColor
         }
@@ -131,7 +131,7 @@ class RollbackDialog(
 
         // 文件数量
         addLabelValueRow(panel, DeployXBundle.message("rollback.dialog.fileCount"),
-            if (fileList.isNotEmpty()) fileList.size.toString() else DeployXBundle.message("rollback.dialog.fileCount.unknown"),
+            if (fileList.isNotEmpty()) fileList.size.toString() else DeployXBundle.message("rollback.dialog.fileCount.notListed"),
             gridy++)
 
         // 原始部署时间
@@ -154,7 +154,7 @@ class RollbackDialog(
         gbc.gridx = 0
         gbc.anchor = GridBagConstraints.WEST
         gbc.fill = GridBagConstraints.NONE
-        panel.add(JBLabel("<b>$label:</b>"), gbc)
+        panel.add(JBLabel("$label:"), gbc)
 
         // 值
         gbc.gridx = 1
