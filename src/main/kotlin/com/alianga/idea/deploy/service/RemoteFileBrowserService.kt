@@ -12,18 +12,18 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileDocumentManagerListener
 import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Key
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.testFramework.LightVirtualFile
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.SftpException
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -48,32 +48,41 @@ class RemoteFileBrowserService {
 
     // ===== 远程文件在 IDE 主编辑器中打开 + 保存回写 =====
 
-    /** 远程编辑文件句柄，关联一个 IDE 内存虚拟文件与远程路径 */
-    data class RemoteFileHandle(val serverId: String, val remotePath: String, val fileName: String)
+    /** 远程编辑文件句柄，关联一个本地临时文件路径与远程路径 */
+    data class RemoteFileHandle(val serverId: String, val remotePath: String, val fileName: String, val localPath: String)
 
-    /** 当前在 IDE 编辑器中打开的远程文件：VirtualFile -> 句柄 */
-    private val openRemoteFiles = ConcurrentHashMap<VirtualFile, RemoteFileHandle>()
+    /** 当前在 IDE 编辑器中打开的远程文件：本地临时文件路径 -> 句柄 */
+    private val openRemoteFiles = ConcurrentHashMap<String, RemoteFileHandle>()
 
     /** 编辑器保存用的会话缓存（serverId -> session），避免每次 Ctrl+S 都重连 */
     private val editorSessions = ConcurrentHashMap<String, BrowserSession>()
 
+    /** 本地临时文件根目录 */
+    private val editorTempRoot: File by lazy {
+        File(System.getProperty("user.home"), ".deploy-x/editor").also { it.mkdirs() }
+    }
+
+    /** 持有 messageBus 连接防止 GC 回收导致监听器失效 */
+    @Suppress("FieldCanBeLocal")
+    private val messageBusConnection = ApplicationManager.getApplication().messageBus.connect()
+
     init {
         // 监听 IDE 文档保存：当保存的是远程文件时，将内容写回服务器
-        ApplicationManager.getApplication().messageBus.connect()
-            .subscribe(FileDocumentManagerListener.TOPIC, object : FileDocumentManagerListener {
-                override fun beforeDocumentSaving(document: Document) {
-                    val vfile = FileDocumentManager.getInstance().getFile(document) ?: return
-                    val handle = openRemoteFiles[vfile] ?: return
-                    saveRemoteFile(handle, document.text)
-                }
-            })
+        messageBusConnection.subscribe(FileDocumentManagerListener.TOPIC, object : FileDocumentManagerListener {
+            override fun beforeDocumentSaving(document: Document) {
+                val vfile = FileDocumentManager.getInstance().getFile(document) ?: return
+                val handle = openRemoteFiles[vfile.path] ?: return
+                saveRemoteFile(handle, document.text)
+            }
+        })
     }
 
     /**
      * 在 IDE 主编辑器中打开远程文件（支持语法高亮），编辑后 Ctrl+S 自动写回远程服务器。
      *
-     * 在后台线程读取文件内容，然后在 EDT 创建 [LightVirtualFile] 并通过 [FileEditorManager] 打开。
-     * 超过 [MAX_EDITOR_SIZE] 的大文件拒绝打开并提示改用下载。
+     * 将远程内容写入本地临时文件（~/.deploy-x/editor/{serverId}/{fileName}），
+     * 再通过 LocalFileSystem 刷新后在 IDE 编辑器中打开。使用真实文件可确保
+     * IDE 的保存管线（Ctrl+S → beforeDocumentSaving）正常触发。
      */
     fun openInEditor(project: Project, server: ServerConfig, remotePath: String, fileName: String) {
         ProgressManager.getInstance().run(
@@ -100,33 +109,40 @@ class RemoteFileBrowserService {
                         }
                         val size = loadedContent.toByteArray(Charsets.UTF_8).size.toLong()
                         if (size > MAX_EDITOR_SIZE) {
-                            notify(
-                                project,
-                                "File is too large (${RemoteFileEntry.formatSize(size)}) to open in editor. Use download instead.",
-                                NotificationType.WARNING
-                            )
+                            notify(project, "File is too large (${RemoteFileEntry.formatSize(size)}) to open in editor. Use download instead.", NotificationType.WARNING)
                             return@invokeLater
                         }
-                        openVirtualFileInEditor(project, server, remotePath, fileName, loadedContent)
+                        openTempFileInEditor(project, server, remotePath, fileName, loadedContent)
                     }
                 }
             }
         )
     }
 
-    private fun openVirtualFileInEditor(
-        project: Project,
-        server: ServerConfig,
-        remotePath: String,
-        fileName: String,
-        content: String
+    /** 将内容写入本地临时文件，刷新 VFS 后在编辑器中打开 */
+    private fun openTempFileInEditor(
+        project: Project, server: ServerConfig,
+        remotePath: String, fileName: String, content: String
     ) {
-        val fileType = FileTypeManager.getInstance().getFileTypeByFileName(fileName)
-        val vfile = LightVirtualFile(fileName, fileType, content)
-        openRemoteFiles[vfile] = RemoteFileHandle(server.id, remotePath, fileName)
-        // 文件关闭时从追踪表移除，避免内存泄漏
-        vfile.putUserData(REMOTE_FILE_KEY, remotePath)
-        FileEditorManager.getInstance(project).openFile(vfile, true)
+        try {
+            // 写入本地临时文件
+            val serverDir = File(editorTempRoot, server.id).also { it.mkdirs() }
+            val localFile = File(serverDir, fileName)
+            localFile.writeText(content, Charsets.UTF_8)
+            // 刷新虚拟文件系统以获取 VirtualFile
+            val vfile = VfsUtil.findFileByIoFile(localFile, true)
+                ?: LocalFileSystem.getInstance().refreshAndFindFileByIoFile(localFile)
+            if (vfile == null) {
+                notify(project, "Cannot open temp file: ${localFile.absolutePath}", NotificationType.ERROR)
+                return
+            }
+            // 追踪：按本地文件路径索引（而非 VirtualFile 实例）
+            openRemoteFiles[vfile.path] = RemoteFileHandle(server.id, remotePath, fileName, localFile.absolutePath)
+            FileEditorManager.getInstance(project).openFile(vfile, true)
+        } catch (e: Exception) {
+            LOG.warn("Failed to create temp file for editor", e)
+            notify(project, "Failed to open remote file: ${e.message}", NotificationType.ERROR)
+        }
     }
 
     /** 将远程文件内容写回服务器（Ctrl+S 触发，后台执行） */
@@ -180,8 +196,6 @@ class RemoteFileBrowserService {
         private val LOG = Logger.getInstance(RemoteFileBrowserService::class.java)
         /** 允许在 IDE 编辑器中打开的最大文件大小（5MB） */
         private const val MAX_EDITOR_SIZE = 5L * 1024 * 1024
-        /** 标记 LightVirtualFile 为远程文件的 UserData key */
-        val REMOTE_FILE_KEY = Key.create<String>("DeployX.remoteFilePath")
 
         fun getInstance(): RemoteFileBrowserService =
             ApplicationManager.getApplication().getService(RemoteFileBrowserService::class.java)
@@ -227,11 +241,30 @@ class RemoteFileBrowserService {
             return channel?.isConnected == true
         }
 
+        /** 强制断开（重置连接状态，用于重连前清理） */
+        private fun forceDisconnect() {
+            try { channel?.disconnect() } catch (_: Exception) {}
+            channel = null
+            connection.disconnect()
+        }
+
+        /** 带一次重连重试的 SFTP 操作包装。 */
+        private inline fun <T> withRetry(op: () -> T): T {
+            try {
+                return op()
+            } catch (e: IOException) {
+                LOG.info("SFTP I/O error, reconnecting to ${server.displayAddress}: ${e.message}")
+                forceDisconnect()
+                if (!ensureConnected()) throw e
+                return op()
+            }
+        }
+
         /**
          * 列出指定目录下的条目（按目录在前、名称不区分大小写排序）。
          * @throws IOException 连接失败或目录不可读
          */
-        fun listDirectory(path: String): List<RemoteFileEntry> {
+        fun listDirectory(path: String): List<RemoteFileEntry> = withRetry {
             if (!ensureConnected()) {
                 throw IOException("SFTP channel not connected to ${server.displayAddress}")
             }
@@ -264,7 +297,7 @@ class RemoteFileBrowserService {
         /**
          * 读取远程文本文件内容（UTF-8）。
          */
-        fun readFileText(path: String): String {
+        fun readFileText(path: String): String = withRetry {
             if (!ensureConnected()) throw IOException("SFTP channel not connected")
             val ch = channel ?: throw IOException("SFTP channel is null")
             val stream = ch.get(path) ?: throw IOException("Cannot open remote file: $path")
@@ -274,7 +307,7 @@ class RemoteFileBrowserService {
         /**
          * 将文本内容写回远程文件（覆盖写入，UTF-8）。
          */
-        fun writeFileText(path: String, content: String) {
+        fun writeFileText(path: String, content: String) = withRetry {
             if (!ensureConnected()) throw IOException("SFTP channel not connected")
             val ch = channel ?: throw IOException("SFTP channel is null")
             val bytes = content.toByteArray(Charsets.UTF_8)

@@ -7,6 +7,7 @@ import com.alianga.idea.deploy.ssh.SshCloudTerminalRunner
 import com.alianga.idea.deploy.ssh.SshConnection
 import com.alianga.idea.deploy.ssh.SshTtyConnector
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
@@ -102,6 +103,67 @@ class TerminalService : Disposable {
             }
         })
 
+        return true
+    }
+
+    /**
+     * 打开 SSH 终端并自动切换到指定目录。
+     */
+    fun openTerminalInDir(project: Project, serverConfig: ServerConfig, initialDirectory: String): Boolean {
+        LOG.info("Opening SSH terminal with cd to: $initialDirectory for ${serverConfig.displayAddress}")
+        val title = "SSH: ${serverConfig.name} - ${serverConfig.user}@${serverConfig.host}"
+        val pipeName = "${serverConfig.host}:${serverConfig.port}"
+        val escapedDir = initialDirectory.replace("\"", "\\\"")
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, DeployXBundle.message("terminal.opening.title", serverConfig.displayAddress), true) {
+            private var opened = false
+            private var errorMessage: String? = null
+
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = false
+                indicator.text = DeployXBundle.message("terminal.connecting", serverConfig.displayAddress)
+                try {
+                    val connection = SshConnection(serverConfig)
+                    val connectResult = connection.connectWithDetails()
+                    if (!connectResult.success) {
+                        errorMessage = connectResult.errorMessage ?: "SSH connection failed"
+                        return
+                    }
+                    indicator.fraction = 0.5
+                    indicator.text = DeployXBundle.message("terminal.openingShell")
+                    val channel = connection.openShellChannel()
+                    indicator.fraction = 0.7
+                    val ttyConnector = SshTtyConnector(serverConfig, channel, title)
+                    val cloudProcess = SshCloudTerminalProcess(ttyConnector)
+                    val runner = SshCloudTerminalRunner.create(project, pipeName, cloudProcess, ttyConnector)
+                    opened = true
+                    indicator.fraction = 1.0
+                    ApplicationManager.getApplication().invokeLater {
+                        createTerminalSession(project, runner, title)
+                    }
+                    // 等终端初始化完成（EDT 创建 widget + shell 加载 profile），再通过 TtyConnector 发送 cd
+                    Thread.sleep(600)
+                    try {
+                        ttyConnector.write("cd \"$escapedDir\" 2>/dev/null && echo \"→ \$(pwd)\"\n")
+                    } catch (_: Exception) {
+                        LOG.warn("Failed to send cd command to terminal via ttyConnector")
+                    }
+                } catch (e: Exception) {
+                    LOG.error("Failed to open SSH terminal", e)
+                    errorMessage = e.message ?: "Unknown error"
+                }
+            }
+
+            override fun onFinished() {
+                if (opened) LOG.info("SSH terminal with cd opened: ${serverConfig.displayAddress}")
+                else {
+                    val msg = errorMessage ?: "Cannot connect to ${serverConfig.displayAddress}"
+                    ApplicationManager.getApplication().invokeLater {
+                        Messages.showErrorDialog(project, msg, DeployXBundle.message("notification.sshTerminalTitle"))
+                    }
+                }
+            }
+        })
         return true
     }
 
