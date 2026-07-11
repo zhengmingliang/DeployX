@@ -25,6 +25,7 @@ class ShowDeployXMenuAction : AnAction() {
         private val ACTION_IDS = listOf(
             "DeployX.Deploy",
             "DeployX.SyncFile",
+            "DeployX.PullFromServer",
             "DeployX.QuickPush",
             "DeployX.PreviewSync",
             "DeployX.OpenSshTerminal",

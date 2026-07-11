@@ -77,6 +77,12 @@ tasks {
                     <li><b>🐛 Config Import Lost Server Passwords:</b> Fixed an issue where imported servers had an empty password in memory after config import, causing SSH authentication to fail. The root cause was that <code>ConfigExporter.importConfig</code> passed <code>server.copy(password = "")</code> to <code>ServerManager</code> after saving the password to PasswordSafe / <code>.passwords.dat</code>, clearing the password from the in-memory <code>ServerConfig</code>. Now the full <code>ServerConfig</code> with password is passed through directly, and <code>saveServers()</code> continues to sanitize the password when writing <code>servers.json</code>, matching existing behavior</li>
                     <li><b>📁 New Folder Button in Remote Path Chooser:</b> Added a "New Directory" button in the remote path selection dialog (used in add/edit mapping and sidebar operations). Users can create directories directly on the remote server without switching to the terminal. After successful creation, the directory list is automatically refreshed and the new directory is selected.</li>
                     <li><b>📏 Adaptive Server Dropdown Width:</b> The target server dropdown in the add/edit mapping dialog now automatically adapts to the width of the longest server name, ensuring the server ID and name are fully visible without truncation.</li>
+                    <li><b>🔄 Bidirectional Sync (Pull from Server):</b> New bidirectional incremental sync between local and remote files with auto-merge of differences. Right-click <code>Pull from Server</code> (or the <code>Alt+Shift+Z</code> quick menu) downloads only the files that differ on the remote to local. Uses rsync when available (transfers only changed files by size/mtime), with automatic SFTP fallback for recursive directory download</li>
+                    <li><b>🐛 rsync Pull Direction Reversed:</b> Fixed <code>Pull from Server</code> in rsync mode generating a <code>--files-from</code> command that used the local dir as source and the remote dir as target, actually uploading instead of pulling. Command builders now swap source/target based on <code>SyncDirection.PULL</code></li>
+                    <li><b>🐛 Unclear Pull Log:</b> Fixed the download log reusing the "Preview group" header. The download group now uses a dedicated "Pull from Server group" header and prints direction, remote source dir and local target dir explicitly</li>
+                    <li><b>🐛 Alt+Shift+Z Missing Pull from Server:</b> Added <code>DeployX.PullFromServer</code> to the <code>Alt+Shift+Z</code> quick menu (after Sync to Server)</li>
+                    <li><b>🐛 rsync Pull Directory Transfers 0 Files:</b> Fixed pulling a directory/mapping-root (empty relative path) producing an empty <code>--files-from</code> entry so rsync transferred 0 files. Empty entries now do a full recursive directory pull; non-empty entries still use <code>--files-from</code>; both can be mixed and merged. SFTP fallback handles empty relative paths the same way</li>
+                    <li><b>🐛 History Tab Blank:</b> Fixed the History tab showing blank after the tool window's first build (when HistoryManager wasn't ready). Now reloads latest records on each switch to the History tab, and shows a "No history yet" placeholder when empty</li>
                 </ul>
 
                 <h3>v1.0.3 - Transfer Enhancements & Multi-Server Deploy</h3>
@@ -175,6 +181,12 @@ tasks {
                     <li><b>🐛 配置导入后服务器丢失密码修复：</b>修复导入加密配置后，服务器密码在内存中丢失导致 SSH 连接失败的问题。根因：`ConfigExporter.importConfig` 在保存密码到 PasswordSafe / `.passwords.dat` 后，传给 `ServerManager` 的是 `server.copy(password = "")` 的副本，导致内存中的 `ServerConfig.password` 为空，SSH 密码认证失败。现已改为直接传入带密码的 `ServerConfig`，`saveServers()` 仍会在写入 `servers.json` 时清空密码字段，行为与现有逻辑完全一致</li>
                     <li><b>📁 远程路径选择对话框新增新建目录按钮：</b>在添加/编辑映射、侧边栏操作的远程路径选择对话框中，新增新建目录功能，支持直接在远程服务器上创建目录，无需切换到终端手动操作，创建成功后自动刷新目录列表并选中新目录。</li>
                     <li><b>📏 服务器下拉列表宽度自适应：</b>在添加/编辑映射对话框中，目标服务器下拉列表自动适配最长服务器名称的宽度，确保完整显示服务器ID和名称，避免内容截断。</li>
+                    <li><b>🔄 双向同步（从服务器拉取）：</b>新增本地与远程文件的双向增量同步，自动合并差异。右键「从服务器拉取」或使用 <code>Alt+Shift+Z</code> 快捷菜单，可将远程与本地不同的文件拉取到本地；rsync 模式按大小/修改时间只传输差异文件，SFTP 降级时递归下载整个远程目录</li>
+                    <li><b>🐛 rsync 拉取方向反转：</b>修复「从服务器拉取」使用 rsync 模式时，生成的 <code>--files-from</code> 命令把本地当源、远程当目标，实际变成上传。命令构建现在按 <code>SyncDirection.PULL</code> 动态交换源/目标</li>
+                    <li><b>🐛 拉取日志不清晰：</b>修复下载日志误用「预览分组」标题。下载分组现使用独立的「从服务器拉取分组」标题，并明确打印方向、远程源目录与本地目标目录</li>
+                    <li><b>🐛 Alt+Shift+Z 菜单缺少「从服务器拉取」：</b>已将 <code>DeployX.PullFromServer</code> 加入 <code>Alt+Shift+Z</code> 快捷菜单（位于「同步到服务器」之后）</li>
+                    <li><b>🐛 rsync 拉取目录/映射根时文件数为 0：</b>修复选中目录/映射根（相对路径为空）时 <code>--files-from</code> 列表为空条目、rsync 实际传输 0 文件的问题。空项现走整目录递归拉取，非空项仍走 <code>--files-from</code>，二者可混合并合并结果；SFTP 降级模式同样处理</li>
+                    <li><b>🐛 历史 Tab 展示空白：</b>修复侧边面板「历史」Tab 初次构建时因 HistoryManager 未就绪而加载空列表、之后一直空白的问题。现切换至历史 Tab 时自动重新加载最新记录，列表为空时显示「暂无历史记录」占位提示</li>
                 </ul>
 
                 <h3>v1.0.3 - 传输增强与多服务器并行部署</h3>

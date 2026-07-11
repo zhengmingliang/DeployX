@@ -1,6 +1,6 @@
 # DeployX Changelog
 
-## [1.0.4] - 2026-07-11
+## [1.0.4] - 2026-07-10
 
 
 ### ✨ 新功能
@@ -14,6 +14,12 @@
 
 ### 🐛 Bug 修复
 - **配置导入后服务器丢失密码**：修复导入加密配置后，服务器密码在内存中丢失导致 SSH 连接失败的问题。根因：`ConfigExporter.importConfig` 在保存密码到 PasswordSafe / `.passwords.dat` 后，传给 `ServerManager` 的是 `server.copy(password = "")` 的副本，导致内存中的 `ServerConfig.password` 为空，SSH 密码认证失败。现已改为直接传入带密码的 `ServerConfig`，`ConfigManager.saveServers()` 仍会在写入 `servers.json` 时清空密码字段，行为与现有逻辑完全一致
+- **rsync 拉取方向反转**：修复「从服务器拉取」使用 rsync 模式时，生成的 `--files-from` 命令把本地目录当作源、远程目录当作目标，实际变成了上传而非拉取的问题。根因：`buildRsyncCommand` / `buildRsyncFilesFromCommand` 始终固定「本地→远程」的源/目标顺序，未根据 `SyncDirection.PULL` 交换。现已改为按 `options.direction` 动态交换：PULL 时 `远程源 → 本地目标`，PUSH 时维持 `本地源 → 远程目标`，单文件 `pull` 与批量 `pullFilesFrom` 均正确
+- **拉取日志不清晰**：修复「从服务器拉取」的执行日志误用「预览分组」标题、信息不明确的问题。下载分组现使用独立的「从服务器拉取分组」标题，并明确打印「拉取方向: 远程服务器 → 本地」「远程源目录 (服务器)」「本地目标目录」，与上传分组的「上传方向: 本地 → 远程」对称，日志一眼可辨操作方向与源/目标
+- **Alt+Shift+Z 菜单缺少「从服务器拉取」**：修复 `Alt+Shift+Z` 快捷操作菜单中没有「从服务器拉取」项的问题。已将 `DeployX.PullFromServer` 加入 `ShowDeployXMenuAction` 的菜单列表（位于「同步到服务器」之后），与右键子菜单保持一致
+- **rsync 拉取目录/映射根时文件数为 0**：修复「从服务器拉取」选中目录或映射根（相对路径为空）时，`--files-from` 列表为空条目，rsync 实际传输 0 个文件的问题（日志表现为 `[FILES-FROM]` 后无内容、`Number of regular files transferred: 0`）。根因：`DownloadItem.relativePath` 对目录/映射根场景为空，而 `--files-from` 模式无法处理空条目。现已拆分相对路径——空项走整目录递归拉取（普通 `rsync 远程源/ 本地目标`，自动只传差异文件），非空项仍走 `--files-from` 精确拉取，二者可混合并合并结果。SFTP 降级模式下空相对路径同样改为递归下载整个远程目录
+
+- **历史 Tab 展示空白**：修复侧边面板「历史」Tab 在工具窗口初次构建时因 `HistoryManager` 尚未就绪而加载到空列表、之后一直显示为空白（无任何内容）的问题。现改为：① 每次切换到「历史」Tab 时自动重新加载最新记录；② 列表为空时显示明确的占位提示「暂无历史记录」，替代原先令人困惑的空白界面
 
 ### 🛠 重构
 - **rsync 下载目录统一**：Windows 下 rsync 自动下载解压目录从 `~/.deployx/rsync-win/` 迁移至 `~/.deploy-x/rsync-win/`，与插件其他配置文件（`servers.json`、`.passwords.dat` 等）统一使用 `.deploy-x` 目录。首次访问时自动检测并迁移旧的 `.deployx/rsync-win/` 目录（若存在），用户无需手动操作

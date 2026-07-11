@@ -301,6 +301,14 @@
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift P"/>
         </action>
 
+        <!-- Pull From Server Action -->
+        <action id="DeployX.PullFromServer"
+                class="com.alianga.idea.deploy.action.PullFromServerAction"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+
         <!-- Preview Sync Action -->
         <action id="DeployX.PreviewSync"
                 class="com.alianga.idea.deploy.action.PreviewSyncAction"
@@ -350,6 +358,7 @@
 
             <reference id="DeployX.Deploy"/>
             <reference id="DeployX.SyncFile"/>
+            <reference id="DeployX.PullFromServer"/>
             <reference id="DeployX.QuickPush"/>
             <separator/>
             <reference id="DeployX.PreviewSync"/>

@@ -11,6 +11,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.PathMatcher
 import java.nio.file.Paths
+import java.util.*
 
 /**
  * SFTP fallback 上传客户端。
@@ -248,5 +249,233 @@ class SftpTransferClient {
         if (matchers.isEmpty()) return false
         val path = Paths.get(relativePath)
         return matchers.any { matcher -> matcher.matches(path) || matcher.matches(path.fileName) }
+    }
+
+    /**
+     * 从服务器下载文件到本地（PULL）
+     */
+    fun download(
+        localPath: String,
+        remotePath: String,
+        serverConfig: ServerConfig,
+        options: SyncOptions = SyncOptions(),
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+    ): SyncResult {
+        val localFile = File(localPath)
+        // 确保本地父目录存在
+        localFile.parentFile?.mkdirs()
+        val relative = localFile.name
+        return downloadFilesFrom(localFile.parent ?: ".", remotePath, listOf(relative), serverConfig, options, logCallback, progressCallback)
+    }
+
+    /**
+     * 从服务器批量下载文件到本地（使用相对路径列表）
+     */
+    fun downloadFilesFrom(
+        localBaseDir: String,
+        remoteBaseDir: String,
+        relativePaths: List<String>,
+        serverConfig: ServerConfig,
+        options: SyncOptions = SyncOptions(),
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+    ): SyncResult {
+        val startTime = System.currentTimeMillis()
+
+        // dry-run 模式：遍历远程文件列表，收集待下载文件，不实际传输
+        if (options.dryRun) {
+            return dryRunDownloadFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, startTime)
+        }
+
+        val connection = SshConnection(serverConfig)
+        return try {
+            logCallback?.invoke(DeployXBundle.message("ssh.sftp.downloadUsingFallback"))
+            if (!connection.connect()) {
+                return SyncResult(false, error = DeployXBundle.message("ssh.sftp.connectFailed", serverConfig.displayAddress))
+            }
+            val channel = connection.openSftpChannel()
+            try {
+                val localBase = Paths.get(localBaseDir)
+                val remoteBase = remoteBaseDir.trimEnd('/')
+                val matchers = createMatchers(options.excludePatterns)
+                var count = 0
+                var totalSize = 0L
+                val transferredFiles = mutableListOf<String>()
+
+                relativePaths.forEach { rawRelative ->
+                    val relative = rawRelative.trim('/').replace("\\", "/")
+                    // 空相对路径表示“整目录拉取”：downloadPath 会递归下载 remoteBase 下的全部内容
+                    val downloaded = downloadPath(channel, localBase, remoteBase, relative, matchers, logCallback, progressCallback, transferredFiles)
+                    count += downloaded.first
+                    totalSize += downloaded.second
+                }
+
+                SyncResult(
+                    success = true,
+                    transferredFiles = count,
+                    transferredFileList = transferredFiles,
+                    totalSize = totalSize,
+                    duration = System.currentTimeMillis() - startTime,
+                    output = "SFTP downloaded $count file(s)"
+                )
+            } finally {
+                channel.disconnect()
+            }
+        } catch (e: Exception) {
+            SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("ssh.sftp.downloadFailed", e.message ?: ""))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * dry-run 模式：遍历远程文件，收集待下载的文件列表和总大小，不实际传输。
+     */
+    private fun dryRunDownloadFilesFrom(
+        localBaseDir: String,
+        remoteBaseDir: String,
+        relativePaths: List<String>,
+        serverConfig: ServerConfig,
+        options: SyncOptions,
+        logCallback: ((String) -> Unit)?,
+        startTime: Long
+    ): SyncResult {
+        val localBase = Paths.get(localBaseDir)
+        val remoteBase = remoteBaseDir.trimEnd('/')
+        val matchers = createMatchers(options.excludePatterns)
+        val transferredFiles = mutableListOf<String>()
+        var totalSize = 0L
+
+        logCallback?.invoke(DeployXBundle.message("ssh.sftp.dryRunPreview"))
+
+        val connection = SshConnection(serverConfig)
+        return try {
+            if (!connection.connect()) {
+                return SyncResult(false, error = DeployXBundle.message("ssh.sftp.connectFailed", serverConfig.displayAddress))
+            }
+            val channel = connection.openSftpChannel()
+            try {
+                relativePaths.forEach { rawRelative ->
+                    val relative = rawRelative.trim('/').replace("\\", "/")
+                    // 空相对路径表示“整目录拉取”：collectRemoteFiles 会递归收集 remoteBase 下的全部文件
+                    val remotePath = joinRemotePath(remoteBase, relative)
+                    collectRemoteFiles(channel, localBase, remoteBase, relative, remotePath, matchers, logCallback, transferredFiles) { size ->
+                        totalSize += size
+                    }
+                }
+
+                SyncResult(
+                    success = true,
+                    transferredFiles = transferredFiles.size,
+                    transferredFileList = transferredFiles,
+                    totalSize = totalSize,
+                    duration = System.currentTimeMillis() - startTime,
+                    output = "SFTP dry-run: ${transferredFiles.size} file(s) would be downloaded"
+                )
+            } finally {
+                channel.disconnect()
+            }
+        } catch (e: Exception) {
+            SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("ssh.sftp.downloadFailed", e.message ?: ""))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * 递归收集待下载的远程文件（dry-run 用），不实际传输。
+     */
+    private fun collectRemoteFiles(
+        channel: ChannelSftp,
+        localBase: Path,
+        remoteBase: String,
+        relative: String,
+        remotePath: String,
+        matchers: List<PathMatcher>,
+        logCallback: ((String) -> Unit)?,
+        transferredFiles: MutableList<String>,
+        onSize: (Long) -> Unit
+    ) {
+        try {
+            val attrs = channel.stat(remotePath)
+            if (attrs.isDir) {
+                // 目录：递归遍历
+                @Suppress("UNCHECKED_CAST")
+                val entries = channel.ls(remotePath) as Vector<ChannelSftp.LsEntry>
+                entries.forEach { entry ->
+                    val name = entry.filename
+                    if (name != "." && name != "..") {
+                        val subRelative = if (relative.isBlank()) name else "$relative/$name"
+                        val subRemotePath = joinRemotePath(remoteBase, subRelative)
+                        collectRemoteFiles(channel, localBase, remoteBase, subRelative, subRemotePath, matchers, logCallback, transferredFiles, onSize)
+                    }
+                }
+            } else {
+                // 文件
+                if (!isExcluded(relative, matchers)) {
+                    val localPath = localBase.resolve(relative)
+                    logCallback?.invoke("[DRY-RUN] $remotePath -> $localPath")
+                    transferredFiles.add(relative)
+                    onSize(attrs.size)
+                }
+            }
+        } catch (e: Exception) {
+            logCallback?.invoke("[WARN] Cannot stat remote path, skipped: $remotePath")
+        }
+    }
+
+    /**
+     * 下载单个路径（文件或目录）。
+     * @return (下载文件数量, 总大小)
+     */
+    private fun downloadPath(
+        channel: ChannelSftp,
+        localBase: Path,
+        remoteBase: String,
+        relative: String,
+        matchers: List<PathMatcher>,
+        logCallback: ((String) -> Unit)?,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)?,
+        transferredFiles: MutableList<String> = mutableListOf()
+    ): Pair<Int, Long> {
+        var count = 0
+        var totalSize = 0L
+        val remotePath = joinRemotePath(remoteBase, relative)
+
+        try {
+            val attrs = channel.stat(remotePath)
+            if (attrs.isDir) {
+                // 目录：递归下载
+                @Suppress("UNCHECKED_CAST")
+                val entries = channel.ls(remotePath) as Vector<ChannelSftp.LsEntry>
+                entries.forEach { entry ->
+                    val name = entry.filename
+                    if (name != "." && name != "..") {
+                        val subRelative = if (relative.isBlank()) name else "$relative/$name"
+                        val downloaded = downloadPath(channel, localBase, remoteBase, subRelative, matchers, logCallback, progressCallback, transferredFiles)
+                        count += downloaded.first
+                        totalSize += downloaded.second
+                    }
+                }
+            } else {
+                // 文件
+                if (!isExcluded(relative, matchers)) {
+                    val localPath = localBase.resolve(relative)
+                    // 确保本地目录存在
+                    Files.createDirectories(localPath.parent)
+                    logCallback?.invoke("[SFTP] $remotePath -> $localPath")
+                    channel.get(remotePath, localPath.toString())
+                    count++
+                    totalSize += attrs.size
+                    transferredFiles.add(relative)
+                    progressCallback?.invoke(RsyncWrapper.SyncProgress(currentFile = relative, percentage = 100))
+                }
+            }
+        } catch (e: Exception) {
+            logCallback?.invoke("[WARN] Cannot download path: $remotePath, error: ${e.message}")
+        }
+
+        return count to totalSize
     }
 }

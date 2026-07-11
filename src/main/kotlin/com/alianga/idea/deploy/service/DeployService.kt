@@ -135,6 +135,7 @@ class DeployService {
 
         groupLog(DeployXBundle.message(if (dryRun) "deploy.log.previewGroupHeader" else "deploy.log.uploadGroupHeader"))
         groupLog(DeployXBundle.message("deploy.log.server", server.displayAddress))
+        groupLog(DeployXBundle.message("deploy.log.pushDirection"))
         groupLog(DeployXBundle.message("deploy.log.localRootDir", key.sourceBaseDir))
         groupLog(DeployXBundle.message("deploy.log.remoteRootDir", key.remoteBaseDir))
         groupLog(DeployXBundle.message("deploy.log.fileCount", groupItems.size))
@@ -209,6 +210,98 @@ class DeployService {
         } finally {
             sshConnection?.disconnect()
         }
+    }
+
+    /**
+     * Download-only 批量下载。按 server/mapping/root/excludes 分组，使用 rsync --files-from 合并下载。
+     */
+    fun downloadBatch(
+        items: List<DownloadItem>,
+        dryRun: Boolean = false,
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        serverLogCallback: ((serverId: String, line: String) -> Unit)? = null
+    ): List<SyncResult> {
+        if (items.isEmpty()) return emptyList()
+
+        val groups = items.groupBy {
+            DownloadGroupKey(
+                serverId = it.serverId,
+                mappingId = it.mappingId,
+                localBaseDir = it.localBaseDir.trimEnd('/'),
+                remoteBaseDir = it.remoteBaseDir.trimEnd('/'),
+                excludePatterns = it.excludePatterns
+            )
+        }
+
+        val results = Collections.synchronizedList(mutableListOf<SyncResult>())
+        // 多服务器分组并行执行（每组内部串行，不同服务器并行）
+        if (groups.size > 1) {
+            val executor = Executors.newFixedThreadPool(groups.size.coerceAtMost(4))
+            val latch = CountDownLatch(groups.size)
+            groups.forEach { (key, groupItems) ->
+                executor.submit {
+                    try {
+                        processDownloadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun)
+                    } finally {
+                        latch.countDown()
+                    }
+                }
+            }
+            latch.await()
+            executor.shutdown()
+        } else {
+            groups.forEach { (key, groupItems) ->
+                processDownloadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun)
+            }
+        }
+        return results
+    }
+
+    private fun processDownloadGroup(
+        key: DownloadGroupKey,
+        groupItems: List<DownloadItem>,
+        results: MutableList<SyncResult>,
+        serverLogCallback: ((serverId: String, line: String) -> Unit)?,
+        logCallback: ((String) -> Unit)?,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)?,
+        dryRun: Boolean
+    ) {
+        val server = ServerManager.getInstance().getServer(key.serverId)
+        if (server == null) {
+            results.add(SyncResult(false, error = DeployXBundle.message("deploy.error.serverNotFound", key.serverId)))
+            return
+        }
+
+        fun groupLog(line: String) {
+            serverLogCallback?.invoke(key.serverId, line)
+            logCallback?.invoke(line)
+        }
+
+        groupLog(DeployXBundle.message("deploy.log.downloadGroupHeader"))
+        groupLog(DeployXBundle.message("deploy.log.server", key.serverId))
+        groupLog(DeployXBundle.message("deploy.log.pullDirection"))
+        groupLog(DeployXBundle.message("deploy.log.pullRemoteSource", key.remoteBaseDir))
+        groupLog(DeployXBundle.message("deploy.log.pullLocalTarget", key.localBaseDir))
+        groupLog(DeployXBundle.message("deploy.log.fileCount", groupItems.size))
+
+        val relativePaths = groupItems.map { it.relativePath }
+        val options = SyncOptions(
+            direction = SyncDirection.PULL,
+            excludePatterns = key.excludePatterns,
+            dryRun = dryRun
+        )
+
+        val syncResult = transferService.downloadFilesFrom(
+            localBaseDir = key.localBaseDir,
+            remoteBaseDir = key.remoteBaseDir,
+            relativePaths = relativePaths,
+            serverConfig = server,
+            options = options,
+            logCallback = { groupLog(it) },
+            progressCallback = progressCallback
+        )
+        results.add(syncResult)
     }
 
     /**
