@@ -1,5 +1,16 @@
 <!--LANG:EN-->
 <h2> Changelog</h2>
+<h3>v1.0.5 - Remote File Browser</h3>
+<ul>
+    <li><b>📂 Remote File Browser:</b> Browse remote server file systems in a sidebar tree (<code>DeployX Remote</code> tool window, right side dock). All operations are non-modal — browse remote files while editing local projects</li>
+    <li><b>👀 View:</b> Lazy-loaded directory tree with file size, modification time and icons; switch servers, path navigation with per-server history (up to 20 entries, jump / delete individual / clear all), create/delete directories, refresh</li>
+    <li><b>📝 Edit:</b> Double-click a remote text file to open it in the IDE main editor with full syntax highlighting; <code>Ctrl+S</code> automatically writes changes back to the remote server; files over 5MB are rejected with a download suggestion</li>
+    <li><b>⬆️ Upload:</b> Drag local files/directories from the project view or OS file manager onto the browser tree to upload to the target remote directory</li>
+    <li><b>⬇️ Download:</b> Right-click to download files/directories with a progress dialog; or drag remote entries from the tree to the project view to download directly</li>
+    <li><b>🎯 Auto-map &amp; Remember:</b> First open auto-locates the remote directory by matching the current project path against configured mappings; each server's last-opened directory is remembered across sessions</li>
+    <li>Persistent SFTP channel with auto-reconnect and automatic I/O retry. Accessible via right-click menu, <code>Alt+Shift+Z</code> quick menu, and the folder button in the DeployX operation tab. Full bilingual (English / 简体中文) support</li>
+</ul>
+
 <h3>v1.0.4 - SSH Key Export &amp; New Features</h3>
 <ul>
     <li><b>🔑 SSH Key Export/Import:</b> When exporting encrypted config, if any servers use SSH key authentication, users are prompted whether to include encrypted key files in the export. On import, key files are automatically decrypted and saved to the local keys directory (<code>~/.deploy-x/keys/</code>), with server key paths updated to point to the local files. If the user chooses not to export key files, only server config is exported (key paths preserved but content not included)</li>
@@ -108,6 +119,17 @@
 
 <!--LANG:ZH-->
 <h2> 更新日志</h2>
+<h3>v1.0.5 - 远程文件浏览器</h3>
+<ul>
+    <li><b>📂 远程文件浏览器：</b>在 IDE 侧边栏（<code>DeployX Remote</code> 工具窗口，右侧停靠）以树形结构浏览远程服务器文件系统，非模态窗口不影响本地项目编辑</li>
+    <li><b>👀 查看：</b>懒加载目录树，显示文件大小/修改时间/图标；切换服务器、路径导航（每服务器最多 20 条历史，可跳转/删除单条/清空）、新建/删除目录、刷新</li>
+    <li><b>📝 编辑：</b>双击远程文本文件直接在 IDE 主编辑器中打开，完整语法高亮；<code>Ctrl+S</code> 自动写回远程服务器；超过 5MB 文件拒绝打开并提示改用下载</li>
+    <li><b>⬆️ 上传：</b>从项目视图或系统文件管理器拖拽本地文件/目录到浏览器树，自动上传到目标远程目录</li>
+    <li><b>⬇️ 下载：</b>右键下载文件/目录（带进度对话框）；或从浏览器树拖拽文件到项目视图直接下载</li>
+    <li><b>🎯 自动映射与记忆：</b>首次打开按当前项目路径匹配映射自动定位远程目录；每台服务器上次打开的目录跨会话记忆</li>
+    <li>持久化 SFTP 通道复用 + 自动重连 + I/O 异常自动重试。入口：右键菜单、<code>Alt+Shift+Z</code> 快捷菜单、DeployX 操作 Tab 文件夹按钮。完整中英文双语支持</li>
+</ul>
+
 <h3>v1.0.4 - SSH 密钥导出与新功能增强</h3>
 <ul>
     <li><b>🔑 SSH 密钥导出/导入：</b>导出加密配置时，若存在使用密钥认证的服务器，会提示用户是否将密钥文件内容一并加密导出。导入到另一台机器时自动解密并保存到本地密钥目录（<code>~/.deploy-x/keys/</code>），服务器配置的密钥路径自动指向本地文件，无需手动复制密钥。若不选择导出密钥文件，仍按原有方式仅导出服务器配置（密钥路径保留但内容不导出）</li>

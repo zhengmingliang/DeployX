@@ -7,6 +7,7 @@ import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.service.MappingManager
 import com.alianga.idea.deploy.service.RemoteFileBrowserService
 import com.alianga.idea.deploy.service.ServerManager
+import com.alianga.idea.deploy.service.TerminalService
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
@@ -60,6 +61,17 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
         private val FILE_ICON = AllIcons.FileTypes.Any_type
         private val LINK_ICON = AllIcons.Nodes.Symlink
         private val LOADING_ICON = AllIcons.Actions.Refresh
+
+        private fun toolButton(icon: Icon, tooltip: String): JButton = JButton(icon).apply {
+            toolTipText = tooltip
+            isContentAreaFilled = false
+            isBorderPainted = false
+            isFocusPainted = false
+            border = BorderFactory.createEmptyBorder(2, 2, 2, 2)
+            preferredSize = Dimension(26, 26)
+            maximumSize = Dimension(26, 26)
+            minimumSize = Dimension(22, 22)
+        }
     }
 
     private val serverManager = ServerManager.getInstance()
@@ -68,11 +80,11 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
 
     private val serverCombo = JComboBox<String>()
     private val pathCombo = JComboBox<String>().apply { isEditable = true }
-    private val goButton = JButton(AllIcons.Actions.Forward)
-    private val upButton = JButton(AllIcons.Actions.Upload)
-    private val refreshButton = JButton(AllIcons.Actions.Refresh)
-    private val newDirButton = JButton(AllIcons.Actions.NewFolder)
-    private val historyButton = JButton(AllIcons.Vcs.History)
+    private val goButton = toolButton(AllIcons.Actions.Forward, DeployXBundle.message("remote.browser.button.go"))
+    private val upButton = toolButton(AllIcons.Actions.Upload, DeployXBundle.message("remote.browser.button.up"))
+    private val refreshButton = toolButton(AllIcons.Actions.Refresh, DeployXBundle.message("remote.browser.refresh"))
+    private val newDirButton = toolButton(AllIcons.Actions.NewFolder, DeployXBundle.message("remote.browser.newDir"))
+    private val historyButton = toolButton(AllIcons.Vcs.History, DeployXBundle.message("remote.browser.button.history"))
 
     private val statusLabel = JBLabel(DeployXBundle.message("remote.browser.status.ready"))
 
@@ -97,11 +109,6 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
     private var suppressPathAction = false
 
     init {
-        goButton.toolTipText = DeployXBundle.message("remote.browser.button.go")
-        upButton.toolTipText = DeployXBundle.message("remote.browser.button.up")
-        refreshButton.toolTipText = DeployXBundle.message("remote.browser.refresh")
-        newDirButton.toolTipText = DeployXBundle.message("remote.browser.newDir")
-        historyButton.toolTipText = DeployXBundle.message("remote.browser.button.history")
         setupUI()
         buildLayout()
         populateServers()
@@ -412,6 +419,10 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
                 statusLabel.text = DeployXBundle.message("remote.browser.copyPath.success", entry.path)
             }
         })
+        popup.add(JMenuItem(DeployXBundle.message("remote.browser.menu.openTerminal"), AllIcons.Nodes.Console).apply {
+            val dir = if (entry.isDirectory) entry.path else entry.path.substringBeforeLast('/').ifBlank { "/" }
+            addActionListener { openTerminalInDir(dir) }
+        })
         popup.addSeparator()
         popup.add(JMenuItem(DeployXBundle.message("remote.browser.menu.delete"), AllIcons.Actions.Cancel).apply {
             addActionListener { deleteEntry(node, entry) }
@@ -559,6 +570,16 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
     private fun normalizePath(path: String): String { val p = path.trim().replace("\\", "/"); return if (p.isBlank()) "/" else p }
     private fun joinPath(base: String, name: String): String { val b = base.trimEnd('/'); return if (b.isBlank() || b == "/") "/$name" else "$b/$name" }
     private fun syntheticDirEntry(path: String): RemoteFileEntry = RemoteFileEntry(name = path, path = normalizePath(path), isDirectory = true)
+
+    /** 打开 SSH 终端并切换到指定目录 */
+    private fun openTerminalInDir(dir: String) {
+        val server = currentServer ?: run {
+            Messages.showErrorDialog(this, DeployXBundle.message("remote.browser.error.title"), "No server selected")
+            return
+        }
+        TerminalService.getInstance().openTerminalInDir(project, server, dir)
+        statusLabel.text = DeployXBundle.message("remote.browser.status.terminal", dir)
+    }
 
     /** 释放会话资源（工具窗口隐藏时调用） */
     fun dispose() {

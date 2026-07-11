@@ -35,20 +35,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <h3>v1.0.6 - Remote File Browser Upgrade</h3>
-        <ul>
-            <li><b>📂 Sidebar Tool Window:</b> Browser now opens as a non-modal sidebar tool window (<code>DeployX Remote</code>), no longer blocks editing local files</li>
-            <li><b>📝 IDE Editor Integration:</b> Double-click opens remote file in the IDE main editor with syntax highlighting; <code>Ctrl+S</code> writes back to server (fixes the empty-content dialog bug)</li>
-            <li><b>🎯 Auto-map & Remember Path:</b> Auto-locates remote dir from project mappings on first open; remembers each server's last-opened directory</li>
-            <li><b>🕘 Path History:</b> Per-server path history with jump/delete-individual/clear-all via a history popup</li>
-            <li><b>🖱️ Drag & Drop Upload:</b> Drag local files onto the browser tree to upload</li>
-            <li><b>🖱️ Drag & Drop Download:</b> Drag remote files from the tree to the project view to download</li>
-        </ul>
-
         <h3>v1.0.5 - Remote File Browser</h3>
         <ul>
-            <li><b>📂 Remote File Browser:</b> Browse remote server file systems directly in the IDE with a tree view. Supports <b>viewing</b> (lazy-loaded directory tree with file size/modification time and icons), <b>editing</b> (double-click a text file to view/modify content and save it back to the server; files over 10MB prompt to use download instead), <b>downloading</b> (right-click to download a file or recursively download an entire directory), and <b>directory management</b> (create new directories, delete files/directories, copy remote path, refresh). Uses a persistent reusable SFTP channel with auto-reconnect. Accessible via the right-click menu, the <code>Alt+Shift+Z</code> quick menu, and the DeployX tool window. Full bilingual (English / 简体中文) support</li>
-            <li><b>📂 远程文件浏览器：</b>在 IDE 内以树形结构直接浏览远程服务器文件系统，支持查看（懒加载目录树）、编辑（双击文本文件查看/修改并保存回服务器）、下载（右键下载文件或递归下载整个目录）、目录管理（新建/删除/复制路径/刷新）。持久化 SFTP 通道复用，浏览延迟低。入口：右键菜单、Alt+Shift+Z 快捷菜单、工具窗口按钮。完整中英文双语支持</li>
+            <li><b>📂 Remote File Browser:</b> Browse remote server file systems in a sidebar tree. <b>View:</b> lazy-loaded directory tree. <b>Edit:</b> double-click to open in IDE main editor with syntax highlighting; <code>Ctrl+S</code> writes back to server. <b>Upload:</b> drag local files onto the tree. <b>Download:</b> drag remote files to the project view or right-click download. Auto-map from project path, remember last directory per server, path history (up to 20 per server). Persistent SFTP channel with auto-reconnect. Accessible via right-click menu, <code>Alt+Shift+Z</code>, and tool window button. Full bilingual (English / 简体中文)</li>
+            <li><b>📂 远程文件浏览器：</b>在 IDE 侧边栏以树形结构浏览远程服务器文件系统。支持查看（懒加载目录树）、编辑（双击在 IDE 主编辑器打开，语法高亮，Ctrl+S 写回远程）、拖拽上传/下载、右键下载、新建/删除目录、复制路径、刷新。按项目路径映射自动定位远程目录 + 记忆上次目录 + 路径历史（每服务器 20 条）。持久化 SFTP 通道复用+自动重连。入口：右键菜单、Alt+Shift+Z、工具窗口按钮。中英文双语</li>
         </ul>
 
         <h3>v1.0.3 - Transfer Enhancements & Multi-Server Deploy</h3>
@@ -282,9 +272,9 @@
         <!-- Remote File Browser Tool Window (sidebar, non-modal) -->
         <toolWindow
             id="DeployX Remote"
-            icon="/icons/toolWindow.svg"
+            icon="/icons/remoteBrowser.svg"
             factoryClass="com.alianga.idea.deploy.ui.toolwindow.RemoteFileBrowserToolWindowFactory"
-            anchor="left"/>
+            anchor="right"/>
 
         <!-- Notification Group -->
         <notificationGroup id="DeployX"
