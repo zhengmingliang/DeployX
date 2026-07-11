@@ -141,7 +141,7 @@ data class HistoryRecord(
 
     val formattedDate: String
         get() {
-            val sdf = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault())
+            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
             return sdf.format(Date(timestamp))
         }
 
