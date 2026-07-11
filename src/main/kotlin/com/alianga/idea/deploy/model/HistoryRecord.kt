@@ -74,8 +74,14 @@ data class HistoryRecord(
         @SerializedName("sync")
         SYNC("sync"),
 
+        @SerializedName("upload")
+        UPLOAD("upload"),
+
         @SerializedName("deploy")
         DEPLOY("deploy"),
+
+        @SerializedName("pull")
+        PULL("pull"),
 
         @SerializedName("backup")
         BACKUP("backup"),
@@ -159,7 +165,12 @@ data class HistoryRecord(
                 OperationStatus.FAILED -> "✗"
                 OperationStatus.CANCELLED -> "⊘"
             }
-            return "[$formattedDate] $statusIcon ${type.value.uppercase()}: " +
-                    "$sourcePath → $serverId:$targetPath"
+            // PULL（从服务器拉取）方向相反：远程源 → 本地目标
+            val direction = if (type == OperationType.PULL) {
+                "$serverId:$targetPath → $sourcePath"
+            } else {
+                "$sourcePath → $serverId:$targetPath"
+            }
+            return "[$formattedDate] $statusIcon ${type.value.uppercase()}: $direction"
         }
 }

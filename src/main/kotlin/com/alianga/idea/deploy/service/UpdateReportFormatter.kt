@@ -20,6 +20,7 @@ object UpdateReportFormatter {
             "DEPLOY" -> DeployXBundle.message("report.operation.deploy")
             "UPLOAD" -> DeployXBundle.message("report.operation.upload")
             "SYNC" -> DeployXBundle.message("report.operation.sync")
+            "PULL" -> DeployXBundle.message("report.operation.pull")
             else -> report.operationType
         }
 

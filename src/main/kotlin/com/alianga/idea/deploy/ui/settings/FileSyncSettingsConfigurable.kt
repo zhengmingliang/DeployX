@@ -28,7 +28,9 @@ class FileSyncSettingsConfigurable : Configurable {
     private val mappingPanel = MappingSettingsPanel()
     private val rsyncPanel = RsyncSettingsPanel()
     private val scriptPanel = ScriptSettingsPanel()
+    private val changelogPanel = ChangelogTabPanel()
     private var tabbedPane: JBTabbedPane? = null
+    private var langListenerRemover: (() -> Unit)? = null
 
     override fun getDisplayName(): String = DeployXBundle.message("settings.title")
 
@@ -40,6 +42,14 @@ class FileSyncSettingsConfigurable : Configurable {
                 addTab(DeployXBundle.message("settings.tab.mappingManagement"), mappingPanel)
                 addTab(DeployXBundle.message("settings.tab.rsyncConfig"), rsyncPanel)
                 addTab(DeployXBundle.message("settings.tab.scriptLibrary"), scriptPanel)
+                addTab(DeployXBundle.message("settings.tab.changelog"), changelogPanel)
+                // 语言切换时刷新「版本更新说明」文案与 Tab 标题
+                langListenerRemover = DeployXBundle.addLanguageChangeListener {
+                    tabbedPane?.let {
+                        it.setTitleAt(it.tabCount - 1, DeployXBundle.message("settings.tab.changelog"))
+                    }
+                    changelogPanel.refresh()
+                }
             }
             val buttonPanel = JPanel().apply {
                 add(JButton(DeployXBundle.message("settings.button.exportConfig"), AllIcons.Actions.Download).apply {
@@ -247,6 +257,8 @@ class FileSyncSettingsConfigurable : Configurable {
     }
 
     override fun disposeUIResources() {
+        langListenerRemover?.invoke()
+        langListenerRemover = null
         mainPanel = null
         tabbedPane = null
     }

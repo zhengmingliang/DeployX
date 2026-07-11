@@ -44,9 +44,12 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.util.ui.FormBuilder
 import java.awt.BorderLayout
+import java.awt.CardLayout
 import java.awt.Dimension
 import java.awt.Font
 import java.awt.datatransfer.StringSelection
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import javax.swing.*
@@ -192,9 +195,14 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         this.toolbar = toolbar
 
         // ===== 操作面板 =====
+        val serverButtonsPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            add(Box.createHorizontalStrut(4))
+            add(openTerminalButton)
+        }
         val serverWithTerminalPanel = JPanel(BorderLayout(6, 0)).apply {
             add(serverCombo, BorderLayout.CENTER)
-            add(openTerminalButton, BorderLayout.EAST)
+            add(serverButtonsPanel, BorderLayout.EAST)
         }
         val serverPanel = FormBuilder.createFormBuilder()
             .addLabeledComponent(targetServerLabel, serverWithTerminalPanel)
@@ -249,11 +257,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         logTabbedPane.addTab(DeployXBundle.message("toolwindow.tab.all"), AllIcons.Nodes.LogFolder, JBScrollPane(logArea))
 
         // ===== 历史面板 =====
-        historyList.addListSelectionListener { e ->
-            if (!e.valueIsAdjusting) {
-                showHistoryDetail()
+        // 单击仅选中记录（不跳转），双击才查看详情并跳转到「日志」页签
+        historyList.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount >= 2 && SwingUtilities.isLeftMouseButton(e)) {
+                    val idx = historyList.locationToIndex(e.point)
+                    if (idx >= 0) {
+                        historyList.selectedIndex = idx
+                        showHistoryDetail()
+                    }
+                }
             }
-        }
+        })
 
         historyRefreshButton.addActionListener { refreshHistory() }
         historyRedeployButton.addActionListener { redeployFromHistory() }

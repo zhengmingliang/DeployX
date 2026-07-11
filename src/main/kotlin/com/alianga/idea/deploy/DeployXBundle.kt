@@ -47,7 +47,7 @@ object DeployXBundle {
      * - "en"：英文
      * - "zh_CN"：简体中文
      */
-    private fun currentLanguageTag(): String {
+    fun currentLanguageTag(): String {
         val language = try {
             FileSyncSettings.getInstance().language
         } catch (_: Exception) {
