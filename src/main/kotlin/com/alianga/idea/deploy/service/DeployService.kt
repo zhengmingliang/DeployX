@@ -576,7 +576,7 @@ class DeployService {
                     reportGroup = reportGroup
                 )
                 results.add(result)
-                saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS)
+                saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS, backupPath)
             } catch (e: Exception) {
                 LOG.error("Batch deploy group failed", e)
                 val result = DeployResult(false, taskId = taskId, error = DeployXBundle.message("deploy.error.deployException", e.message ?: ""), duration = System.currentTimeMillis() - startTime)
@@ -723,7 +723,7 @@ class DeployService {
             if (!needsSshConnection) {
                 val duration = System.currentTimeMillis() - startTime
                 logCallback?.invoke(DeployXBundle.message("deploy.log.deployComplete", duration))
-                saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS)
+                saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS, null)
                 val reportGroup = buildReportGroup(
                     server = server,
                     sourceBaseDir = File(request.localPath).parent ?: request.localPath,
@@ -758,7 +758,7 @@ class DeployService {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.unzipSuccess", request.unzipDest))
                 } else {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.unzipFailedErrorLog", unzipResult.error ?: ""))
-                    saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.FAILED)
+                    saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.FAILED, backupPath)
                     return DeployResult(
                         success = false,
                         taskId = taskId,
@@ -791,7 +791,7 @@ class DeployService {
 
             val duration = System.currentTimeMillis() - startTime
             logCallback?.invoke(DeployXBundle.message("deploy.log.deployComplete", duration))
-            saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS)
+            saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS, backupPath)
 
             val reportGroup = buildReportGroup(
                 server = server,
@@ -970,7 +970,8 @@ class DeployService {
         items: List<DeployItem>,
         syncResult: SyncResult,
         duration: Long,
-        status: HistoryRecord.OperationStatus
+        status: HistoryRecord.OperationStatus,
+        backupFilePath: String? = null
     ) {
         val server = ServerManager.getInstance().getServer(key.serverId)
         val reportGroup = if (server != null) {
@@ -1010,7 +1011,9 @@ class DeployService {
                 remotePaths = reportGroup?.remotePaths ?: emptyList(),
                 serverName = reportGroup?.serverName ?: "",
                 serverAddress = reportGroup?.serverAddress ?: "",
-                reportText = reportText
+                reportText = reportText,
+                canRollback = !backupFilePath.isNullOrBlank(),
+                backupFilePath = backupFilePath ?: ""
             )
         )
     }
@@ -1125,7 +1128,8 @@ class DeployService {
         request: DeployRequest,
         syncResult: com.alianga.idea.deploy.model.SyncResult,
         startTime: Long,
-        status: com.alianga.idea.deploy.model.HistoryRecord.OperationStatus
+        status: com.alianga.idea.deploy.model.HistoryRecord.OperationStatus,
+        backupFilePath: String? = null
     ) {
         val server = ServerManager.getInstance().getServer(request.serverId)
         val reportGroup = if (server != null) {
@@ -1165,7 +1169,9 @@ class DeployService {
                 remotePaths = reportGroup?.remotePaths ?: emptyList(),
                 serverName = reportGroup?.serverName ?: "",
                 serverAddress = reportGroup?.serverAddress ?: "",
-                reportText = reportText
+                reportText = reportText,
+                canRollback = !backupFilePath.isNullOrBlank(),
+                backupFilePath = backupFilePath ?: ""
             )
         )
     }

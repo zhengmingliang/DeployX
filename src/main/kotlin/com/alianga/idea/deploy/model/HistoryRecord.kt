@@ -68,7 +68,15 @@ data class HistoryRecord(
     val serverAddress: String = "",
 
     @SerializedName("report_text")
-    val reportText: String = ""
+    val reportText: String = "",
+
+    /** 是否可回滚（部署时生成了备份） */
+    @SerializedName("can_rollback")
+    val canRollback: Boolean = false,
+
+    /** 备份文件的完整路径（用于回滚） */
+    @SerializedName("backup_file_path")
+    val backupFilePath: String = ""
 ) {
     enum class OperationType(val value: String) {
         @SerializedName("sync")

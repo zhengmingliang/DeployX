@@ -2,6 +2,7 @@ package com.alianga.idea.deploy.config
 
 import com.alianga.idea.deploy.model.HistoryRecord
 import com.alianga.idea.deploy.model.MappingConfig
+import com.alianga.idea.deploy.model.RollbackRecord
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.model.ServerConfigDeserializer
@@ -37,6 +38,7 @@ class ConfigManager {
         private val SERVERS_FILE = File(CONFIG_DIR, "servers.json")
         private val MAPPINGS_FILE = File(CONFIG_DIR, "mappings.json")
         private val HISTORY_FILE = File(CONFIG_DIR, "history.json")
+        private val ROLLBACK_HISTORY_FILE = File(CONFIG_DIR, "rollback_history.json")
         private val SCRIPTS_FILE = File(CONFIG_DIR, "scripts.json")
         /** 加密的密码备份文件（Base64 编码的 AES 加密数据） */
         private val PASSWORD_BACKUP_FILE = File(CONFIG_DIR, ".passwords.dat")
@@ -399,6 +401,34 @@ class ConfigManager {
             LOG.info("Saved ${records.size} history records")
         } catch (e: Exception) {
             LOG.error("Failed to save history", e)
+        }
+    }
+
+    // ==================== 回滚记录 ====================
+
+    /**
+     * 读取回滚历史记录
+     */
+    fun loadRollbackHistory(): List<RollbackRecord> {
+        if (!ROLLBACK_HISTORY_FILE.exists()) return emptyList()
+        return try {
+            val type = object : TypeToken<List<RollbackRecord>>() {}.type
+            GSON.fromJson(ROLLBACK_HISTORY_FILE.readText(), type) ?: emptyList()
+        } catch (e: Exception) {
+            LOG.warn("Failed to load rollback history", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * 保存回滚历史记录
+     */
+    fun saveRollbackHistory(records: List<RollbackRecord>) {
+        try {
+            ROLLBACK_HISTORY_FILE.writeText(GSON.toJson(records))
+            LOG.info("Saved ${records.size} rollback records")
+        } catch (e: Exception) {
+            LOG.error("Failed to save rollback history", e)
         }
     }
 

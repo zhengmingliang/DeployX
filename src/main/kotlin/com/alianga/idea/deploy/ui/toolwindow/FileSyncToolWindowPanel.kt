@@ -20,6 +20,8 @@ import com.alianga.idea.deploy.service.TerminalService
 import com.alianga.idea.deploy.service.UpdateReportFormatter
 import com.alianga.idea.deploy.ui.CommandFieldWithScriptButton
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
+import com.alianga.idea.deploy.ui.dialog.RollbackDialog
+import com.alianga.idea.deploy.ui.dialog.RollbackProgressDialog
 import com.alianga.idea.deploy.ui.script.ScriptTabPanel
 import com.alianga.idea.deploy.ui.settings.MappingEditDialog
 import com.intellij.icons.AllIcons
@@ -142,6 +144,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val historyFillConfigButton = JButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit)
     private val historyCopyReportButton = JButton(DeployXBundle.message("toolwindow.history.copyReport"), AllIcons.Actions.Copy)
     private val historyExportReportButton = JButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download)
+    private val historyRollbackButton = JButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback)
     private val historyClearButton = JButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Vcs.History)
 
     /** 历史列表为空时的占位提示（替代原先的空白，明确告知用户“暂无记录”） */
@@ -277,6 +280,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         historyFillConfigButton.addActionListener { fillFromHistory() }
         historyCopyReportButton.addActionListener { copyReportFromHistory() }
         historyExportReportButton.addActionListener { exportReportFromHistory() }
+        historyRollbackButton.addActionListener { rollbackFromHistory() }
         historyClearButton.addActionListener { clearHistory() }
 
         val historyButtonPanel = JPanel().apply {
@@ -290,6 +294,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(historyCopyReportButton)
             add(Box.createHorizontalStrut(4))
             add(historyExportReportButton)
+            add(Box.createHorizontalStrut(4))
+            add(historyRollbackButton)
             add(Box.createHorizontalStrut(8))
             add(historyClearButton)
         }
@@ -371,6 +377,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         historyFillConfigButton.text = DeployXBundle.message("toolwindow.history.fillConfig")
         historyCopyReportButton.text = DeployXBundle.message("toolwindow.history.copyReport")
         historyExportReportButton.text = DeployXBundle.message("toolwindow.history.exportReport")
+        historyRollbackButton.text = DeployXBundle.message("toolwindow.history.rollback")
         historyClearButton.text = DeployXBundle.message("toolwindow.history.clear")
         historyEmptyLabel.text = DeployXBundle.message("toolwindow.history.empty")
 
@@ -487,11 +494,61 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.deployComplete") else DeployXBundle.message("toolwindow.progress.deployFailed")
                     refreshHistory()
                 }
-            }
-        })
-    }
+                }
+            })
+        }
 
-    /** 将历史记录的配置填入操作面板 */
+        /** 从历史记录执行回滚 */
+        private fun rollbackFromHistory() {
+            val idx = historyList.selectedIndex
+            if (idx < 0 || idx >= historyRecords.size) {
+                Messages.showWarningDialog(
+                    DeployXBundle.message("toolwindow.log.selectHistoryFirst"),
+                    DeployXBundle.message("toolwindow.log.rollbackTitle")
+                )
+                return
+            }
+            val record = historyRecords[idx]
+
+            // 检查是否可回滚
+            if (!record.canRollback || record.backupFilePath.isBlank()) {
+                Messages.showWarningDialog(
+                    DeployXBundle.message("toolwindow.log.rollbackNotAvailable"),
+                    DeployXBundle.message("toolwindow.log.rollbackTitle")
+                )
+                return
+            }
+
+            // 显示回滚确认对话框
+            val dialog = RollbackDialog(project, record)
+            if (!dialog.showAndGet()) {
+                return
+            }
+
+            // 执行回滚
+            val progressDialog = RollbackProgressDialog(project, record) { result ->
+                if (result.success) {
+                    appendLog(DeployXBundle.message("toolwindow.log.rollbackSuccess"))
+                    appendLog(DeployXBundle.message("toolwindow.log.restoredFiles", result.rolledBackFiles.size))
+                    ActionUtils.showNotification(
+                        project,
+                        DeployXBundle.message("toolwindow.notification.rollbackSuccess"),
+                        NotificationType.INFORMATION
+                    )
+                } else {
+                    appendLog(DeployXBundle.message("toolwindow.log.rollbackFailed", result.error ?: ""))
+                    ActionUtils.showNotification(
+                        project,
+                        DeployXBundle.message("toolwindow.notification.rollbackFailed", result.error ?: ""),
+                        NotificationType.ERROR
+                    )
+                }
+                refreshHistory()
+            }
+            progressDialog.show()
+        }
+
+        /** 将历史记录的配置填入操作面板 */
     private fun fillFromHistory() {
         val idx = historyList.selectedIndex
         if (idx < 0 || idx >= historyRecords.size) {
