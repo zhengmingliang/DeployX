@@ -4,8 +4,10 @@ import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ScriptParam
 import com.alianga.idea.deploy.service.ServerManager
+import com.alianga.idea.deploy.ui.ScriptEditorFactory
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.ui.EditorTextField
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBScrollPane
@@ -38,7 +40,7 @@ class ScriptEditDialog(
     private val groupField = JBTextField(DeployXBundle.message("dialog.script.defaultGroup"))
     private val tagsField = JBTextField()
     private val serverCombo = JComboBox<String>()
-    private val commandArea = JBTextArea(14, 80)
+    private val commandArea: EditorTextField = ScriptEditorFactory.createEditable("")
     private val workingDirField = JBTextField()
     private val autoCdCheck = JBCheckBox(DeployXBundle.message("dialog.script.checkbox.autoCd"), false)
     private val confirmCheck = JBCheckBox(DeployXBundle.message("dialog.script.checkbox.confirmBeforeRun"), true)
@@ -65,9 +67,6 @@ class ScriptEditDialog(
 
         descriptionField.lineWrap = true
         descriptionField.wrapStyleWord = true
-        commandArea.font = Font("Monospaced", Font.PLAIN, 12)
-        commandArea.lineWrap = true
-        commandArea.wrapStyleWord = false
         init()
     }
 
@@ -99,9 +98,8 @@ class ScriptEditDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val commandScroll = JBScrollPane(commandArea).apply {
+        val commandScroll = commandArea.apply {
             preferredSize = Dimension(640, 240)
-            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
         }
         val variablesArea = JBTextArea(buildVariablesHelpText(), 8, 60).apply {
             isEditable = false

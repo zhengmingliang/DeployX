@@ -1,15 +1,13 @@
 package com.alianga.idea.deploy.ui.dialog
 
 import com.alianga.idea.deploy.DeployXBundle
-import com.alianga.idea.deploy.ui.LineNumberGutter
+import com.alianga.idea.deploy.ui.ScriptEditorFactory
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
-import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTextArea
+import com.intellij.ui.EditorTextField
 import java.awt.BorderLayout
 import java.awt.Dimension
-import java.awt.Font
 import java.awt.Toolkit
 import javax.swing.Action
 import javax.swing.JButton
@@ -21,23 +19,17 @@ import javax.swing.JPanel
  *
  * 用于在映射编辑界面中放大查看/编辑命令内容，
  * 顶部右上角提供缩小恢复按钮，关闭时自动将内容同步回原输入组件。
+ *
+ * 使用 IDEA 平台 [EditorTextField] 提供语法高亮、行号、主题自适应。
  */
 class CommandFullscreenDialog(
     private val project: Project?,
     private val originalText: String,
-    private val sourceFont: Font,
     private val dialogTitle: String,
     private val onCommit: (String) -> Unit
 ) : DialogWrapper(project) {
 
-    private val textArea: JBTextArea = JBTextArea().apply {
-        font = sourceFont.deriveFont(sourceFont.size + 1f)
-        tabSize = 2
-        text = originalText
-        lineWrap = true
-        wrapStyleWord = true
-        caretPosition = 0
-    }
+    private val editorField: EditorTextField = ScriptEditorFactory.createEditable(originalText, project)
 
     init {
         title = dialogTitle
@@ -62,13 +54,8 @@ class CommandFullscreenDialog(
 
         panel.add(toolbar, BorderLayout.NORTH)
 
-        // ── 中央：带行号的代码编辑区域 ──
-        val scrollPane = JBScrollPane(textArea).apply {
-            setRowHeaderView(LineNumberGutter(textArea))
-            verticalScrollBarPolicy = JBScrollPane.VERTICAL_SCROLLBAR_ALWAYS
-            horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-        }
-        panel.add(scrollPane, BorderLayout.CENTER)
+        // ── 中央：基于 IDEA 编辑器的代码编辑区域（自带行号、高亮、滚动） ──
+        panel.add(editorField, BorderLayout.CENTER)
 
         // 填满大部分屏幕
         val screen = Toolkit.getDefaultToolkit().screenSize
@@ -93,7 +80,7 @@ class CommandFullscreenDialog(
     }
 
     private fun commitAndClose() {
-        onCommit(textArea.text)
+        onCommit(editorField.text)
         close(OK_EXIT_CODE)
     }
 }

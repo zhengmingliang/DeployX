@@ -7,6 +7,7 @@ import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.model.ScriptRunResult
 import com.alianga.idea.deploy.service.ScriptManager
 import com.alianga.idea.deploy.service.ServerManager
+import com.alianga.idea.deploy.ui.ScriptEditorFactory
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
@@ -14,6 +15,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.ui.EditorTextField
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
@@ -42,14 +44,12 @@ class ScriptRunDialog(
     private val scriptManager = ScriptManager.getInstance()
     private val serverCombo = JComboBox<String>()
     private val paramComponents = linkedMapOf<String, JComponent>()
-    private val previewArea = JBTextArea(8, 60)
+    private val previewArea: EditorTextField = ScriptEditorFactory.createViewer("", project)
     private var runResult: ScriptRunResult? = null
 
     init {
         title = DeployXBundle.message("dialog.script.run.title", script.name)
         setupServerCombo()
-        previewArea.isEditable = false
-        previewArea.font = Font("Monospaced", Font.PLAIN, 12)
         init()
         setOKButtonText(DeployXBundle.message("dialog.script.run.button.run"))
     }
@@ -98,7 +98,7 @@ class ScriptRunDialog(
             .addVerticalGap(6)
             .addLabeledComponent(DeployXBundle.message("dialog.script.run.label.variablesHelp"), JBScrollPane(variablesArea).apply { preferredSize = Dimension(680, 170) })
             .addVerticalGap(6)
-            .addLabeledComponent(DeployXBundle.message("dialog.script.run.label.commandPreview"), JBScrollPane(previewArea))
+            .addLabeledComponent(DeployXBundle.message("dialog.script.run.label.commandPreview"), previewArea.apply { preferredSize = Dimension(680, 180) })
             .panel
 
         return JPanel(BorderLayout()).apply {

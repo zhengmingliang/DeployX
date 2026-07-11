@@ -22,6 +22,28 @@
 - **路径切换报错**：SFTP 通道异常时新增自动重连+重试机制，修复物理路径时偶发 `inputstream is closed` 错误
 
 
+### 🛠 重构
+- **脚本编辑器复用 IDEA 编辑器能力**：将项目中所有脚本/命令编辑场景从 Swing 原生组件（`JBTextArea` + 手写 `LineNumberGutter`）迁移到 IDEA 平台 `EditorTextField`，统一获得语法高亮、行号、代码折叠、当前行高亮、主题自适应等编辑器能力。
+
+  改造方案对比图见 [docs/script-editor-refactor.svg](docs/script-editor-refactor.svg)。
+
+  **改造范围（8 处场景）**：
+  - 可编辑场景：`ScriptEditDialog` 命令模板编辑区、`CommandFieldWithScriptButton` 多行编辑、`CommandFullscreenDialog` 全屏编辑
+  - 只读预览场景：`ScriptRunDialog` 命令预览、`ScriptTabPanel` 脚本库预览
+  - `MappingEditDialog` 的前置/后置命令输入自动跟随 `CommandFieldWithScriptButton` 升级
+
+  **新增**：
+  - `ScriptEditorFactory`：统一创建可编辑/只读 `EditorTextField`，自动探测 Shell Script FileType（IDEA Ultimate 默认提供），未找到时降级 PlainText，保证不依赖外部插件
+  - 内置行号、滚动条、当前行高亮；project 为 null 时手动补设语法高亮器，确保无 project 上下文也有高亮
+  - 修复 `EditorTextField` 在 `DialogWrapper` 中回车键触发"确定"按钮的问题（拦截 Enter 手动换行）
+  - 修复粘贴多行命令变成一行的问题（强制多行模式 `setOneLineMode(false)`）
+  - 修复 Tab 键被焦点切换拦截的问题（拦截 Tab 手动插入缩进）
+
+  **移除**：
+  - 删除 `LineNumberGutter.kt`（手写行号边栏，`EditorTextField` 内置 gutter 完全替代）
+  - `CommandFullscreenDialog` 移除 `sourceFont` 参数（编辑器字体由平台统一管理）
+
+
 ---
 
 ## [1.0.4] - 2026-07-10

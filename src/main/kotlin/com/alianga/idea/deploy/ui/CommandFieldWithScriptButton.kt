@@ -5,34 +5,36 @@ import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.ui.dialog.CommandFullscreenDialog
 import com.alianga.idea.deploy.ui.dialog.ScriptPickerDialog
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.project.Project
-import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTextArea
+import com.intellij.ui.EditorTextField
 import com.intellij.ui.components.JBTextField
 import java.awt.BorderLayout
 import java.awt.Dimension
-import java.awt.Font
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JPanel
-import javax.swing.text.JTextComponent
 
 /**
- * 带脚本库选择按钮和全屏编辑按钮的命令输入组件，支持行号显示和多行编辑。
+ * 带脚本库选择按钮和全屏编辑按钮的命令输入组件，支持多行编辑。
  *
  * 统一提供三种脚本操作模式：
- * 1. 手动输入命令 — 直接在文本框中编辑
+ * 1. 手动输入命令 — 直接在编辑器中编辑
  * 2. 从脚本库中引用已有脚本 — 点击右侧按钮，在脚本选择窗口中选择"引用脚本"模式
  * 3. 将脚本内容插入到当前编辑位置 — 点击右侧按钮，在脚本选择窗口中选择"插入脚本内容"模式
  *
- * 当指定 fullscreenTitle 时，文本框末端会额外显示全屏按钮，
+ * 多行模式使用 IDEA 平台 [EditorTextField]（语法高亮、行号、主题自适应、代码折叠），
+ * 单行模式使用 [JBTextField]。
+ *
+ * 当指定 fullscreenTitle 时，编辑器末端会额外显示全屏按钮，
  * 点击后在弹出对话框中全屏编辑命令内容。
  *
- * @param project 当前项目，用于脚本选择对话框（可为 null）
+ * @param project 当前项目，用于脚本选择对话框和 EditorTextField（可为 null）
  * @param contextProvider 构建 ScriptRunContext 的回调，用于脚本模板渲染
- * @param multiline true 使用多行文本区域，附带行号边栏和滚动；false 使用单行文本框
- * @param preferredScrollSize 多行模式下滚动面板的首选尺寸，null 则使用默认
- * @param showLineNumbers 多行模式下是否显示行号边栏，默认 true
+ * @param multiline true 使用多行 EditorTextField；false 使用单行 JBTextField
+ * @param preferredScrollSize 多行模式下编辑器的首选尺寸，null 则使用默认
+ * @param showLineNumbers 多行模式下是否显示行号，默认 true
  * @param fullscreenTitle 全屏编辑对话框的标题。为 null 时不显示全屏按钮
  */
 class CommandFieldWithScriptButton(
@@ -44,17 +46,12 @@ class CommandFieldWithScriptButton(
     private val fullscreenTitle: String? = null
 ) : JPanel(BorderLayout(4, 0)) {
 
-    /** 内部文本组件（JBTextField 或 JBTextArea） */
-    val textComponent: JTextComponent = if (multiline) {
-        JBTextArea(4, 50).apply {
-            font = Font("Monospaced", Font.PLAIN, 13)
-            lineWrap = true
-            wrapStyleWord = true
-            tabSize = 2
-        }
-    } else {
-        JBTextField()
-    }
+    /** 多行模式：基于 IDEA 编辑器的 EditorTextField；单行模式：JBTextField */
+    private val editorField: EditorTextField? = if (multiline) {
+        ScriptEditorFactory.createEditable("", project, showLineNumbers)
+    } else null
+
+    private val singleField: JBTextField? = if (!multiline) JBTextField() else null
 
     private val scriptButton: JButton = JButton(AllIcons.Actions.AddMulticaret).apply {
         toolTipText = DeployXBundle.message("command.field.script.picker.tooltip")
@@ -74,16 +71,11 @@ class CommandFieldWithScriptButton(
     }
 
     init {
-        if (multiline && textComponent is JBTextArea) {
-            val scrollPane = JBScrollPane(textComponent).apply {
-                if (preferredScrollSize != null) preferredSize = preferredScrollSize
-                if (showLineNumbers) {
-                    setRowHeaderView(LineNumberGutter(textComponent))
-                }
-            }
-            add(scrollPane, BorderLayout.CENTER)
-        } else {
-            add(textComponent, BorderLayout.CENTER)
+        if (editorField != null) {
+            if (preferredScrollSize != null) editorField.preferredSize = preferredScrollSize
+            add(editorField, BorderLayout.CENTER)
+        } else if (singleField != null) {
+            add(singleField, BorderLayout.CENTER)
         }
 
         // 右侧按钮面板：脚本库按钮在上，全屏按钮在下
@@ -100,31 +92,36 @@ class CommandFieldWithScriptButton(
 
     /** 获取/设置文本内容 */
     var text: String
-        get() = textComponent.text
+        get() = editorField?.text ?: singleField?.text ?: ""
         set(value) {
-            textComponent.text = value
-            if (textComponent is JBTextArea) {
-                textComponent.caretPosition = 0
+            editorField?.text = value
+            singleField?.let {
+                it.text = value
+                it.caretPosition = 0
             }
         }
 
     /** 是否可编辑 */
     var editable: Boolean
-        get() = textComponent.isEditable
+        get() = editorField?.isViewer == false || singleField?.isEditable == true
         set(value) {
-            textComponent.isEditable = value
+            editorField?.setViewer(!value)
+            singleField?.isEditable = value
         }
 
     override fun setEnabled(enabled: Boolean) {
         super.setEnabled(enabled)
-        textComponent.isEnabled = enabled
-        textComponent.isEditable = enabled
+        editorField?.setEnabled(enabled)
+        singleField?.let {
+            it.isEnabled = enabled
+            it.isEditable = enabled
+        }
         scriptButton.isEnabled = enabled
         fullscreenButton?.isEnabled = enabled
     }
 
     /** 获取内部文本组件内容并 trim */
-    fun trimmedText(): String = textComponent.text.trim()
+    fun trimmedText(): String = text.trim()
 
     /** 刷新脚本按钮的 tooltip（语言切换时调用） */
     fun updateTooltip() {
@@ -139,40 +136,46 @@ class CommandFieldWithScriptButton(
         val dialog = ScriptPickerDialog(project, context)
         if (dialog.showAndGet()) {
             val command = dialog.getResultCommand()
-            textComponent.requestFocus()
-            if (textComponent is JBTextArea) {
+            val field = editorField
+            if (field != null) {
                 // 多行模式：在光标位置插入
-                val pos = textComponent.caretPosition
-                val before = textComponent.text.substring(0, pos)
-                val after = textComponent.text.substring(pos)
-                val insertPrefix = if (before.isNotEmpty() && !before.endsWith('\n')) "\n" else ""
-                val insertSuffix = if (after.isNotEmpty() && !after.startsWith('\n')) "\n" else ""
-                textComponent.text = before + insertPrefix + command + insertSuffix + after
-                val newCaret = pos + insertPrefix.length + command.length + insertSuffix.length
-                textComponent.caretPosition = newCaret.coerceIn(0, textComponent.text.length)
-            } else {
+                field.requestFocus()
+                insertIntoEditor(field, command)
+            } else if (singleField != null) {
                 // 单行模式：替换整个内容
-                textComponent.text = command
+                singleField.text = command
             }
         }
+    }
+
+    /** 在 EditorTextField 光标位置插入命令文本 */
+    private fun insertIntoEditor(field: EditorTextField, command: String) {
+        val doc: Document = field.document
+        val editor = field.editor
+        val pos = editor?.caretModel?.offset ?: doc.textLength
+        val before = doc.text.substring(0, pos)
+        val after = doc.text.substring(pos)
+        val insertPrefix = if (before.isNotEmpty() && !before.endsWith('\n')) "\n" else ""
+        val insertSuffix = if (after.isNotEmpty() && !after.startsWith('\n')) "\n" else ""
+        val insertText = insertPrefix + command + insertSuffix
+        WriteCommandAction.runWriteCommandAction(project) {
+            doc.insertString(pos, insertText)
+        }
+        val newCaret = (pos + insertText.length).coerceIn(0, doc.textLength)
+        editor?.caretModel?.moveToOffset(newCaret)
     }
 
     // ─── 全屏编辑 ────────────────────────────────────────────────
 
     private fun openFullscreen() {
         val title = fullscreenTitle ?: return
-        val currentText = textComponent.text
-        val currentFont = textComponent.font
+        val currentText = text
         val dialog = CommandFullscreenDialog(
             project = project,
             originalText = currentText,
-            sourceFont = currentFont,
             dialogTitle = title
         ) { newText ->
-            textComponent.text = newText
-            if (textComponent is JBTextArea) {
-                textComponent.caretPosition = 0
-            }
+            text = newText
         }
         dialog.show()
     }

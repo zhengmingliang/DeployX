@@ -9,6 +9,8 @@
     <li><b>⬇️ Download:</b> Right-click to download files/directories with a progress dialog; or drag remote entries from the tree to the project view to download directly</li>
     <li><b>🎯 Auto-map &amp; Remember:</b> First open auto-locates the remote directory by matching the current project path against configured mappings; each server's last-opened directory is remembered across sessions</li>
     <li>Persistent SFTP channel with auto-reconnect and automatic I/O retry. Accessible via right-click menu, <code>Alt+Shift+Z</code> quick menu, and the folder button in the DeployX operation tab. Full bilingual (English / 简体中文) support</li>
+    <li><b>📝 Script Editor Reuse:</b> Migrated all script/command editing UIs from Swing native components (<code>JBTextArea</code> + hand-written <code>LineNumberGutter</code>) to the IDEA platform <code>EditorTextField</code>, with syntax highlighting, line numbers, code folding, current-line highlight and automatic theme adaptation. Fixed Enter key triggering the OK button in dialogs, multi-line paste collapsing to one line, and Tab key being swallowed by focus traversal</li>
+    <li><b>🗑️ Removed LineNumberGutter:</b> Deleted the hand-written <code>LineNumberGutter.kt</code> — the platform editor's built-in gutter fully replaces it</li>
 </ul>
 
 <h3>v1.0.4 - SSH Key Export &amp; New Features</h3>
@@ -128,6 +130,8 @@
     <li><b>⬇️ 下载：</b>右键下载文件/目录（带进度对话框）；或从浏览器树拖拽文件到项目视图直接下载</li>
     <li><b>🎯 自动映射与记忆：</b>首次打开按当前项目路径匹配映射自动定位远程目录；每台服务器上次打开的目录跨会话记忆</li>
     <li>持久化 SFTP 通道复用 + 自动重连 + I/O 异常自动重试。入口：右键菜单、<code>Alt+Shift+Z</code> 快捷菜单、DeployX 操作 Tab 文件夹按钮。完整中英文双语支持</li>
+    <li><b>📝 脚本编辑器复用：</b>将所有脚本/命令编辑界面从 Swing 原生组件（<code>JBTextArea</code> + 手写 <code>LineNumberGutter</code>）迁移到 IDEA 平台 <code>EditorTextField</code>，获得语法高亮、行号、代码折叠、当前行高亮、主题自适应。修复了回车键触发对话框"确定"按钮、粘贴多行变一行、Tab 键被焦点切换拦截等问题</li>
+    <li><b>🗑️ 移除 LineNumberGutter：</b>删除手写的 <code>LineNumberGutter.kt</code>，平台编辑器内置 gutter 完全替代</li>
 </ul>
 
 <h3>v1.0.4 - SSH 密钥导出与新功能增强</h3>

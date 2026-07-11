@@ -4,6 +4,7 @@ import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.service.ScriptManager
+import com.alianga.idea.deploy.ui.ScriptEditorFactory
 import com.alianga.idea.deploy.ui.dialog.ScriptPickerDialog
 import com.alianga.idea.deploy.ui.dialog.ScriptRunDialog
 import com.alianga.idea.deploy.ui.settings.ScriptEditDialog
@@ -12,6 +13,7 @@ import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.ui.EditorTextField
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
@@ -51,7 +53,7 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
     private val tableModel = ScriptTableModel()
     private val table = JBTable(tableModel)
     private val previewTitle = JBLabel(DeployXBundle.message("script.tab.preview.selectFirst"))
-    private val previewArea = JBTextArea(8, 80)
+    private val previewArea: EditorTextField = ScriptEditorFactory.createViewer("", project)
 
     // 按钮引用（保留以便语言切换时刷新文案）
     private val refreshFilterButton = JButton(AllIcons.Actions.Refresh)
@@ -164,11 +166,6 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
     }
 
     private fun setupPreviewArea() {
-        previewArea.isEditable = false
-        previewArea.font = Font("Monospaced", Font.PLAIN, 12)
-        previewArea.lineWrap = true
-        previewArea.wrapStyleWord = true
-        previewArea.border = JBUI.Borders.empty(4)
         previewTitle.font = previewTitle.font.deriveFont(Font.BOLD)
     }
 
@@ -181,9 +178,7 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
         return JPanel(BorderLayout(4, 4)).apply {
             border = JBUI.Borders.emptyTop(8)
             add(header, BorderLayout.NORTH)
-            add(JBScrollPane(previewArea).apply {
-                horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
-            }, BorderLayout.CENTER)
+            add(previewArea, BorderLayout.CENTER)
         }
     }
 
