@@ -12,6 +12,7 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.TextBrowseFolderListener
 import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.openapi.ui.ComboBoxWithWidePopup
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
@@ -31,7 +32,7 @@ class MappingEditDialog(
 
     private val nameField = JBTextField()
     private val localDirField = TextFieldWithBrowseButton()
-    private val serverCombo = JComboBox<String>()
+    private val serverCombo = ComboBoxWithWidePopup<String>()
     private val remoteDirField = TextFieldWithBrowseButton()
     private val backupEnabledCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.enableBackup"))
     private val backupDirField = JBTextField()
@@ -78,9 +79,13 @@ class MappingEditDialog(
             else -> MappingConfig.generateId() // 新建时生成新ID
         }
 
+        // 先填充服务器下拉框，确保 DialogWrapper.init() / createCenterPanel() 布局时
+        // ComboBoxWithWidePopup 已经带有最长项和真实首选宽度，避免先按空列表算成很窄、
+        // 之后再 setPreferredSize 也改变不了父布局。
+        setupServerCombo()
+
         init()
 
-        setupServerCombo()
         setupLocalDirBrowser()
         setupRemoteDirBrowser()
 
@@ -136,9 +141,14 @@ class MappingEditDialog(
             }
         }
         
-        // 设置下拉列表宽度，足够显示最长的服务器名称，最小400px
-        serverCombo.prototypeDisplayValue = maxLengthText.padEnd(50, ' ')
-        serverCombo.preferredSize = Dimension(400, serverCombo.preferredSize.height)
+        // ComboBoxWithWidePopup 允许下拉弹层比输入框本身更宽，从而完整显示最长的
+        // 「服务器id - 名称」。prototypeDisplayValue 让系统按最长项计算首选宽度；
+        // 不再手动 setPreferredSize，否则 ComboBoxWithWidePopup.getMinimumPopupWidth()
+        // 会返回被改小的固定宽度，反而限制弹层自适应。
+        if (maxLengthText.isNotEmpty()) {
+            serverCombo.prototypeDisplayValue = maxLengthText
+            serverCombo.setMinLength(maxLengthText.length)
+        }
     }
 
     private fun setupLocalDirBrowser() {

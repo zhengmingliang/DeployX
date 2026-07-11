@@ -133,6 +133,7 @@ class DeployService {
             return
         }
 
+        val startTime = System.currentTimeMillis()
         groupLog(DeployXBundle.message(if (dryRun) "deploy.log.previewGroupHeader" else "deploy.log.uploadGroupHeader"))
         groupLog(DeployXBundle.message("deploy.log.server", server.displayAddress))
         groupLog(DeployXBundle.message("deploy.log.pushDirection"))
@@ -198,6 +199,13 @@ class DeployService {
                 )
             )
             results.add(resultWithReport)
+
+            // 仅在实际同步/推送（非 dry-run 预览）成功/失败后记录历史；预览不写历史
+            if (!dryRun) {
+                val duration = System.currentTimeMillis() - startTime
+                val status = if (resultWithReport.success) HistoryRecord.OperationStatus.SUCCESS else HistoryRecord.OperationStatus.FAILED
+                saveUploadGroupHistory(key, groupItems, resultWithReport, duration, status)
+            }
 
             if (!dryRun && !key.postCommand.isNullOrBlank()) {
                 val resolvedPostCommand = ScriptRefResolver.resolve(key.postCommand, server, key.remoteBaseDir)
@@ -292,6 +300,7 @@ class DeployService {
             dryRun = dryRun
         )
 
+        val startTime = System.currentTimeMillis()
         val syncResult = transferService.downloadFilesFrom(
             localBaseDir = key.localBaseDir,
             remoteBaseDir = key.remoteBaseDir,
@@ -302,6 +311,13 @@ class DeployService {
             progressCallback = progressCallback
         )
         results.add(syncResult)
+
+        // 仅在实际拉取（非 dry-run 预览）成功/失败后记录历史；预览不写历史
+        if (!dryRun) {
+            val duration = System.currentTimeMillis() - startTime
+            val status = if (syncResult.success) HistoryRecord.OperationStatus.SUCCESS else HistoryRecord.OperationStatus.FAILED
+            saveDownloadGroupHistory(key, groupItems, syncResult, duration, status)
+        }
     }
 
     /**
@@ -871,7 +887,46 @@ class DeployService {
     ): DeployResult {
         logCallback?.invoke(DeployXBundle.message("deploy.log.redeployHeader"))
         logCallback?.invoke(DeployXBundle.message("deploy.log.originalOperation", record.summary))
-        return deploy(record.toDeployRequest(), logCallback, progressCallback)
+        return when (record.type) {
+            HistoryRecord.OperationType.PULL -> redeployPull(record, logCallback, progressCallback)
+            else -> deploy(record.toDeployRequest(), logCallback, progressCallback)
+        }
+    }
+
+    /**
+     * 对「从服务器拉取」历史记录执行重新拉取（远程 → 本地）。
+     * 记录中 sourcePath=本地目标目录、targetPath=远程源目录，relativePaths 为远程相对路径。
+     */
+    private fun redeployPull(
+        record: HistoryRecord,
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+    ): DeployResult {
+        val server = ServerManager.getInstance().getServer(record.serverId)
+        if (server == null) {
+            return DeployResult(
+                success = false,
+                error = DeployXBundle.message("deploy.error.serverNotFound", record.serverId)
+            )
+        }
+        val options = SyncOptions(direction = SyncDirection.PULL)
+        val syncResult = transferService.downloadFilesFrom(
+            localBaseDir = record.sourcePath,
+            remoteBaseDir = record.targetPath,
+            relativePaths = record.relativePaths,
+            serverConfig = server,
+            options = options,
+            logCallback = logCallback,
+            progressCallback = progressCallback
+        )
+        return DeployResult(
+            success = syncResult.success,
+            transferredFiles = syncResult.transferredFiles,
+            totalSize = syncResult.totalSize,
+            duration = syncResult.duration,
+            error = syncResult.error,
+            logs = syncResult.output.lines().filter { it.isNotBlank() }
+        )
     }
 
     private fun buildReportGroup(
@@ -948,6 +1003,109 @@ class DeployService {
                 status = status,
                 backupDir = key.backupDir ?: "",
                 unzipDest = key.unzipDest ?: "",
+                excludePatterns = key.excludePatterns,
+                preCommand = key.preCommand ?: "",
+                postCommand = key.postCommand ?: "",
+                relativePaths = reportGroup?.relativePaths ?: emptyList(),
+                remotePaths = reportGroup?.remotePaths ?: emptyList(),
+                serverName = reportGroup?.serverName ?: "",
+                serverAddress = reportGroup?.serverAddress ?: "",
+                reportText = reportText
+            )
+        )
+    }
+
+    /**
+     * 保存「从服务器拉取」的历史记录（type = PULL）。
+     * 与 saveGroupHistory 对称：source/target 沿用统一约定（sourcePath=本地, targetPath=远程），
+     * 方向由 type 区分；报告 operationType 用 "PULL"，本地/远程目录按实际含义展示。
+     */
+    private fun saveDownloadGroupHistory(
+        key: DownloadGroupKey,
+        items: List<DownloadItem>,
+        syncResult: SyncResult,
+        duration: Long,
+        status: HistoryRecord.OperationStatus
+    ) {
+        val server = ServerManager.getInstance().getServer(key.serverId)
+        val reportGroup = if (server != null) {
+            buildReportGroup(
+                server = server,
+                sourceBaseDir = key.localBaseDir,
+                remoteBaseDir = key.remoteBaseDir,
+                localPaths = items.map { it.localPath },
+                relativePaths = items.map { it.relativePath },
+                success = status == HistoryRecord.OperationStatus.SUCCESS,
+                duration = duration,
+                totalSize = syncResult.totalSize,
+                output = syncResult.output,
+                transferredFileList = syncResult.transferredFileList
+            )
+        } else null
+        val reportText = reportGroup?.let {
+            UpdateReportFormatter.format(UpdateReport(operationType = "PULL", groups = listOf(it)))
+        } ?: ""
+        HistoryManager.getInstance().addRecord(
+            HistoryRecord(
+                type = HistoryRecord.OperationType.PULL,
+                sourcePath = key.localBaseDir,
+                serverId = key.serverId,
+                targetPath = key.remoteBaseDir,
+                fileCount = items.size,
+                fileSize = syncResult.totalSize,
+                duration = duration,
+                status = status,
+                excludePatterns = key.excludePatterns,
+                relativePaths = reportGroup?.relativePaths ?: emptyList(),
+                remotePaths = reportGroup?.remotePaths ?: emptyList(),
+                serverName = reportGroup?.serverName ?: "",
+                serverAddress = reportGroup?.serverAddress ?: "",
+                reportText = reportText
+            )
+        )
+    }
+
+    /**
+     * 保存「同步到服务器 / 推送到服务器」(upload-only) 的历史记录（type = UPLOAD）。
+     * 与 saveGroupHistory / saveDownloadGroupHistory 对称：source/target 沿用统一约定
+     * （sourcePath=本地, targetPath=远程，方向由 type 区分）；报告 operationType 用 "UPLOAD"。
+     * 仅由 !dryRun 的实际同步/推送路径调用，预览(dry-run)不会写历史。
+     */
+    private fun saveUploadGroupHistory(
+        key: UploadGroupKey,
+        items: List<UploadItem>,
+        syncResult: SyncResult,
+        duration: Long,
+        status: HistoryRecord.OperationStatus
+    ) {
+        val server = ServerManager.getInstance().getServer(key.serverId)
+        val reportGroup = if (server != null) {
+            buildReportGroup(
+                server = server,
+                sourceBaseDir = key.sourceBaseDir,
+                remoteBaseDir = key.remoteBaseDir,
+                localPaths = items.map { it.localPath },
+                relativePaths = items.map { it.relativePath },
+                success = status == HistoryRecord.OperationStatus.SUCCESS,
+                duration = duration,
+                totalSize = syncResult.totalSize,
+                output = syncResult.output,
+                transferredFileList = syncResult.transferredFileList
+            )
+        } else null
+        val reportText = reportGroup?.let {
+            UpdateReportFormatter.format(UpdateReport(operationType = "UPLOAD", groups = listOf(it)))
+        } ?: ""
+        HistoryManager.getInstance().addRecord(
+            HistoryRecord(
+                type = HistoryRecord.OperationType.UPLOAD,
+                sourcePath = key.sourceBaseDir,
+                serverId = key.serverId,
+                targetPath = key.remoteBaseDir,
+                fileCount = items.size,
+                fileSize = syncResult.totalSize,
+                duration = duration,
+                status = status,
                 excludePatterns = key.excludePatterns,
                 preCommand = key.preCommand ?: "",
                 postCommand = key.postCommand ?: "",

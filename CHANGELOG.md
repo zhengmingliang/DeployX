@@ -20,6 +20,9 @@
 - **rsync 拉取目录/映射根时文件数为 0**：修复「从服务器拉取」选中目录或映射根（相对路径为空）时，`--files-from` 列表为空条目，rsync 实际传输 0 个文件的问题（日志表现为 `[FILES-FROM]` 后无内容、`Number of regular files transferred: 0`）。根因：`DownloadItem.relativePath` 对目录/映射根场景为空，而 `--files-from` 模式无法处理空条目。现已拆分相对路径——空项走整目录递归拉取（普通 `rsync 远程源/ 本地目标`，自动只传差异文件），非空项仍走 `--files-from` 精确拉取，二者可混合并合并结果。SFTP 降级模式下空相对路径同样改为递归下载整个远程目录
 
 - **历史 Tab 展示空白**：修复侧边面板「历史」Tab 在工具窗口初次构建时因 `HistoryManager` 尚未就绪而加载到空列表、之后一直显示为空白（无任何内容）的问题。现改为：① 每次切换到「历史」Tab 时自动重新加载最新记录；② 列表为空时显示明确的占位提示「暂无历史记录」，替代原先令人困惑的空白界面
+- **「从服务器拉取」不记录历史**：修复「从服务器拉取」（双向同步的下载路径）执行后历史面板没有任何记录的问题。根因：`downloadBatch` / `processDownloadGroup` 只负责传输，从不调用 `HistoryManager.addRecord`，且 `HistoryRecord.OperationType` 没有拉取类型。现已新增 `PULL` 类型，并在拉取成功/失败后写入历史（仅实际拉取写，dry-run 预览不写），历史列表摘要对 PULL 显示「远程 → 本地」方向；历史「重新部署」对 PULL 记录改为执行「重新拉取」（远程 → 本地），更新报告 operationType 新增 `PULL` 渲染
+- **「同步到服务器 / 推送到服务器」不记录历史**：修复右键「同步到服务器」「推送到服务器」执行后历史面板没有记录的问题。根因：这两条路径走 `uploadBatch` → `processUploadGroup`，而历史写入只存在于 `deployBatch` 的 `processDeployGroup` 中。现已在 `processUploadGroup` 内新增 `saveUploadGroupHistory`（type = `UPLOAD`），仅在非 dry-run 的实际同步/推送成功或失败后写入历史；预览（dry-run）明确不写历史
+- **历史列表单击误跳转日志页**：修复在「历史」Tab 中单击某条记录会立即跳转到「日志」页签、无法单独选中的问题。根因：`addListSelectionListener` 在单击选中时就触发 `showHistoryDetail()`，其内部 `appendLog` 会切到日志 Tab。现改为 `MouseListener` 双击才查看详情并跳转，「日志」页签；单击仅做选中，不影响后续「重新部署 / 复制报告 / 填充配置」等操作
 
 ### 🛠 重构
 - **rsync 下载目录统一**：Windows 下 rsync 自动下载解压目录从 `~/.deployx/rsync-win/` 迁移至 `~/.deploy-x/rsync-win/`，与插件其他配置文件（`servers.json`、`.passwords.dat` 等）统一使用 `.deploy-x` 目录。首次访问时自动检测并迁移旧的 `.deployx/rsync-win/` 目录（若存在），用户无需手动操作
