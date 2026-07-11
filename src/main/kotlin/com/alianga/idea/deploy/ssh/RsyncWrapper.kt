@@ -1087,9 +1087,21 @@ class RsyncWrapper {
         val diagnosticPrefixes = listOf(
             "warning:", "error:", "note:", "info:",
             "failed to ", "could not ", "cannot ", "unable to ",
-            "permission denied", "connection ", "rsync:", "ssh:"
+            "permission denied", "connection ", "rsync:", "ssh:",
+            "mise: ", "using", "required", "run: ", "activate"
         )
         if (diagnosticPrefixes.any { trimmed.startsWith(it, ignoreCase = true) }) {
+            return false
+        }
+
+        // 排除包含 shell 执行标记的行（如 "$ <command>"）
+        if (trimmed.contains('$') || trimmed.contains('>')) {
+            return false
+        }
+
+        // 排除工具版本/路径输出（如 "/path/to/tool version x.y.z"）
+        if (trimmed.matches(Regex(".+\\s+v?\\d+\\.\\d+\\.\\d+.*$")) &&
+            !trimmed.contains('/') && !trimmed.contains('\\')) {
             return false
         }
 
