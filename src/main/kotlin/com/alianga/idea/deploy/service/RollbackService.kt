@@ -6,6 +6,7 @@ import com.alianga.idea.deploy.model.RollbackRecord
 import com.alianga.idea.deploy.model.RollbackResult
 import com.alianga.idea.deploy.ssh.SshConnection
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import java.io.ByteArrayOutputStream
 
@@ -18,6 +19,7 @@ import java.io.ByteArrayOutputStream
  * 3. 执行 tar 解压恢复
  * 4. 记录回滚历史
  */
+@Service(Service.Level.APP)
 class RollbackService {
 
     companion object {

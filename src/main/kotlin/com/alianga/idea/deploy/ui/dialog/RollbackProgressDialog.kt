@@ -43,6 +43,8 @@ class RollbackProgressDialog(
     }
     private val logList = mutableListOf<String>()
     private var result: RollbackResult? = null
+    // 在 EDT 线程中先获取好服务实例，避免在 SwingWorker 中获取失败
+    private val rollbackService = RollbackService.getInstance()
 
     init {
         title = DeployXBundle.message("rollback.progress.title")
@@ -162,17 +164,17 @@ class RollbackProgressDialog(
 
         object : SwingWorker<RollbackResult, Pair<Int, String>>() {
 
-            override fun doInBackground(): RollbackResult {
-                return RollbackService.getInstance().rollback(
-                    record = record,
-                    logCallback = { log ->
-                        publish(Pair(-1, log))
-                    },
-                    progressCallback = { progress, message ->
-                        publish(Pair(progress, message))
-                    }
-                )
+    override fun doInBackground(): RollbackResult {
+        return rollbackService.rollback(
+            record = record,
+            logCallback = { log ->
+                publish(Pair(-1, log))
+            },
+            progressCallback = { progress, message ->
+                publish(Pair(progress, message))
             }
+        )
+    }
 
             override fun process(chunks: List<Pair<Int, String>>) {
                 chunks.forEach { (progress, message) ->
