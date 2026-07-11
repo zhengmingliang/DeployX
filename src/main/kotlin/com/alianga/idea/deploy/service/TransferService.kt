@@ -3,6 +3,7 @@ package com.alianga.idea.deploy.service
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.model.ServerConfig
+import com.alianga.idea.deploy.model.SyncDirection
 import com.alianga.idea.deploy.model.SyncOptions
 import com.alianga.idea.deploy.model.SyncResult
 import com.alianga.idea.deploy.ssh.RsyncWrapper
@@ -64,6 +65,50 @@ class TransferService {
             when (chooseMethod(serverConfig, logCallback)) {
                 "rsync" -> rsyncWrapper.syncFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback)
                 "sftp" -> sftpClient.uploadFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback)
+                else -> SyncResult(false, error = "未知传输方式")
+            }
+        }
+    }
+
+    /**
+     * 从服务器下载文件到本地（PULL）。
+     * rsync 可用时使用 rsync pull，不可用时降级到 SFTP download。
+     */
+    fun download(
+        localPath: String,
+        remotePath: String,
+        serverConfig: ServerConfig,
+        options: SyncOptions = SyncOptions(direction = SyncDirection.PULL),
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+    ): SyncResult {
+        val pullOptions = options.copy(direction = SyncDirection.PULL)
+        return withRetry(logCallback) {
+            when (chooseMethod(serverConfig, logCallback)) {
+                "rsync" -> rsyncWrapper.pull(localPath, remotePath, serverConfig, pullOptions, logCallback, progressCallback)
+                "sftp" -> sftpClient.download(localPath, remotePath, serverConfig, pullOptions, logCallback, progressCallback)
+                else -> SyncResult(false, error = "未知传输方式")
+            }
+        }
+    }
+
+    /**
+     * 从服务器批量下载文件（使用相对路径列表）。
+     */
+    fun downloadFilesFrom(
+        localBaseDir: String,
+        remoteBaseDir: String,
+        relativePaths: List<String>,
+        serverConfig: ServerConfig,
+        options: SyncOptions = SyncOptions(direction = SyncDirection.PULL),
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+    ): SyncResult {
+        val pullOptions = options.copy(direction = SyncDirection.PULL)
+        return withRetry(logCallback) {
+            when (chooseMethod(serverConfig, logCallback)) {
+                "rsync" -> rsyncWrapper.pullFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, pullOptions, logCallback, progressCallback)
+                "sftp" -> sftpClient.downloadFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, pullOptions, logCallback, progressCallback)
                 else -> SyncResult(false, error = "未知传输方式")
             }
         }

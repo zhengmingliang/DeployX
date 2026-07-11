@@ -3,6 +3,7 @@ package com.alianga.idea.deploy.ssh
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.model.ServerConfig
+import com.alianga.idea.deploy.model.SyncDirection
 import com.alianga.idea.deploy.model.SyncOptions
 import com.alianga.idea.deploy.model.SyncResult
 import com.intellij.openapi.diagnostic.Logger
@@ -10,6 +11,7 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
+import java.util.*
 
 /**
  * rsync 命令封装 - 基于系统 rsync 实现增量同步
@@ -164,6 +166,119 @@ class RsyncWrapper {
     }
 
     /**
+     * 从服务器拉取文件到本地（PULL）
+     * @param localPath 本地目标路径
+     * @param remotePath 远程源路径
+     * @param serverConfig 服务器配置
+     * @param options 同步选项（direction 将被强制设置为 PULL）
+     * @param logCallback 实时日志回调
+     * @param progressCallback 进度回调
+     */
+    fun pull(
+        localPath: String,
+        remotePath: String,
+        serverConfig: ServerConfig,
+        options: SyncOptions = SyncOptions(direction = SyncDirection.PULL),
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((SyncProgress) -> Unit)? = null
+    ): SyncResult {
+        // 强制使用 PULL 方向
+        val pullOptions = options.copy(direction = SyncDirection.PULL)
+        val startTime = System.currentTimeMillis()
+
+        val auth = prepareAuthContext(serverConfig)
+        try {
+            // 确保本地目录存在
+            val localDir = File(localPath).parentFile
+            if (localDir != null && !localDir.exists()) {
+                localDir.mkdirs()
+            }
+
+            // 构建并执行 rsync 命令（buildRsyncCommand 会根据方向处理源和目标）
+            val cmd = buildRsyncCommand(localPath, remotePath, serverConfig, pullOptions, auth.commandPrefix)
+            val cmdStr = maskPassword(cmd).joinToString(" ")
+            LOG.info("Executing rsync pull: $cmdStr")
+            logCallback?.invoke("[CMD] PULL: $cmdStr")
+
+            val pb = ProcessBuilder(cmd).redirectErrorStream(true)
+            auth.environment.forEach { (k, v) -> pb.environment()[k] = v }
+            val process = pb.start()
+
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val outputBuilder = StringBuilder()
+            var totalSize = 0L
+            val transferredFileList = mutableListOf<String>()
+
+            // 读取输出并解析进度
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val currentLine = line ?: continue
+                outputBuilder.appendLine(currentLine)
+                logCallback?.invoke(currentLine)
+
+                val progress = parseProgressLine(currentLine)
+                if (progress != null) {
+                    progressCallback?.invoke(progress)
+                }
+
+                // 收集传输的文件列表
+                if (isFileTransferLine(currentLine)) {
+                    transferredFileList.add(currentLine.trim())
+                }
+
+                // 统计传输文件大小
+                if (currentLine.contains("sent ") && currentLine.contains("received ") &&
+                    currentLine.contains("bytes")
+                ) {
+                    val sentMatch = Regex("sent (\\d+) bytes").find(currentLine)
+                    val receivedMatch = Regex("received (\\d+) bytes").find(currentLine)
+                    if (sentMatch != null && receivedMatch != null) {
+                        totalSize = (sentMatch.groupValues[1].toLongOrNull() ?: 0L) +
+                                (receivedMatch.groupValues[1].toLongOrNull() ?: 0L)
+                    }
+                }
+            }
+
+            val exitCode = process.waitFor()
+            val duration = System.currentTimeMillis() - startTime
+
+            return if (exitCode == 0) {
+                logCallback?.invoke(DeployXBundle.message("ssh.rsync.pullCompleted", duration))
+                SyncResult(
+                    success = true,
+                    transferredFiles = transferredFileList.size,
+                    transferredFileList = transferredFileList,
+                    totalSize = totalSize,
+                    duration = duration,
+                    output = outputBuilder.toString()
+                )
+            } else {
+                val errMsg = DeployXBundle.message("ssh.rsync.pullFailed", exitCode)
+                logCallback?.invoke("[ERROR] $errMsg")
+                SyncResult(
+                    success = false,
+                    transferredFiles = transferredFileList.size,
+                    transferredFileList = transferredFileList,
+                    duration = duration,
+                    error = errMsg,
+                    output = outputBuilder.toString()
+                )
+            }
+        } catch (e: Exception) {
+            LOG.error("rsync pull execution failed", e)
+            val errMsg = DeployXBundle.message("ssh.rsync.pullException", e.message ?: "")
+            logCallback?.invoke("[ERROR] $errMsg")
+            return SyncResult(
+                success = false,
+                duration = System.currentTimeMillis() - startTime,
+                error = errMsg
+            )
+        } finally {
+            auth.cleanup()
+        }
+    }
+
+    /**
      * 使用 rsync --files-from 执行批量上传。
      * relativePaths 必须是 sourceBaseDir 下的相对路径；目录项建议以 / 结尾。
      */
@@ -277,6 +392,207 @@ class RsyncWrapper {
     }
 
     /**
+     * 使用 rsync --files-from 执行批量拉取（从远程到本地）。
+     *
+     * relativePaths 中：
+     * - 非空项：remoteBaseDir 下的相对路径，使用 --files-from 精确拉取；
+     * - 空字符串项：表示“映射根目录 / 整目录”（例如直接对映射根目录或目录发起拉取）。
+     *   此时不再走 --files-from（空条目会让 rsync 实际传输 0 个文件），而是执行一次
+     *   整目录递归拉取——rsync 会自动只传输与本地存在差异的文件，满足“增量拉取差异文件”的诉求。
+     */
+    fun pullFilesFrom(
+        localBaseDir: String,
+        remoteBaseDir: String,
+        relativePaths: List<String>,
+        serverConfig: ServerConfig,
+        options: SyncOptions = SyncOptions(direction = SyncDirection.PULL),
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((SyncProgress) -> Unit)? = null
+    ): SyncResult {
+        // 强制使用 PULL 方向
+        val pullOptions = options.copy(direction = SyncDirection.PULL)
+        if (relativePaths.isEmpty()) {
+            return SyncResult(false, error = DeployXBundle.message("ssh.rsync.filesFromEmpty"))
+        }
+
+        // 拆分：空相对路径（目录 / 映射根）→ 整目录递归拉取；非空 → --files-from 精确拉取
+        val (dirPaths, filePaths) = relativePaths.partition { it.isBlank() }
+
+        // 纯整目录拉取
+        if (filePaths.isEmpty()) {
+            return pullWholeDirectory(localBaseDir, remoteBaseDir, serverConfig, pullOptions, logCallback, progressCallback)
+        }
+
+        // 纯精确拉取（与历史行为一致）
+        if (dirPaths.isEmpty()) {
+            return runPullFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, pullOptions, logCallback, progressCallback)
+        }
+
+        // 混合：先整目录递归拉取，再对指定文件精确拉取，最后合并结果
+        val dirResult = pullWholeDirectory(localBaseDir, remoteBaseDir, serverConfig, pullOptions, logCallback, progressCallback)
+        val fileResult = runPullFilesFrom(localBaseDir, remoteBaseDir, filePaths, serverConfig, pullOptions, logCallback, progressCallback)
+        return mergeSyncResults(listOf(dirResult, fileResult), logCallback)
+    }
+
+    /**
+     * 整目录递归拉取（从远程到本地）：直接用普通 rsync 递归传输整个映射根目录，
+     * rsync 会按大小/修改时间只传输与本地存在差异的文件。远程源带尾斜杠（仅传目录内容），
+     * 本地目标为映射根目录，避免把远程根目录本身嵌套到本地根目录下。
+     */
+    private fun pullWholeDirectory(
+        localBaseDir: String,
+        remoteBaseDir: String,
+        serverConfig: ServerConfig,
+        pullOptions: SyncOptions,
+        logCallback: ((String) -> Unit)?,
+        progressCallback: ((SyncProgress) -> Unit)?
+    ): SyncResult {
+        logCallback?.invoke(
+            DeployXBundle.message(
+                "ssh.rsync.pullWholeDir",
+                "${serverConfig.user}@${serverConfig.host}:${remoteBaseDir.trimEnd('/')}/",
+                localBaseDir
+            )
+        )
+        // remoteBaseDir 末尾补斜杠：rsync 仅传目录内容（而非目录本身），与本地映射根目录对齐
+        return pull(localBaseDir, remoteBaseDir + "/", serverConfig, pullOptions, logCallback, progressCallback)
+    }
+
+    /**
+     * [pullFilesFrom] 的内部实现：使用 --files-from 精确拉取非空相对路径列表。
+     */
+    private fun runPullFilesFrom(
+        localBaseDir: String,
+        remoteBaseDir: String,
+        filePaths: List<String>,
+        serverConfig: ServerConfig,
+        pullOptions: SyncOptions,
+        logCallback: ((String) -> Unit)?,
+        progressCallback: ((SyncProgress) -> Unit)?
+    ): SyncResult {
+        val startTime = System.currentTimeMillis()
+        val auth = prepareAuthContext(serverConfig)
+        // 临时文件存放要同步的相对路径列表（NUL 分隔，配合 --from0）。
+        // 改用 --files-from=FILE 而非 --files-from=- 通过 stdin 传入，
+        // 避免 Windows 下与 cygwin rsync 的 stdin 交互出现编码/阻塞问题；
+        // 使用完毕后自动删除。
+        val filesFromTemp = File.createTempFile("deployx_files_from_pull_", ".txt").apply { deleteOnExit() }
+        try {
+            filesFromTemp.outputStream().use { output ->
+                filePaths.forEach { path ->
+                    output.write(path.toByteArray(StandardCharsets.UTF_8))
+                    output.write(0)
+                }
+                output.flush()
+            }
+
+            val localBase = localBaseDir.trimEnd('/') + "/"
+            val remoteBase = remoteBaseDir.trimEnd('/') + "/"
+
+            // 确保本地目录存在
+            val baseDir = File(localBase)
+            if (!baseDir.exists()) {
+                baseDir.mkdirs()
+            }
+
+            val cmd = buildRsyncFilesFromCommand(
+                localBase, remoteBase, serverConfig, pullOptions, auth.commandPrefix, filesFromTemp
+            )
+            val cmdStr = maskPassword(cmd).joinToString(" ")
+            LOG.info("Executing rsync pull files-from: $cmdStr")
+            logCallback?.invoke("[CMD] PULL files-from: $cmdStr")
+            logCallback?.invoke("[FILES-FROM]")
+            filePaths.forEach { logCallback?.invoke("  $it") }
+
+            val pb = ProcessBuilder(cmd).redirectErrorStream(true)
+            auth.environment.forEach { (k, v) -> pb.environment()[k] = v }
+            val process = pb.start()
+
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val outputBuilder = StringBuilder()
+            var totalSize = 0L
+            val transferredFileList = mutableListOf<String>()
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val currentLine = line ?: continue
+                outputBuilder.appendLine(currentLine)
+                logCallback?.invoke(currentLine)
+
+                val progress = parseProgressLine(currentLine)
+                if (progress != null) {
+                    progressCallback?.invoke(progress)
+                }
+
+                // 收集传输的文件列表
+                if (isFileTransferLine(currentLine)) {
+                    transferredFileList.add(currentLine.trim())
+                }
+
+                if (currentLine.contains("sent ") && currentLine.contains("received ") && currentLine.contains("bytes")) {
+                    val sentMatch = Regex("sent (\\d+) bytes").find(currentLine)
+                    val receivedMatch = Regex("received (\\d+) bytes").find(currentLine)
+                    if (sentMatch != null && receivedMatch != null) {
+                        totalSize = (sentMatch.groupValues[1].toLongOrNull() ?: 0L) +
+                                (receivedMatch.groupValues[1].toLongOrNull() ?: 0L)
+                    }
+                }
+            }
+
+            val exitCode = process.waitFor()
+            val duration = System.currentTimeMillis() - startTime
+            return if (exitCode == 0) {
+                logCallback?.invoke(DeployXBundle.message("ssh.rsync.pullFilesFromCompleted", duration))
+                SyncResult(
+                    success = true,
+                    transferredFiles = transferredFileList.size,
+                    transferredFileList = transferredFileList,
+                    totalSize = totalSize,
+                    duration = duration,
+                    output = outputBuilder.toString()
+                )
+            } else {
+                val errMsg = DeployXBundle.message("ssh.rsync.pullFilesFromFailed", exitCode)
+                logCallback?.invoke("[ERROR] $errMsg")
+                SyncResult(false, transferredFiles = transferredFileList.size, transferredFileList = transferredFileList, duration = duration, error = errMsg, output = outputBuilder.toString())
+            }
+        } catch (e: Exception) {
+            LOG.error("rsync pull files-from execution failed", e)
+            val errMsg = DeployXBundle.message("ssh.rsync.pullFilesFromException", e.message ?: "")
+            logCallback?.invoke("[ERROR] $errMsg")
+            return SyncResult(false, duration = System.currentTimeMillis() - startTime, error = errMsg)
+        } finally {
+            runCatching { filesFromTemp.delete() }
+            auth.cleanup()
+        }
+    }
+
+    /**
+     * 合并多个 [SyncResult]（整目录拉取 + 精确文件拉取），用于混合场景。
+     */
+    private fun mergeSyncResults(results: List<SyncResult>, logCallback: ((String) -> Unit)?): SyncResult {
+        if (results.isEmpty()) {
+            return SyncResult(false, error = DeployXBundle.message("ssh.rsync.filesFromEmpty"))
+        }
+        val success = results.all { it.success }
+        val transferredFiles = results.sumOf { it.transferredFiles }
+        val transferredFileList = results.flatMap { it.transferredFileList }
+        val totalSize = results.sumOf { it.totalSize }
+        val duration = results.maxOfOrNull { it.duration } ?: 0L
+        val errors = results.mapNotNull { it.error }
+        val output = results.joinToString("\n") { it.output }
+        return SyncResult(
+            success = success,
+            transferredFiles = transferredFiles,
+            transferredFileList = transferredFileList,
+            totalSize = totalSize,
+            duration = duration,
+            error = if (errors.isEmpty()) null else errors.joinToString("; "),
+            output = output,
+            attempts = results.maxOfOrNull { it.attempts } ?: 1
+        )
+    }
+
+    /**
      * 判断当前是否运行在 Windows 环境下。
      * Windows 下的 cygwin rsync 需要对路径和命令做特殊处理：
      *  - 本地路径要转换为 /cygdrive/<drive>/... 形式，否则盘符 `C:` 会被 rsync 误识别为远程主机；
@@ -357,13 +673,18 @@ class RsyncWrapper {
             cmd.add("--delete")
         }
 
-        // 源路径（注意：rsync 中 /path/dir 表示上传目录本身，/path/dir/ 表示只上传目录内容）
-        // Windows 下需转换为 Cygwin 风格路径，否则盘符 `C:` 会被 rsync 误识别为远程主机
-        val source = toCygwinPath(localPath).trimEnd('/')
+        // 源/目标路径：PULL 时远程在前、本地在后（从服务器拉取到本地）；否则本地在前、远程在后（上传）。
+        // Windows 下本地路径需转换为 Cygwin 风格路径，否则盘符 `C:` 会被 rsync 误识别为远程主机。
+        // 注意：rsync 中 /path/dir（无尾斜杠）表示同步目录本身，/path/dir/ 表示只同步目录内容。
+        val localArg = toCygwinPath(localPath).trimEnd('/')
+        val remoteArg = "${serverConfig.user}@${serverConfig.host}:$remotePath"
+        val (source, dest) = if (options.direction == SyncDirection.PULL) {
+            remoteArg to localArg
+        } else {
+            localArg to remoteArg
+        }
         cmd.add(source)
-
-        // 目标路径
-        cmd.add("${serverConfig.user}@${serverConfig.host}:$remotePath")
+        cmd.add(dest)
 
         return cmd
     }
@@ -420,9 +741,18 @@ class RsyncWrapper {
         if (options.dryRun) cmd.add("--dry-run")
         if (options.deleteRemote) cmd.add("--delete")
 
-        // Windows 下需转换为 Cygwin 风格路径，否则盘符 `C:` 会被 rsync 误识别为远程主机
-        cmd.add(toCygwinPath(sourceBaseDir).trimEnd('/') + "/")
-        cmd.add("${serverConfig.user}@${serverConfig.host}:${remoteBaseDir.trimEnd('/')}/")
+        // 源/目标路径：PULL 时远程在前、本地在后（从服务器拉取到本地）；否则本地在前、远程在后（上传）。
+        // --files-from 中的相对路径始终相对于“源”目录解析。
+        // Windows 下本地路径需转换为 Cygwin 风格路径，否则盘符 `C:` 会被 rsync 误识别为远程主机。
+        val localArg = toCygwinPath(sourceBaseDir).trimEnd('/') + "/"
+        val remoteArg = "${serverConfig.user}@${serverConfig.host}:${remoteBaseDir.trimEnd('/')}/"
+        val (source, dest) = if (options.direction == SyncDirection.PULL) {
+            remoteArg to localArg
+        } else {
+            localArg to remoteArg
+        }
+        cmd.add(source)
+        cmd.add(dest)
         return cmd
     }
 

@@ -24,6 +24,7 @@ DeployX 是一个 JetBrains IntelliJ IDEA 插件，用于在 IDE 内完成本地
   - 支持 `AUTO` / `RSYNC_ONLY` / `SFTP_ONLY` 三种传输模式
   - 基于系统 `rsync` 进行增量传输；rsync 不可用时可自动降级为 JSch SFTP
   - 支持上传文件、目录、多文件批量上传
+  - 支持**双向同步（从服务器拉取）**：本地与远程文件增量双向同步，自动合并差异；可「从服务器拉取」（Pull from Server）将远程与本地不同的文件拉取到本地，rsync 模式按大小/修改时间只传输差异文件，SFTP 降级时递归下载整个远程目录
   - 多文件上传使用 `rsync --files-from` 合并传输，并保持相对路径
   - 上传目录时会上传目录本身，而不是仅上传目录内容
   - `Sync to Server` / `Quick Push to Server` 为 upload-only，默认不执行备份/解压/前后置命令
@@ -57,6 +58,7 @@ DeployX 是一个 JetBrains IntelliJ IDEA 插件，用于在 IDE 内完成本地
 
 - **快捷操作菜单**
   - 支持 `Alt+Shift+Z` 快捷呼出 DeployX 操作菜单，无需右键即可快速执行常用操作
+  - `Alt+Shift+Z` 快捷菜单包含：Deploy（完整部署）、Sync to Server（同步上传）、Quick Push（快速推送）、Preview Sync（预览同步）、**Pull from Server（从服务器拉取）**、Open SSH Terminal（打开终端）
   - 丰富的快捷键支持：
     - `Alt+Shift+D` / `Alt+Shift+2`：Deploy（完整部署）
     - `Ctrl+Alt+Y`：Sync to Server（同步上传）
@@ -148,7 +150,7 @@ DeployX/
 生成的插件包位于：
 
 ```text
-build/distributions/DeployX-1.0.1.zip
+build/distributions/DeployX-1.0.4.zip
 ```
 
 ### 在沙箱 IDE 中运行
@@ -173,7 +175,7 @@ build/distributions/DeployX-1.0.1.zip
 4. 选择：
 
 ```text
-build/distributions/DeployX-1.0.1.zip
+build/distributions/DeployX-1.0.4.zip
 ```
 
 5. 重启 IDE
@@ -236,7 +238,7 @@ DeployX
 
 包含三个 Tab：
 
-- **操作**：手动输入本地文件、远程目录并执行预览/部署/快速推送
+- **操作**：手动输入本地文件、远程目录并执行预览/部署/快速推送；也可通过「从服务器拉取」将远程差异文件拉取到本地
 - **日志**：实时查看 rsync/SFTP 命令和上传进度，内部包含 `全部` 与按服务器拆分的日志子 Tab
 - **历史**：查看历史记录并快速重新部署
 
@@ -254,6 +256,7 @@ DeployX → Sync to Server
 DeployX → Quick Push to Server
 DeployX → Deploy (Backup + Upload + Unzip)
 DeployX → Preview Sync
+DeployX → Pull from Server (Download from Server)
 ```
 
 当同一路径匹配多个服务器映射时，会弹出服务器选择对话框。
@@ -335,3 +338,16 @@ IDE 持久化设置会写入 IntelliJ 配置目录中的 `FileSyncTool.xml`。
 4. 上传目录时不会自动追加尾部 `/`，因此会上传目录本身。
 5. 服务器密码通过 IntelliJ `PasswordSafe` 加密存储，迁移到其他机器时需重新配置密码（`servers.json` 中不含密码）。
 6. 旧版本升级后，`servers.json` 中的明文密码会在首次启动时自动迁移到 PasswordSafe，原明文会被清空。
+
+## 更新日志
+
+### v1.0.4
+
+- **双向同步（从服务器拉取）**：新增本地与远程文件的双向增量同步，自动合并差异。右键或 `Alt+Shift+Z` 快捷菜单的「从服务器拉取」，可将远程与本地不同的文件拉取到本地；rsync 按大小/修改时间只传输差异文件，SFTP 降级时递归下载整个远程目录
+- **rsync 拉取方向反转修复**：「从服务器拉取」rsync 模式原误把本地当源、远程当目标（实为上传），现按方向动态交换源/目标
+- **拉取日志优化**：下载分组改用独立「从服务器拉取分组」标题，明确打印方向、远程源目录与本地目标目录
+- **Alt+Shift+Z 菜单补充「从服务器拉取」**：快捷菜单已加入该入口
+- **rsync 拉取目录/映射根修复**：选中目录或映射根（相对路径为空）时原传输 0 文件，现空项走整目录递归拉取，非空项仍走 `--files-from`
+- **历史 Tab 空白修复**：切换至历史 Tab 时自动重新加载最新记录，列表为空时显示「暂无历史记录」占位
+
+> 完整更新日志见 [CHANGELOG.md](CHANGELOG.md)。

@@ -140,6 +140,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val historyExportReportButton = JButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download)
     private val historyClearButton = JButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Vcs.History)
 
+    /** 历史列表为空时的占位提示（替代原先的空白，明确告知用户“暂无记录”） */
+    private val historyEmptyLabel = JBLabel(DeployXBundle.message("toolwindow.history.empty"), SwingConstants.CENTER)
+    /** 历史面板的卡片布局：有记录显示列表，无记录显示占位提示 */
+    private val historyCardLayout = CardLayout()
+    private lateinit var historyCardPanel: JPanel
+
     // Tab 面板
     private val tabbedPane = JBTabbedPane()
 
@@ -270,9 +276,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(Box.createHorizontalStrut(8))
             add(historyClearButton)
         }
+        historyCardPanel = JPanel(historyCardLayout).apply {
+            add(JBScrollPane(historyList), "list")
+            add(historyEmptyLabel, "empty")
+        }
         val historyPanel = JPanel(BorderLayout()).apply {
             add(historyButtonPanel, BorderLayout.NORTH)
-            add(JBScrollPane(historyList), BorderLayout.CENTER)
+            add(historyCardPanel, BorderLayout.CENTER)
         }
 
         // ===== 脚本面板 =====
@@ -288,6 +298,14 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         setContent(tabbedPane)
         setToolbar(toolbar.component)
+
+        // 切换到「历史」Tab 时重新加载，确保展示最新记录（避免工具窗口初次构建时
+        // HistoryManager 尚未就绪导致列表一直为空、显示空白的问题）
+        tabbedPane.addChangeListener {
+            if (tabbedPane.selectedComponent === historyPanel) {
+                refreshHistory()
+            }
+        }
     }
 
     /**
@@ -336,6 +354,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         historyCopyReportButton.text = DeployXBundle.message("toolwindow.history.copyReport")
         historyExportReportButton.text = DeployXBundle.message("toolwindow.history.exportReport")
         historyClearButton.text = DeployXBundle.message("toolwindow.history.clear")
+        historyEmptyLabel.text = DeployXBundle.message("toolwindow.history.empty")
 
         // Tab 标题（operation=0, log=1, history=2, script=3）
         if (tabbedPane.tabCount >= 4) {
@@ -401,6 +420,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         for (record in historyRecords) {
             historyListModel.addElement(record.summary)
         }
+        // 根据是否有记录切换卡片：有记录显示列表，无记录显示占位提示
+        historyCardLayout.show(historyCardPanel, if (historyRecords.isEmpty()) "empty" else "list")
     }
 
     private fun showHistoryDetail() {
@@ -626,6 +647,42 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     val successCount = results.count { it.success }
                     progressBar.value = 100
                     progressLabel.text = DeployXBundle.message("toolwindow.progress.batchPreviewComplete", successCount, results.size)
+                }
+            }
+        })
+    }
+
+    /**
+     * 公开方法：供右键菜单 Action 调用 files-from 批量下载。
+     */
+    fun executeDownloadBatch(items: List<DownloadItem>) {
+        if (items.isEmpty()) {
+            appendLog(DeployXBundle.message("toolwindow.log.noFilesToDownload"))
+            return
+        }
+        appendLog(DeployXBundle.message("toolwindow.log.batchDownloadStart", items.size))
+        progressBar.value = 0
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDownloading")
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Downloading...", true) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.text = "Batch downloading ${items.size} item(s)..."
+                val results = deployService.downloadBatch(
+                    items,
+                    serverLogCallback = { serverId, line -> appendLog(serverId, line) },
+                    progressCallback = { progress ->
+                        SwingUtilities.invokeLater {
+                            progressBar.value = progress.percentage.coerceIn(0, 100)
+                            progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
+                        }
+                    }
+                )
+                SwingUtilities.invokeLater {
+                    val successCount = results.count { it.success }
+                    progressBar.value = 100
+                    progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDownloadComplete", successCount, results.size)
+                    refreshHistory()
+                    notifyTransferResult(successCount, results.size)
                 }
             }
         })
