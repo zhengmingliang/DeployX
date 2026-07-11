@@ -1,7 +1,8 @@
 <!--LANG:EN-->
 <h2> Changelog</h2>
-<h3>v1.0.5 - Remote File Browser</h3>
+<h3>v1.0.5 - Remote File Browser & Rollback</h3>
 <ul>
+    <li><b>🔄 Deployment Rollback:</b> One-click rollback to previous version for mappings with backup enabled. Rollback button appears in history for deploy records with backups, with full confirmation dialog and progress tracking. All rollback operations are logged in history with full reports</li>
     <li><b>📂 Remote File Browser:</b> Browse remote server file systems in a sidebar tree (<code>DeployX Remote</code> tool window, right side dock). All operations are non-modal — browse remote files while editing local projects</li>
     <li><b>👀 View:</b> Lazy-loaded directory tree with file size, modification time and icons; switch servers, path navigation with per-server history (up to 20 entries, jump / delete individual / clear all), create/delete directories, refresh</li>
     <li><b>📝 Edit:</b> Double-click a remote text file to open it in the IDE main editor with full syntax highlighting; <code>Ctrl+S</code> automatically writes changes back to the remote server; files over 5MB are rejected with a download suggestion</li>
@@ -11,6 +12,7 @@
     <li>Persistent SFTP channel with auto-reconnect and automatic I/O retry. Accessible via right-click menu, <code>Alt+Shift+Z</code> quick menu, and the folder button in the DeployX operation tab. Full bilingual (English / 简体中文) support</li>
     <li><b>📝 Script Editor Reuse:</b> Migrated all script/command editing UIs from Swing native components (<code>JBTextArea</code> + hand-written <code>LineNumberGutter</code>) to the IDEA platform <code>EditorTextField</code>, with syntax highlighting, line numbers, code folding, current-line highlight and automatic theme adaptation. Fixed Enter key triggering the OK button in dialogs, multi-line paste collapsing to one line, and Tab key being swallowed by focus traversal</li>
     <li><b>🗑️ Removed LineNumberGutter:</b> Deleted the hand-written <code>LineNumberGutter.kt</code> — the platform editor's built-in gutter fully replaces it</li>
+    <li><b>🔐 SSH Key Permission Fix:</b> Fixed key authentication failing in file sync/deploy with <code>Permissions 0644 for 'xxx' are too open</code> when terminal works fine. Root cause: the terminal uses JSch (doesn't check file permissions), while rsync uses system ssh (OpenSSH enforces strict key permissions). Fix: auto-detects overly-permissive key files, creates a temp copy with correct <code>0600</code> permissions, uses it for transfer, then cleans up. Users don't need to manually fix key file permissions anymore</li>
 </ul>
 
 <h3>v1.0.4 - SSH Key Export &amp; New Features</h3>
@@ -121,8 +123,9 @@
 
 <!--LANG:ZH-->
 <h2> 更新日志</h2>
-<h3>v1.0.5 - 远程文件浏览器</h3>
+<h3>v1.0.5 - 远程文件浏览器与部署回滚</h3>
 <ul>
+    <li><b>🔄 部署回滚：</b>对启用了备份的映射支持一键回滚到之前的版本。历史记录中带有备份的部署会显示回滚按钮，包含完整的确认对话框和执行进度追踪。所有回滚操作都记录在历史中并生成完整报告</li>
     <li><b>📂 远程文件浏览器：</b>在 IDE 侧边栏（<code>DeployX Remote</code> 工具窗口，右侧停靠）以树形结构浏览远程服务器文件系统，非模态窗口不影响本地项目编辑</li>
     <li><b>👀 查看：</b>懒加载目录树，显示文件大小/修改时间/图标；切换服务器、路径导航（每服务器最多 20 条历史，可跳转/删除单条/清空）、新建/删除目录、刷新</li>
     <li><b>📝 编辑：</b>双击远程文本文件直接在 IDE 主编辑器中打开，完整语法高亮；<code>Ctrl+S</code> 自动写回远程服务器；超过 5MB 文件拒绝打开并提示改用下载</li>
@@ -132,6 +135,7 @@
     <li>持久化 SFTP 通道复用 + 自动重连 + I/O 异常自动重试。入口：右键菜单、<code>Alt+Shift+Z</code> 快捷菜单、DeployX 操作 Tab 文件夹按钮。完整中英文双语支持</li>
     <li><b>📝 脚本编辑器复用：</b>将所有脚本/命令编辑界面从 Swing 原生组件（<code>JBTextArea</code> + 手写 <code>LineNumberGutter</code>）迁移到 IDEA 平台 <code>EditorTextField</code>，获得语法高亮、行号、代码折叠、当前行高亮、主题自适应。修复了回车键触发对话框"确定"按钮、粘贴多行变一行、Tab 键被焦点切换拦截等问题</li>
     <li><b>🗑️ 移除 LineNumberGutter：</b>删除手写的 <code>LineNumberGutter.kt</code>，平台编辑器内置 gutter 完全替代</li>
+    <li><b>🔐 SSH 密钥权限自动修复：</b>修复使用密钥认证的服务器在终端能正常连接，但文件同步/部署时报 <code>Permissions 0644 for 'xxx' are too open</code> 的问题。根因：终端使用 JSch 库（不检查文件权限），rsync 使用系统 ssh（OpenSSH 强制密钥权限严格）。修复方案：自动检测权限过松的密钥文件，创建权限为 <code>0600</code> 的临时副本用于传输，传输完成后自动清理。用户无需手动修改密钥文件权限即可正常部署</li>
 </ul>
 
 <h3>v1.0.4 - SSH 密钥导出与新功能增强</h3>

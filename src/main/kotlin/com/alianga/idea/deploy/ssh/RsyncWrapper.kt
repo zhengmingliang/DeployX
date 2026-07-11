@@ -77,7 +77,7 @@ class RsyncWrapper {
             }
 
             // 构建 rsync 命令
-            val cmd = buildRsyncCommand(localPath, remotePath, serverConfig, options, auth.commandPrefix)
+            val cmd = buildRsyncCommand(localPath, remotePath, serverConfig, options, auth.commandPrefix, auth.keyFile)
             val cmdStr = maskPassword(cmd).joinToString(" ")
             LOG.info("Executing rsync: ${maskPassword(cmd).joinToString(" ")}")
             logCallback?.invoke("[CMD] $cmdStr")
@@ -195,7 +195,7 @@ class RsyncWrapper {
             }
 
             // 构建并执行 rsync 命令（buildRsyncCommand 会根据方向处理源和目标）
-            val cmd = buildRsyncCommand(localPath, remotePath, serverConfig, pullOptions, auth.commandPrefix)
+            val cmd = buildRsyncCommand(localPath, remotePath, serverConfig, pullOptions, auth.commandPrefix, auth.keyFile)
             val cmdStr = maskPassword(cmd).joinToString(" ")
             LOG.info("Executing rsync pull: $cmdStr")
             logCallback?.invoke("[CMD] PULL: $cmdStr")
@@ -321,7 +321,7 @@ class RsyncWrapper {
             }
 
             val cmd = buildRsyncFilesFromCommand(
-                sourceBase, remoteBase, serverConfig, options, auth.commandPrefix, filesFromTemp
+                sourceBase, remoteBase, serverConfig, options, auth.commandPrefix, auth.keyFile, filesFromTemp
             )
             val cmdStr = maskPassword(cmd).joinToString(" ")
             LOG.info("Executing rsync files-from: $cmdStr")
@@ -496,7 +496,7 @@ class RsyncWrapper {
             }
 
             val cmd = buildRsyncFilesFromCommand(
-                localBase, remoteBase, serverConfig, pullOptions, auth.commandPrefix, filesFromTemp
+                localBase, remoteBase, serverConfig, pullOptions, auth.commandPrefix, auth.keyFile, filesFromTemp
             )
             val cmdStr = maskPassword(cmd).joinToString(" ")
             LOG.info("Executing rsync pull files-from: $cmdStr")
@@ -622,13 +622,15 @@ class RsyncWrapper {
     /**
      * 构建 rsync 命令参数
      * @param commandPrefix 认证相关的前缀命令（sshpass 或为空，由 [prepareAuthContext] 决定）
+     * @param keyFile 密钥文件路径（来自 AuthContext，可能是权限修复后的临时文件）
      */
     private fun buildRsyncCommand(
         localPath: String,
         remotePath: String,
         serverConfig: ServerConfig,
         options: SyncOptions,
-        commandPrefix: List<String>
+        commandPrefix: List<String>,
+        keyFile: String? = null
     ): List<String> {
         val settings = FileSyncSettings.getInstance()
         val rsyncPath = settings.rsyncPath.ifEmpty { "rsync" }
@@ -652,7 +654,7 @@ class RsyncWrapper {
         }
 
         // SSH 配置
-        val sshOpts = buildSshOptions(serverConfig)
+        val sshOpts = buildSshOptions(serverConfig, keyFile)
         cmd.add("-e")
         // Windows 下 cygwin rsync 会对 -e 后的值按空格重新拆分，
         // 用引号整体包裹 ssh 命令，避免被错误拆分。
@@ -692,6 +694,7 @@ class RsyncWrapper {
     /**
      * 构建 --files-from 模式的 rsync 命令参数
      * @param commandPrefix 认证相关的前缀命令（sshpass 或为空，由 [prepareAuthContext] 决定）
+     * @param keyFile 密钥文件路径（来自 AuthContext，可能是权限修复后的临时文件）
      * @param filesFromFile 存放要同步的相对路径列表的临时文件（NUL 分隔，配合 --from0）
      */
     private fun buildRsyncFilesFromCommand(
@@ -700,6 +703,7 @@ class RsyncWrapper {
         serverConfig: ServerConfig,
         options: SyncOptions,
         commandPrefix: List<String>,
+        keyFile: String? = null,
         filesFromFile: File
     ): List<String> {
         val settings = FileSyncSettings.getInstance()
@@ -729,7 +733,7 @@ class RsyncWrapper {
         cmd.add("--files-from=${toCygwinPath(filesFromFile.absolutePath)}")
         cmd.add("--from0")
 
-        val sshOpts = buildSshOptions(serverConfig)
+        val sshOpts = buildSshOptions(serverConfig, keyFile)
         cmd.add("-e")
         // Windows 下 cygwin rsync 会对 -e 后的值按空格重新拆分，
         // 用引号整体包裹 ssh 命令，避免被错误拆分。
@@ -779,11 +783,16 @@ class RsyncWrapper {
      * - 若使用密码认证但 sshpass 不可用（例如 Windows 上只装了 rsync 没有 sshpass），
      *   则回退到 `SSH_ASKPASS` 机制：现代 OpenSSH（含 Windows 原生 OpenSSH）支持通过该环境变量
      *   在非交互场景下提供密码，从而无需 sshpass 也能用 rsync 完成密码认证传输。
-     * - 密钥认证无需任何包装，返回空上下文。
+     * - 密钥认证：检查私钥文件权限，若权限过松（其他用户可读取）则创建权限正确的临时副本。
      *
-     * @return 包含命令前缀、额外环境变量以及执行后需清理的临时文件的上下文
+     * @return 包含命令前缀、额外环境变量、密钥文件路径以及执行后需清理的临时文件的上下文
      */
     private fun prepareAuthContext(serverConfig: ServerConfig): AuthContext {
+        // 处理密钥认证：检查并修复私钥文件权限问题
+        if (serverConfig.authType == ServerConfig.AuthType.KEY && serverConfig.keyFile.isNotEmpty()) {
+            return buildKeyAuthContext(serverConfig.keyFile)
+        }
+
         val needsPassword = serverConfig.authType == ServerConfig.AuthType.PASSWORD &&
                 serverConfig.password.isNotEmpty()
         if (!needsPassword) {
@@ -800,6 +809,83 @@ class RsyncWrapper {
 
         // 回退：使用 SSH_ASKPASS 机制提供密码
         return buildAskpassContext(serverConfig.password)
+    }
+
+    /**
+     * 构建密钥认证上下文。
+     *
+     * 检查私钥文件权限：
+     * - Linux/macOS 下，若权限过松（other 可读取），则创建临时副本并设置 0600 权限。
+     * - Windows 下通常不需要权限检查（NTFS 权限由系统管理），直接使用原文件。
+     *
+     * OpenSSH 要求私钥文件必须仅所有者可读写，否则拒绝使用该密钥，报错：
+     * "Permissions 0644 for 'xxx' are too open."
+     */
+    private fun buildKeyAuthContext(keyFile: String): AuthContext {
+        val originalKey = File(keyFile)
+        if (!originalKey.exists()) {
+            LOG.warn("Key file not found: $keyFile")
+            return AuthContext(emptyList(), emptyMap(), keyFile = keyFile)
+        }
+
+        // Windows 下通常不需要权限检查（NTFS 权限与 POSIX 权限模型不同）
+        if (isWindows()) {
+            return AuthContext(emptyList(), emptyMap(), keyFile = keyFile)
+        }
+
+        // 检查 POSIX 文件权限：确保 other 用户没有读权限
+        // 使用 Java NIO PosixFilePermission 检查权限
+        return try {
+            val permissions = java.nio.file.Files.getPosixFilePermissions(originalKey.toPath())
+            val otherCanRead = permissions.contains(java.nio.file.attribute.PosixFilePermission.OTHERS_READ)
+            val otherCanWrite = permissions.contains(java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE)
+
+            if (otherCanRead || otherCanWrite) {
+                LOG.info("Private key file permissions are too open ($keyFile), creating temporary copy with correct permissions.")
+                // 创建临时副本并设置正确权限
+                val tempKey = createTempKeyFileWithCorrectPermissions(originalKey)
+                AuthContext(
+                    commandPrefix = emptyList(),
+                    environment = emptyMap(),
+                    keyFile = tempKey.absolutePath,
+                    cleanup = {
+                        runCatching { tempKey.delete() }
+                    }
+                )
+            } else {
+                // 权限正确，直接使用原文件
+                AuthContext(emptyList(), emptyMap(), keyFile = keyFile)
+            }
+        } catch (e: Exception) {
+            LOG.warn("Failed to check key file permissions, using original file: ${e.message}")
+            AuthContext(emptyList(), emptyMap(), keyFile = keyFile)
+        }
+    }
+
+    /**
+     * 创建私钥文件的临时副本，并设置正确的权限（仅所有者可读写）。
+     */
+    private fun createTempKeyFileWithCorrectPermissions(originalKey: File): File {
+        val tempKey = File.createTempFile("deployx_key_", ".tmp").apply {
+            deleteOnExit()
+        }
+
+        // 复制文件内容
+        originalKey.inputStream().use { input ->
+            tempKey.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+
+        // 设置权限：仅所有者可读写（0600）
+        val perms = HashSet<java.nio.file.attribute.PosixFilePermission>().apply {
+            add(java.nio.file.attribute.PosixFilePermission.OWNER_READ)
+            add(java.nio.file.attribute.PosixFilePermission.OWNER_WRITE)
+        }
+        java.nio.file.Files.setPosixFilePermissions(tempKey.toPath(), perms)
+
+        LOG.info("Created temporary key file with correct permissions: ${tempKey.absolutePath}")
+        return tempKey
     }
 
     /**
@@ -857,20 +943,21 @@ class RsyncWrapper {
     }
 
     /**
-     * rsync 认证上下文：命令前缀、额外环境变量、执行后清理回调。
+     * rsync 认证上下文：命令前缀、额外环境变量、密钥文件路径、执行后清理回调。
      */
     private data class AuthContext(
         val commandPrefix: List<String>,
         val environment: Map<String, String>,
+        val keyFile: String? = null,
         val cleanup: () -> Unit = {}
     )
 
     /**
      * 构建 SSH 选项字符串
      * 密码认证时返回 ssh 命令（sshpass 已在外层处理）
-     * 密钥认证时添加 -i 参数
+     * 密钥认证时添加 -i 参数（使用 AuthContext 中的 keyFile，可能是权限修复后的临时文件）
      */
-    private fun buildSshOptions(serverConfig: ServerConfig): String {
+    private fun buildSshOptions(serverConfig: ServerConfig, keyFile: String? = null): String {
         val opts = StringBuilder("${resolveSshCommand()} -o StrictHostKeyChecking=no -o ConnectTimeout=")
         opts.append(FileSyncSettings.getInstance().connectTimeout / 1000) // 转为秒
         // 不写 known_hosts：cygwin ssh 默认写 /home/<user>/.ssh/known_hosts，精简 cygwin 包可能无此目录，
@@ -881,8 +968,10 @@ class RsyncWrapper {
             opts.append(" -p ${serverConfig.port}")
         }
 
-        if (serverConfig.authType == ServerConfig.AuthType.KEY && serverConfig.keyFile.isNotEmpty()) {
-            opts.append(" -i ${serverConfig.keyFile}")
+        // 优先使用 AuthContext 中的 keyFile（可能是权限修复后的临时文件）
+        val actualKeyFile = keyFile ?: serverConfig.keyFile
+        if (serverConfig.authType == ServerConfig.AuthType.KEY && actualKeyFile.isNotEmpty()) {
+            opts.append(" -i $actualKeyFile")
         }
 
         return opts.toString()
