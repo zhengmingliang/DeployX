@@ -1187,7 +1187,9 @@ class DeployService {
         logCallback: ((String) -> Unit)? = null
     ): BackupResult {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
-        val backupFile = "${backupDir.trimEnd('/')}/backup_${timestamp}.tar.gz"
+        // 使用源目录名作为备份文件名前缀，更有意义
+        val sourceName = remoteBaseDir.split("/").lastOrNull { it.isNotEmpty() } ?: "deploy"
+        val backupFile = "${backupDir.trimEnd('/')}/${sourceName}_bak_${timestamp}.tar.gz"
         sshConnection.executeCommand("mkdir -p ${shellQuote(backupDir)}")
 
         val existingPaths = relativePaths.map { it.trim('/') }.filter { it.isNotBlank() }.filter { relativePath ->
