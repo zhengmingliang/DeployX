@@ -45,6 +45,7 @@ import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.util.ui.FormBuilder
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Dimension
@@ -139,13 +140,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val scriptTabPanel = ScriptTabPanel(project)
 
     // 历史按钮（保留引用以便语言切换时刷新文案）
-    private val historyRefreshButton = JButton(DeployXBundle.message("toolwindow.history.refresh"), AllIcons.Actions.Refresh)
-    private val historyRedeployButton = JButton(DeployXBundle.message("toolwindow.history.redeploy"), AllIcons.Actions.Execute)
-    private val historyFillConfigButton = JButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit)
-    private val historyCopyReportButton = JButton(DeployXBundle.message("toolwindow.history.copyReport"), AllIcons.Actions.Copy)
-    private val historyExportReportButton = JButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download)
-    private val historyRollbackButton = JButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback)
-    private val historyClearButton = JButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Vcs.History)
+    private val historyRefreshButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.refresh"), AllIcons.Actions.Refresh)
+    private val historyRedeployButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.redeploy"), AllIcons.Actions.Execute)
+    private val historyFillConfigButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit)
+    private val historyCopyReportButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.copyReport"), AllIcons.Actions.Copy)
+    private val historyExportReportButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download)
+    private val historyRollbackButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback)
+    private val historyClearButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Vcs.History)
 
     /** 历史列表为空时的占位提示（替代原先的空白，明确告知用户“暂无记录”） */
     private val historyEmptyLabel = JBLabel(DeployXBundle.message("toolwindow.history.empty"), SwingConstants.CENTER)
@@ -262,6 +263,26 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         logTabbedPane.addTab(DeployXBundle.message("toolwindow.tab.all"), AllIcons.Nodes.LogFolder, JBScrollPane(logArea))
 
         // ===== 历史面板 =====
+        // 自定义渲染器：可回滚的记录显示 🔄 图标
+        historyList.cellRenderer = object : DefaultListCellRenderer() {
+            override fun getListCellRendererComponent(
+                list: JList<*>,
+                value: Any?,
+                index: Int,
+                isSelected: Boolean,
+                cellHasFocus: Boolean
+            ): java.awt.Component {
+                val component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+                if (index >= 0 && index < historyRecords.size) {
+                    val record = historyRecords[index]
+                    if (record.canRollback && record.backupFilePath.isNotBlank()) {
+                        text = "🔄 $text"
+                    }
+                }
+                return component
+            }
+        }
+
         // 单击仅选中记录（不跳转），双击才查看详情并跳转到「日志」页签
         historyList.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
@@ -1195,6 +1216,19 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             this.toolTipText = toolTip
             isFocusable = false
             addActionListener { handler() }
+        }
+    }
+
+    /**
+     * 创建紧凑的工具窗口按钮（无边框，小尺寸）
+     */
+    private fun createToolWindowButton(text: String, icon: Icon): JButton {
+        return JButton(text, icon).apply {
+            isFocusable = false
+            isBorderPainted = false
+            isContentAreaFilled = false
+            margin = JBUI.insets(2, 4, 2, 4)
+            putClientProperty("JButton.buttonType", "square")
         }
     }
 }
