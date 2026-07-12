@@ -19,6 +19,7 @@ import com.alianga.idea.deploy.service.SyncService
 import com.alianga.idea.deploy.service.TerminalService
 import com.alianga.idea.deploy.service.UpdateReportFormatter
 import com.alianga.idea.deploy.ui.CommandFieldWithScriptButton
+import com.alianga.idea.deploy.ui.UiButtonFactory
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
 import com.alianga.idea.deploy.ui.dialog.RollbackDialog
 import com.alianga.idea.deploy.ui.dialog.RollbackProgressDialog
@@ -112,12 +113,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val postCommandLabel = JBLabel(DeployXBundle.message("toolwindow.label.postUploadCommand"))
 
     // 操作面板按钮（保留引用以便语言切换时刷新文案）
-    private val openTerminalButton = createIconButton(DeployXBundle.message("toolwindow.button.openTerminal"), AllIcons.Nodes.Console) { openTerminal() }
-    private val browseRemoteButton = createIconButton(DeployXBundle.message("toolwindow.button.browseRemote"), AllIcons.Nodes.Folder) { browseRemote() }
-    private val previewButton = createActionButton(DeployXBundle.message("toolwindow.button.preview"), AllIcons.Actions.Preview) { previewSync() }
-    private val startDeployButton = createActionButton(DeployXBundle.message("toolwindow.button.startDeploy"), AllIcons.Actions.Execute) { startDeploy() }
-    private val quickPushButton = createActionButton(DeployXBundle.message("toolwindow.button.quickPush"), AllIcons.Actions.Upload) { quickPush() }
-    private val saveAsMappingButton = createActionButton(DeployXBundle.message("toolwindow.button.saveAsMapping"), AllIcons.Actions.MenuSaveall) { saveAsMapping() }
+    private val openTerminalButton = UiButtonFactory.createIconButton(DeployXBundle.message("toolwindow.button.openTerminal"), AllIcons.Nodes.Console) { openTerminal() }
+    private val browseRemoteButton = UiButtonFactory.createIconButton(DeployXBundle.message("toolwindow.button.browseRemote"), AllIcons.Nodes.Folder) { browseRemote() }
+    private val previewButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.preview"), AllIcons.Actions.Preview) { previewSync() }
+    private val startDeployButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.startDeploy"), AllIcons.Actions.Execute) { startDeploy() }
+    private val quickPushButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.quickPush"), AllIcons.Actions.Upload) { quickPush() }
+    private val saveAsMappingButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.saveAsMapping"), AllIcons.Actions.MenuSaveall) { saveAsMapping() }
 
     // 工具栏（保留引用以便语言切换后刷新 Action 显示文本）
     private var toolbar: com.intellij.openapi.actionSystem.ActionToolbar? = null
@@ -140,13 +141,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     // 历史按钮（保留引用以便语言切换时刷新文案）
     // 按钮同时显示图标与文字（JButton(text, icon)），并设置 toolTipText 作为补充说明。
     // 回滚按钮图标与历史列表中“可回滚”记录的图标一致（均为 AllIcons.Actions.Rollback）。
-    private val historyRefreshButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.refresh"), AllIcons.Actions.Refresh, DeployXBundle.message("toolwindow.history.refresh.tooltip"))
-    private val historyRedeployButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.redeploy"), AllIcons.Actions.Execute, DeployXBundle.message("toolwindow.history.redeploy.tooltip"))
-    private val historyFillConfigButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit, DeployXBundle.message("toolwindow.history.fillConfig.tooltip"))
-    private val historyCopyReportButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.copyReport"), AllIcons.Actions.Copy, DeployXBundle.message("toolwindow.history.copyReport.tooltip"))
-    private val historyExportReportButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download, DeployXBundle.message("toolwindow.history.exportReport.tooltip"))
-    private val historyRollbackButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback, DeployXBundle.message("toolwindow.history.rollback.tooltip"))
-    private val historyClearButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Actions.GC, DeployXBundle.message("toolwindow.history.clear.tooltip"))
+    private val historyRefreshButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.refresh"), AllIcons.Actions.Refresh, DeployXBundle.message("toolwindow.history.refresh.tooltip"))
+    private val historyRedeployButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.redeploy"), AllIcons.Actions.Execute, DeployXBundle.message("toolwindow.history.redeploy.tooltip"))
+    private val historyFillConfigButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit, DeployXBundle.message("toolwindow.history.fillConfig.tooltip"))
+    private val historyCopyReportButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.copyReport"), AllIcons.Actions.Copy, DeployXBundle.message("toolwindow.history.copyReport.tooltip"))
+    private val historyExportReportButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download, DeployXBundle.message("toolwindow.history.exportReport.tooltip"))
+    private val historyRollbackButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback, DeployXBundle.message("toolwindow.history.rollback.tooltip"))
+    private val historyClearButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Actions.GC, DeployXBundle.message("toolwindow.history.clear.tooltip"))
 
     /** 历史列表为空时的占位提示（替代原先的空白，明确告知用户“暂无记录”） */
     private val historyEmptyLabel = JBLabel(DeployXBundle.message("toolwindow.history.empty"), SwingConstants.CENTER)
@@ -189,20 +190,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     private fun setupUI() {
         // 工具栏 Actions（文案通过 bundle key 动态获取，语言切换后由 update() 自动刷新）
-        val settingsAction = createLocalizedAction("toolwindow.action.settings", AllIcons.General.Settings) {
+        val settingsAction = UiButtonFactory.createLocalizedAction("toolwindow.action.settings", AllIcons.General.Settings) {
             ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX")
         }
-        val refreshAction = createLocalizedAction("toolwindow.action.refresh", AllIcons.Actions.Refresh) {
+        val refreshAction = UiButtonFactory.createLocalizedAction("toolwindow.action.refresh", AllIcons.Actions.Refresh) {
             refreshServerCombo()
             refreshHistory()
         }
-        val copyReportAction = createLocalizedAction("toolwindow.action.copyReport", AllIcons.Actions.Copy) {
+        val copyReportAction = UiButtonFactory.createLocalizedAction("toolwindow.action.copyReport", AllIcons.Actions.Copy) {
             copyLastReport()
         }
-        val exportReportAction = createLocalizedAction("toolwindow.action.exportReport", AllIcons.ToolbarDecorator.Export) {
+        val exportReportAction = UiButtonFactory.createLocalizedAction("toolwindow.action.exportReport", AllIcons.ToolbarDecorator.Export) {
             exportLastReport()
         }
-        val clearLogAction = createLocalizedAction("toolwindow.action.clearLog", CLEAR_LOG_ICON) {
+        val clearLogAction = UiButtonFactory.createLocalizedAction("toolwindow.action.clearLog", CLEAR_LOG_ICON) {
             logArea.text = ""
             serverLogAreas.values.forEach { it.text = "" }
         }
@@ -1299,59 +1300,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             MappingManager.getInstance().addMapping(dialog.getMappingConfig())
             appendLog(DeployXBundle.message("toolwindow.log.mappedSaved", dialog.getMappingConfig().name))
             Messages.showInfoMessage(DeployXBundle.message("toolwindow.validation.mappingSaved"), DeployXBundle.message("toolwindow.validation.saveSuccess"))
-        }
-    }
-
-    private fun createAction(text: String, icon: Icon, handler: () -> Unit): AnAction {
-        return object : AnAction(text, text, icon) {
-            override fun actionPerformed(e: AnActionEvent) { handler() }
-        }
-    }
-
-    /**
-     * 创建工具栏 Action，文案通过 bundle key 在 [update] 中动态获取，
-     * 使语言切换后无需重建即可刷新显示文本。
-     */
-    private fun createLocalizedAction(textKey: String, icon: Icon, handler: () -> Unit): AnAction {
-        return object : AnAction(DeployXBundle.message(textKey), DeployXBundle.message(textKey), icon) {
-            override fun actionPerformed(e: AnActionEvent) { handler() }
-            override fun update(e: AnActionEvent) {
-                e.presentation.text = DeployXBundle.message(textKey)
-                e.presentation.description = DeployXBundle.message(textKey)
-            }
-        }
-    }
-
-    private fun createActionButton(text: String, icon: Icon, handler: () -> Unit): JButton {
-        return JButton(text, icon).apply { addActionListener { handler() } }
-    }
-
-    private fun createIconButton(toolTip: String, icon: Icon, handler: () -> Unit): JButton {
-        return JButton(icon).apply {
-            this.toolTipText = toolTip
-            isFocusable = false
-            addActionListener { handler() }
-        }
-    }
-
-    /**
-     * 创建紧凑的工具窗口按钮（无边框，小尺寸）
-     * 同时显示图标与文字，并附带 toolTipText 作为补充说明，避免仅有图标时含义不清。
-     */
-    private fun createToolWindowButton(text: String, icon: Icon, toolTip: String? = null): JButton {
-        return JButton(text, icon).apply {
-            isFocusable = false
-            isBorderPainted = false
-            isContentAreaFilled = false
-            margin = JBUI.insets(2, 2, 2, 2)
-            putClientProperty("JButton.buttonType", "square")
-            if (!toolTip.isNullOrBlank()) {
-                this.toolTipText = toolTip
-            }
-            // 水平排列：图标在左，文字在右，确保文字始终可见；缩小图标与文字间距使按钮更紧凑
-            horizontalTextPosition = SwingConstants.TRAILING
-            horizontalAlignment = SwingConstants.LEFT
-            iconTextGap = 2
         }
     }
 }
