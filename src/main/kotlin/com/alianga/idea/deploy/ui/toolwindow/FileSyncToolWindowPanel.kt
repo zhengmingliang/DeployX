@@ -27,7 +27,6 @@ import com.alianga.idea.deploy.ui.settings.MappingEditDialog
 import com.intellij.icons.AllIcons
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.*
-import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.progress.ProgressIndicator
@@ -68,11 +67,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         private val panelByProject = linkedMapOf<String, FileSyncToolWindowPanel>()
 
         /**
-         * “清除日志”图标。直接打包在插件 resources 中引用，
-         * 以兼容 AllIcons.Actions.ClearCash 不存在的低版本 IDE（如 IU-241）。
+         * “清除日志”图标。使用平台 AllIcons.Actions.GC（垃圾桶），
+         * 语义贴合且颜色随主题自适应，与工具栏其他 AllIcons 图标风格统一。
          */
-        private val CLEAR_LOG_ICON: Icon =
-            IconLoader.getIcon("/icons/clearCash.svg", FileSyncToolWindowPanel::class.java)
+        private val CLEAR_LOG_ICON: Icon = AllIcons.Actions.GC
 
         fun getPanel(project: Project): FileSyncToolWindowPanel? {
             return panelByProject[project.hashCode().toString()]
@@ -140,19 +138,35 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val scriptTabPanel = ScriptTabPanel(project)
 
     // 历史按钮（保留引用以便语言切换时刷新文案）
-    private val historyRefreshButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.refresh"), AllIcons.Actions.Refresh)
-    private val historyRedeployButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.redeploy"), AllIcons.Actions.Execute)
-    private val historyFillConfigButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit)
-    private val historyCopyReportButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.copyReport"), AllIcons.Actions.Copy)
-    private val historyExportReportButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download)
-    private val historyRollbackButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback)
-    private val historyClearButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Vcs.History)
+    // 按钮同时显示图标与文字（JButton(text, icon)），并设置 toolTipText 作为补充说明。
+    // 回滚按钮图标与历史列表中“可回滚”记录的图标一致（均为 AllIcons.Actions.Rollback）。
+    private val historyRefreshButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.refresh"), AllIcons.Actions.Refresh, DeployXBundle.message("toolwindow.history.refresh.tooltip"))
+    private val historyRedeployButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.redeploy"), AllIcons.Actions.Execute, DeployXBundle.message("toolwindow.history.redeploy.tooltip"))
+    private val historyFillConfigButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit, DeployXBundle.message("toolwindow.history.fillConfig.tooltip"))
+    private val historyCopyReportButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.copyReport"), AllIcons.Actions.Copy, DeployXBundle.message("toolwindow.history.copyReport.tooltip"))
+    private val historyExportReportButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download, DeployXBundle.message("toolwindow.history.exportReport.tooltip"))
+    private val historyRollbackButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback, DeployXBundle.message("toolwindow.history.rollback.tooltip"))
+    private val historyClearButton = createToolWindowButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Actions.GC, DeployXBundle.message("toolwindow.history.clear.tooltip"))
 
     /** 历史列表为空时的占位提示（替代原先的空白，明确告知用户“暂无记录”） */
     private val historyEmptyLabel = JBLabel(DeployXBundle.message("toolwindow.history.empty"), SwingConstants.CENTER)
     /** 历史面板的卡片布局：有记录显示列表，无记录显示占位提示 */
     private val historyCardLayout = CardLayout()
     private lateinit var historyCardPanel: JPanel
+
+    /** 历史详情面板：选中历史记录时在右侧展示该记录的更新文件清单与关键信息，无需复制报告即可查看 */
+    private val historyDetailArea = JBTextArea().apply {
+        isEditable = false
+        lineWrap = true
+        wrapStyleWord = true
+        font = JBUI.Fonts.create("", 12)
+    }
+    private val historyDetailPane = JBScrollPane(historyDetailArea)
+    private val historyDetailEmptyLabel = JBLabel(DeployXBundle.message("toolwindow.history.detail.empty"), SwingConstants.CENTER)
+    /** 详情区卡片：有选中记录显示详情，无选中显示占位提示 */
+    private val historyDetailCardLayout = CardLayout()
+    private lateinit var historyDetailCardPanel: JPanel
+    private lateinit var historySplitPane: JSplitPane
 
     // Tab 面板
     private val tabbedPane = JBTabbedPane()
@@ -263,7 +277,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         logTabbedPane.addTab(DeployXBundle.message("toolwindow.tab.all"), AllIcons.Nodes.LogFolder, JBScrollPane(logArea))
 
         // ===== 历史面板 =====
-        // 自定义渲染器：可回滚的记录显示 🔄 图标
+        // 自定义渲染器：可回滚的记录显示回滚图标，与「回滚」按钮图标保持一致，
+        // 便于用户快速识别哪些历史记录可以回滚。
         historyList.cellRenderer = object : DefaultListCellRenderer() {
             override fun getListCellRendererComponent(
                 list: JList<*>,
@@ -276,10 +291,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 if (index >= 0 && index < historyRecords.size) {
                     val record = historyRecords[index]
                     if (record.canRollback && record.backupFilePath.isNotBlank()) {
-                        text = "🔄 $text"
+                        // 使用与回滚按钮相同的 AllIcons.Actions.Rollback 图标
+                        icon = AllIcons.Actions.Rollback
+                    } else {
+                        icon = null
                     }
                 }
                 return component
+            }
+        }
+
+        // 选中历史记录时实时刷新右侧详情面板（展示更新文件清单等），无需双击或复制报告
+        historyList.addListSelectionListener { e ->
+            if (!e.valueIsAdjusting) {
+                updateHistoryDetail()
             }
         }
 
@@ -307,26 +332,37 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val historyButtonPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(historyRefreshButton)
-            add(Box.createHorizontalStrut(4))
+            add(Box.createHorizontalStrut(2))
             add(historyRedeployButton)
-            add(Box.createHorizontalStrut(4))
+            add(Box.createHorizontalStrut(2))
             add(historyFillConfigButton)
-            add(Box.createHorizontalStrut(4))
+            add(Box.createHorizontalStrut(2))
             add(historyCopyReportButton)
-            add(Box.createHorizontalStrut(4))
+            add(Box.createHorizontalStrut(2))
             add(historyExportReportButton)
-            add(Box.createHorizontalStrut(4))
+            add(Box.createHorizontalStrut(2))
             add(historyRollbackButton)
-            add(Box.createHorizontalStrut(8))
+            add(Box.createHorizontalGlue())
             add(historyClearButton)
         }
         historyCardPanel = JPanel(historyCardLayout).apply {
             add(JBScrollPane(historyList), "list")
             add(historyEmptyLabel, "empty")
         }
+        historyDetailCardPanel = JPanel(historyDetailCardLayout).apply {
+            add(historyDetailPane, "detail")
+            add(historyDetailEmptyLabel, "empty")
+        }
+        // 左侧历史列表 + 右侧详情面板，可拖拽分隔条调整比例
+        historySplitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, historyCardPanel, historyDetailCardPanel).apply {
+            dividerSize = 6
+            isOneTouchExpandable = true
+            resizeWeight = 0.45
+            border = null
+        }
         val historyPanel = JPanel(BorderLayout()).apply {
             add(historyButtonPanel, BorderLayout.NORTH)
-            add(historyCardPanel, BorderLayout.CENTER)
+            add(historySplitPane, BorderLayout.CENTER)
         }
 
         // ===== 脚本面板 =====
@@ -394,13 +430,23 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // 历史按钮
         historyRefreshButton.text = DeployXBundle.message("toolwindow.history.refresh")
+        historyRefreshButton.toolTipText = DeployXBundle.message("toolwindow.history.refresh.tooltip")
         historyRedeployButton.text = DeployXBundle.message("toolwindow.history.redeploy")
+        historyRedeployButton.toolTipText = DeployXBundle.message("toolwindow.history.redeploy.tooltip")
         historyFillConfigButton.text = DeployXBundle.message("toolwindow.history.fillConfig")
+        historyFillConfigButton.toolTipText = DeployXBundle.message("toolwindow.history.fillConfig.tooltip")
         historyCopyReportButton.text = DeployXBundle.message("toolwindow.history.copyReport")
+        historyCopyReportButton.toolTipText = DeployXBundle.message("toolwindow.history.copyReport.tooltip")
         historyExportReportButton.text = DeployXBundle.message("toolwindow.history.exportReport")
+        historyExportReportButton.toolTipText = DeployXBundle.message("toolwindow.history.exportReport.tooltip")
         historyRollbackButton.text = DeployXBundle.message("toolwindow.history.rollback")
+        historyRollbackButton.toolTipText = DeployXBundle.message("toolwindow.history.rollback.tooltip")
         historyClearButton.text = DeployXBundle.message("toolwindow.history.clear")
+        historyClearButton.toolTipText = DeployXBundle.message("toolwindow.history.clear.tooltip")
         historyEmptyLabel.text = DeployXBundle.message("toolwindow.history.empty")
+        historyDetailEmptyLabel.text = DeployXBundle.message("toolwindow.history.detail.empty")
+        // 重新渲染当前选中记录的详情，使标签跟随语言切换
+        updateHistoryDetail()
 
         // Tab 标题（operation=0, log=1, history=2, script=3）
         if (tabbedPane.tabCount >= 4) {
@@ -468,6 +514,75 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
         // 根据是否有记录切换卡片：有记录显示列表，无记录显示占位提示
         historyCardLayout.show(historyCardPanel, if (historyRecords.isEmpty()) "empty" else "list")
+        // 刷新历史后清空右侧详情面板
+        updateHistoryDetail()
+    }
+
+    /**
+     * 刷新右侧历史详情面板：展示选中记录的关键信息与更新文件清单。
+     * 用户选中历史记录即可直接查看本次部署更新了哪些文件，无需复制报告。
+     */
+    private fun updateHistoryDetail() {
+        val idx = historyList.selectedIndex
+        if (idx < 0 || idx >= historyRecords.size) {
+            historyDetailArea.text = ""
+            historyDetailCardLayout.show(historyDetailCardPanel, "empty")
+            return
+        }
+        val record = historyRecords[idx]
+        historyDetailArea.text = buildHistoryDetailText(record)
+        historyDetailArea.caretPosition = 0
+        historyDetailCardLayout.show(historyDetailCardPanel, "detail")
+    }
+
+    /** 拼接历史详情文本：摘要、服务器、目录、文件数、备份与更新文件清单。 */
+    private fun buildHistoryDetailText(record: HistoryRecord): String {
+        val sb = StringBuilder()
+        val statusText = when (record.status) {
+            HistoryRecord.OperationStatus.SUCCESS -> DeployXBundle.message("report.status.success")
+            HistoryRecord.OperationStatus.FAILED -> DeployXBundle.message("report.status.failed")
+            HistoryRecord.OperationStatus.CANCELLED -> DeployXBundle.message("toolwindow.history.detail.statusCancelled")
+        }
+        sb.appendLine(DeployXBundle.message("toolwindow.history.detail.time", record.formattedDate))
+        sb.appendLine(DeployXBundle.message("toolwindow.history.detail.operation", record.type.value.uppercase()))
+        sb.appendLine(DeployXBundle.message("toolwindow.history.detail.status", statusText))
+        sb.appendLine(DeployXBundle.message("toolwindow.history.detail.server", record.serverName.ifBlank { record.serverId }, record.serverAddress.ifBlank { "-" }))
+        // PULL 方向相反：远程 -> 本地
+        if (record.type == HistoryRecord.OperationType.PULL) {
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.remoteDir", record.targetPath.ifBlank { "-" }))
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.localDir", record.sourcePath.ifBlank { "-" }))
+        } else {
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.localDir", record.sourcePath.ifBlank { "-" }))
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.remoteDir", record.targetPath.ifBlank { "-" }))
+        }
+        sb.appendLine(DeployXBundle.message("toolwindow.history.detail.fileCount", record.fileCount))
+        sb.appendLine(DeployXBundle.message("toolwindow.history.detail.duration", record.formattedDuration))
+        if (record.fileSize > 0) {
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.size", record.formattedSize))
+        }
+        if (record.canRollback && record.backupFilePath.isNotBlank()) {
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.backup", record.backupFilePath))
+        }
+        if (record.preCommand.isNotBlank()) {
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.preCommand", record.preCommand))
+        }
+        if (record.postCommand.isNotBlank()) {
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.postCommand", record.postCommand))
+        }
+        sb.appendLine()
+        // 更新文件清单：优先用 remotePaths（部署涉及的远程文件路径）
+        if (record.remotePaths.isNotEmpty()) {
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.updatedFilesTitle", record.remotePaths.size))
+            sb.appendLine()
+            record.remotePaths.forEach { sb.appendLine("  $it") }
+        } else if (record.relativePaths.isNotEmpty()) {
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.updatedFilesTitle", record.relativePaths.size))
+            sb.appendLine()
+            record.relativePaths.forEach { sb.appendLine("  $it") }
+        } else {
+            sb.appendLine(DeployXBundle.message("toolwindow.history.detail.noFiles"))
+        }
+        return sb.toString().trimEnd()
     }
 
     private fun showHistoryDetail() {
@@ -1221,14 +1336,22 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     /**
      * 创建紧凑的工具窗口按钮（无边框，小尺寸）
+     * 同时显示图标与文字，并附带 toolTipText 作为补充说明，避免仅有图标时含义不清。
      */
-    private fun createToolWindowButton(text: String, icon: Icon): JButton {
+    private fun createToolWindowButton(text: String, icon: Icon, toolTip: String? = null): JButton {
         return JButton(text, icon).apply {
             isFocusable = false
             isBorderPainted = false
             isContentAreaFilled = false
-            margin = JBUI.insets(2, 4, 2, 4)
+            margin = JBUI.insets(2, 2, 2, 2)
             putClientProperty("JButton.buttonType", "square")
+            if (!toolTip.isNullOrBlank()) {
+                this.toolTipText = toolTip
+            }
+            // 水平排列：图标在左，文字在右，确保文字始终可见；缩小图标与文字间距使按钮更紧凑
+            horizontalTextPosition = SwingConstants.TRAILING
+            horizontalAlignment = SwingConstants.LEFT
+            iconTextGap = 2
         }
     }
 }
