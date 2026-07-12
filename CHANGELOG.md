@@ -32,7 +32,7 @@
 - **回滚对话框 Bundle 缺失**：修复 `rollback.dialog.fileCount.unknown` 等 18 个国际化 Key 未定义导致显示原始 Key 的问题；补全中英文双语资源
 - **RollbackService 空指针**：修复 Swing 后台线程中 `serviceOf()` 返回 null 的问题。根因：IDEA 服务管理器在非 EDT 线程获取服务存在时序问题。改为构造函数中预取服务实例、后台线程复用，同时 `@Service` 注解改为 `@Service(Service.Level.APP)` 确保注册正确
 - **更新报告混入 stderr**：增强 rsync 文件传输行解析逻辑，排除 mise 工具输出、shell 命令标记（`$` / `>`）、版本信息行（`vX.Y.Z`）等非文件输出，确保报告文件列表准确
-- **更新报告误判 GLIBC/动态库错误行**：修复远端 shell 初始化或工具链（mise/asdf 等）因 GLIBC 版本不足打印的动态库错误行（如 `/lib64/libc.so.6: version 'GLIBC_2.18' not found (required by ...)`）被 `isFileTransferLine` 误判为已传输文件，导致报告"总文件数"虚增、错误信息被列入"实际更新的文件"的问题。新增基于子串的诊断行过滤（`not found`、`required by`、`glibc`、`libc.so`、`shared object` 等）
+- **更新报告误判 GLIBC/动态库错误行**：修复远端 shell 初始化或工具链（mise/asdf 等）因 GLIBC 版本不足打印的动态库错误行（如 `/lib64/libc.so.6: version 'GLIBC_2.18' not found (required by ...)`）被 `isFileTransferLine` 误判为已传输文件，导致报告"总文件数"虚增、错误信息被列入"实际更新的文件"的问题。新增基于子串的诊断行过滤（`not found`、`required by`、`glibc`、`libc.so`、`shared object` 等）。进一步改用 rsync `--out-format=::%n::` 定界输出精确识别文件传输行（默认选项分支），从根本上避免 stderr 诊断行被误判；无定界行时回退启发式解析，兼容用户自定义 rsync 选项与 SFTP 后端
 - **备份命名无意义**：修复备份文件统一命名为 `backup_{时间戳}.tar.gz`、无法辨识备份来源的问题。改为以备份文件/目录名（取首个相对路径的末段名，可截断）为前缀 + `_bak` + 日期，例如 `updates_bak_20260712_025456.tar.gz`；多文件时为 `xxx_nfiles_bak_{时间戳}.tar.gz`
 - **备份命名 `_bak_` 标识缺失**：修复 `doBackup` 对目录或非压缩文件打包时命名缺少 `_bak_` 标识（为 `{源名}_{时间戳}.tar.gz`）与其他备份分支不一致的问题；同时修正 `.tar.gz` 等双扩展名压缩包备份时扩展名被错误拆分（`foo.tar.gz` → `foo.tar_bak_...gz`）的问题
 - **备份路径返回目录而非文件**：修复 `doBackup` 成功后返回备份目录路径（而非具体备份文件路径）导致更新报告"备份位置"仅显示目录、回滚时 `test -f` 校验失败的问题。现统一返回具体备份文件路径
@@ -65,6 +65,18 @@
   **移除**：
   - 删除 `LineNumberGutter.kt`（手写行号边栏，`EditorTextField` 内置 gutter 完全替代）
   - `CommandFullscreenDialog` 移除 `sourceFont` 参数（编辑器字体由平台统一管理）
+
+- **大文件拆分**：降低单文件复杂度，不改任何对外 API
+  - `BackupService`：从 `DeployService` 抽取 `doBackup`/`doBackupSelected`/`doUnzip` + `BackupResult`/`UnzipResult`，仅依赖 `SshConnection` 参数
+  - `ReportBuilder`：抽取 `buildReportGroup` 纯函数；`RemotePathUtils` 抽取 `joinRemotePath` 供备份/报告/部署共享
+  - `UiButtonFactory`：从 `FileSyncToolWindowPanel` 抽取 5 个无状态按钮/Action 工厂方法
+  - 清理 `DeployService` 未使用字段 `rsyncWrapper`，瘦身约 190 行
+
+- **历史记录持久化实际传输文件**：`HistoryRecord` 新增 `transferred_files` 字段，结构化保存 rsync 实际传输的文件路径（不再只存于报告字符串），增量同步时精确反映本次变更的文件；旧记录兼容（默认空列表）
+
+- **历史按钮间距统一**：移除弹性 `HorizontalGlue`，按钮间距全部改为固定值（功能按钮间 3px、回滚/查看详情与清空间 6px），间距统一可预测
+
+- **历史详情改为弹窗对话框**：原右侧常驻详情面板（`JSplitPane`）占用水平空间且无法关闭，改为双击历史记录或点击「查看详情」按钮弹出 `HistoryDetailDialog`，展示更新文件清单与关键信息，关闭即消失；历史面板恢复单列列表布局
 
 
 ---
