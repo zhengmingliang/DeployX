@@ -32,6 +32,11 @@
 - **回滚对话框 Bundle 缺失**：修复 `rollback.dialog.fileCount.unknown` 等 18 个国际化 Key 未定义导致显示原始 Key 的问题；补全中英文双语资源
 - **RollbackService 空指针**：修复 Swing 后台线程中 `serviceOf()` 返回 null 的问题。根因：IDEA 服务管理器在非 EDT 线程获取服务存在时序问题。改为构造函数中预取服务实例、后台线程复用，同时 `@Service` 注解改为 `@Service(Service.Level.APP)` 确保注册正确
 - **更新报告混入 stderr**：增强 rsync 文件传输行解析逻辑，排除 mise 工具输出、shell 命令标记（`$` / `>`）、版本信息行（`vX.Y.Z`）等非文件输出，确保报告文件列表准确
+- **更新报告误判 GLIBC/动态库错误行**：修复远端 shell 初始化或工具链（mise/asdf 等）因 GLIBC 版本不足打印的动态库错误行（如 `/lib64/libc.so.6: version 'GLIBC_2.18' not found (required by ...)`）被 `isFileTransferLine` 误判为已传输文件，导致报告"总文件数"虚增、错误信息被列入"实际更新的文件"的问题。新增基于子串的诊断行过滤（`not found`、`required by`、`glibc`、`libc.so`、`shared object` 等）
+- **备份命名无意义**：修复备份文件统一命名为 `backup_{时间戳}.tar.gz`、无法辨识备份来源的问题。改为以备份文件/目录名（取首个相对路径的末段名，可截断）为前缀 + `_bak` + 日期，例如 `updates_bak_20260712_025456.tar.gz`；多文件时为 `xxx_nfiles_bak_{时间戳}.tar.gz`
+- **备份命名 `_bak_` 标识缺失**：修复 `doBackup` 对目录或非压缩文件打包时命名缺少 `_bak_` 标识（为 `{源名}_{时间戳}.tar.gz`）与其他备份分支不一致的问题；同时修正 `.tar.gz` 等双扩展名压缩包备份时扩展名被错误拆分（`foo.tar.gz` → `foo.tar_bak_...gz`）的问题
+- **备份路径返回目录而非文件**：修复 `doBackup` 成功后返回备份目录路径（而非具体备份文件路径）导致更新报告"备份位置"仅显示目录、回滚时 `test -f` 校验失败的问题。现统一返回具体备份文件路径
+- **清空历史按钮图标语义误导**：修复历史标签页「清空」按钮使用历史图标（`AllIcons.Vcs.History`，时钟样式）导致语义与"清空所有历史记录"不符、易被误解为查看历史的问题。改为垃圾桶图标（`AllIcons.Actions.GC`）；同步将顶部「清空日志」按钮的自定义灰色图标替换为平台 `AllIcons.Actions.GC`，颜色随主题自适应，与工具栏其他图标风格统一
 
 
 ### 🛠 重构与体验优化
