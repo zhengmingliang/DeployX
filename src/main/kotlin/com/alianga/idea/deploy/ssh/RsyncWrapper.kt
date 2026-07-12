@@ -22,6 +22,14 @@ class RsyncWrapper {
         private val LOG = Logger.getInstance(RsyncWrapper::class.java)
 
         /**
+         * rsync --out-format 的定界格式。用 `::%n::` 包裹文件名，使输出行形如
+         * `::path/to/file::`，便于精确识别实际传输的文件名，避免与 stderr 诊断行混淆。
+         * 仅在“默认 rsync 选项”分支启用（用户自定义 rsyncOptions 时不强制覆盖）。
+         */
+        private const val OUT_FORMAT = "::%n::"
+        private val OUT_FORMAT_LINE_REGEX = Regex("^::(.+)::$")
+
+        /**
          * 检查系统是否安装了 rsync
          */
         fun isRsyncAvailable(): Boolean {
@@ -107,9 +115,12 @@ class RsyncWrapper {
                     progressCallback?.invoke(progress)
                 }
 
-                // 收集传输的文件列表（从 rsync -v 输出）
-                // 排除进度行（包含 %、MB/s 等）和统计行
-                if (isFileTransferLine(currentLine)) {
+                // 收集传输的文件列表：优先用 --out-format 定界行精确提取文件名，
+                // 无定界行时回退到 isFileTransferLine 启发式（兼容用户自定义 rsyncOptions）。
+                val outFormatName = extractOutFormatFileName(currentLine)
+                if (outFormatName != null) {
+                    transferredFileList.add(outFormatName)
+                } else if (isFileTransferLine(currentLine)) {
                     transferredFileList.add(currentLine.trim())
                 }
 
@@ -221,8 +232,12 @@ class RsyncWrapper {
                     progressCallback?.invoke(progress)
                 }
 
-                // 收集传输的文件列表
-                if (isFileTransferLine(currentLine)) {
+                // 收集传输的文件列表：优先用 --out-format 定界行精确提取文件名，
+                // 无定界行时回退到 isFileTransferLine 启发式（兼容用户自定义 rsyncOptions）。
+                val outFormatName = extractOutFormatFileName(currentLine)
+                if (outFormatName != null) {
+                    transferredFileList.add(outFormatName)
+                } else if (isFileTransferLine(currentLine)) {
                     transferredFileList.add(currentLine.trim())
                 }
 
@@ -348,8 +363,12 @@ class RsyncWrapper {
                     progressCallback?.invoke(progress)
                 }
 
-                // 收集传输的文件列表
-                if (isFileTransferLine(currentLine)) {
+                // 收集传输的文件列表：优先用 --out-format 定界行精确提取文件名，
+                // 无定界行时回退到 isFileTransferLine 启发式（兼容用户自定义 rsyncOptions）。
+                val outFormatName = extractOutFormatFileName(currentLine)
+                if (outFormatName != null) {
+                    transferredFileList.add(outFormatName)
+                } else if (isFileTransferLine(currentLine)) {
                     transferredFileList.add(currentLine.trim())
                 }
 
@@ -523,8 +542,12 @@ class RsyncWrapper {
                     progressCallback?.invoke(progress)
                 }
 
-                // 收集传输的文件列表
-                if (isFileTransferLine(currentLine)) {
+                // 收集传输的文件列表：优先用 --out-format 定界行精确提取文件名，
+                // 无定界行时回退到 isFileTransferLine 启发式（兼容用户自定义 rsyncOptions）。
+                val outFormatName = extractOutFormatFileName(currentLine)
+                if (outFormatName != null) {
+                    transferredFileList.add(outFormatName)
+                } else if (isFileTransferLine(currentLine)) {
                     transferredFileList.add(currentLine.trim())
                 }
 
@@ -645,12 +668,15 @@ class RsyncWrapper {
             // 解析用户自定义选项
             cmd.addAll(userOptions.split("\\s+".toRegex()).filter { it.isNotEmpty() })
         } else {
-            // 默认选项
-            cmd.add("-avz")
+            // 默认选项：用 -az（不含 -v）+ --out-format 精确输出文件名行，
+            // 替代 -v 的启发式文件名识别，避免 stderr 诊断行被误判为传输文件。
+            // --progress/--stats 保留，分别用于进度解析与大小统计。
+            cmd.add("-az")
             if (settings.showProgress) {
                 cmd.add("--progress")
             }
             cmd.add("--stats")
+            cmd.add("--out-format=$OUT_FORMAT")
         }
 
         // SSH 配置
@@ -717,9 +743,11 @@ class RsyncWrapper {
         if (userOptions.isNotEmpty()) {
             cmd.addAll(userOptions.split("\\s+".toRegex()).filter { it.isNotEmpty() })
         } else {
-            cmd.add("-avz")
+            // 默认选项：用 -az（不含 -v）+ --out-format 精确输出文件名行
+            cmd.add("-az")
             if (settings.showProgress) cmd.add("--progress")
             cmd.add("--stats")
+            cmd.add("--out-format=$OUT_FORMAT")
         }
 
         // files-from 模式必须显式启用递归：-a 在该模式下不会展开出 -r，
@@ -1015,6 +1043,20 @@ class RsyncWrapper {
             }
         }
         return masked
+    }
+
+    /**
+     * 尝试从 `--out-format=::%n::` 输出行中提取文件名。
+     *
+     * rsync 以 `::%n::` 定界输出实际传输的文件名（相对路径），形如
+     * `::build/options/updates.xml::`。此方法精确提取 `%n` 内容，避免与
+     * stderr 诊断行混淆。返回 null 表示该行不是 out-format 行（需回退到
+     * [isFileTransferLine] 启发式判断，兼容用户自定义 rsyncOptions 无 out-format 的情况）。
+     */
+    private fun extractOutFormatFileName(line: String): String? {
+        val match = OUT_FORMAT_LINE_REGEX.matchEntire(line.trim()) ?: return null
+        val name = match.groupValues[1]
+        return name.ifBlank { null }
     }
 
     /**
