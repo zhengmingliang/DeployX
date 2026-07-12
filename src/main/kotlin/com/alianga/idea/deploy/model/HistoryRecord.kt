@@ -61,6 +61,10 @@ data class HistoryRecord(
     @SerializedName("remote_paths")
     val remotePaths: List<String> = emptyList(),
 
+    /** rsync 实际传输的文件路径（远程全路径）。增量同步时可能少于选中的文件数。 */
+    @SerializedName("transferred_files")
+    val transferredFiles: List<String> = emptyList(),
+
     @SerializedName("server_name")
     val serverName: String = "",
 

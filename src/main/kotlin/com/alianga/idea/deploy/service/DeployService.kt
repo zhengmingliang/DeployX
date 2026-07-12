@@ -971,6 +971,7 @@ class DeployService {
                 postCommand = key.postCommand ?: "",
                 relativePaths = reportGroup?.relativePaths ?: emptyList(),
                 remotePaths = reportGroup?.remotePaths ?: emptyList(),
+                transferredFiles = reportGroup?.transferredFiles ?: emptyList(),
                 serverName = reportGroup?.serverName ?: "",
                 serverAddress = reportGroup?.serverAddress ?: "",
                 reportText = reportText,
@@ -1023,6 +1024,7 @@ class DeployService {
                 excludePatterns = key.excludePatterns,
                 relativePaths = reportGroup?.relativePaths ?: emptyList(),
                 remotePaths = reportGroup?.remotePaths ?: emptyList(),
+                transferredFiles = reportGroup?.transferredFiles ?: emptyList(),
                 serverName = reportGroup?.serverName ?: "",
                 serverAddress = reportGroup?.serverAddress ?: "",
                 reportText = reportText
@@ -1076,6 +1078,7 @@ class DeployService {
                 postCommand = key.postCommand ?: "",
                 relativePaths = reportGroup?.relativePaths ?: emptyList(),
                 remotePaths = reportGroup?.remotePaths ?: emptyList(),
+                transferredFiles = reportGroup?.transferredFiles ?: emptyList(),
                 serverName = reportGroup?.serverName ?: "",
                 serverAddress = reportGroup?.serverAddress ?: "",
                 reportText = reportText
@@ -1129,6 +1132,7 @@ class DeployService {
                 postCommand = request.postCommand ?: "",
                 relativePaths = reportGroup?.relativePaths ?: emptyList(),
                 remotePaths = reportGroup?.remotePaths ?: emptyList(),
+                transferredFiles = reportGroup?.transferredFiles ?: emptyList(),
                 serverName = reportGroup?.serverName ?: "",
                 serverAddress = reportGroup?.serverAddress ?: "",
                 reportText = reportText,
