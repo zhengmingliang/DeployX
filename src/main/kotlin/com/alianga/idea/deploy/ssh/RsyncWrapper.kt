@@ -1094,6 +1094,22 @@ class RsyncWrapper {
             return false
         }
 
+        // 排除 stderr 混入的错误/诊断行（基于子串匹配，覆盖不以诊断前缀开头的情况）。
+        // 典型场景：远端 shell 初始化或工具链（mise/asdf 等）在 rsync 执行期间向输出写入错误，
+        // 例如 "/opt/.../mise: /lib64/libc.so.6: version `GLIBC_2.18' not found (required by /root/.local/bin/mise)"
+        // 这类行包含路径与句点，会被误判为传输文件，需在子串层面拦截。
+        val diagnosticSubstrings = listOf(
+            "not found", "required by",
+            "glibc", "libc.so", "ld-linux",
+            "shared object", "cannot open shared object file",
+            "no such file or directory", "command not found",
+            "version `", "is a directory", "not a directory",
+            "segmentation fault", "core dumped"
+        )
+        if (diagnosticSubstrings.any { trimmed.contains(it, ignoreCase = true) }) {
+            return false
+        }
+
         // 排除包含 shell 执行标记的行（如 "$ <command>"）
         if (trimmed.contains('$') || trimmed.contains('>')) {
             return false
