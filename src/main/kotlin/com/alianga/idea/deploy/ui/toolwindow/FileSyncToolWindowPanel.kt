@@ -332,18 +332,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         val historyButtonPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
+            // 统一按钮间距：功能按钮间 3px；回滚与清空之间 6px 作为危险操作分组分隔，
+            // 全部固定值，避免 HorizontalGlue 造成间距随窗口宽度变化、视觉不一致。
             add(historyRefreshButton)
-            add(Box.createHorizontalStrut(2))
+            add(Box.createHorizontalStrut(3))
             add(historyRedeployButton)
-            add(Box.createHorizontalStrut(2))
+            add(Box.createHorizontalStrut(3))
             add(historyFillConfigButton)
-            add(Box.createHorizontalStrut(2))
+            add(Box.createHorizontalStrut(3))
             add(historyCopyReportButton)
-            add(Box.createHorizontalStrut(2))
+            add(Box.createHorizontalStrut(3))
             add(historyExportReportButton)
-            add(Box.createHorizontalStrut(2))
+            add(Box.createHorizontalStrut(3))
             add(historyRollbackButton)
-            add(Box.createHorizontalGlue())
+            add(Box.createHorizontalStrut(6))
             add(historyClearButton)
         }
         historyCardPanel = JPanel(historyCardLayout).apply {
