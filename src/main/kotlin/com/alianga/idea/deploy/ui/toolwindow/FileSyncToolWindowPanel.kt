@@ -2,6 +2,7 @@ package com.alianga.idea.deploy.ui.toolwindow
 
 import com.alianga.idea.deploy.action.ActionUtils
 import com.alianga.idea.deploy.DeployXBundle
+import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.model.DeployItem
 import com.alianga.idea.deploy.model.DeployRequest
 import com.alianga.idea.deploy.model.DownloadItem
@@ -77,6 +78,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         fun getPanel(project: Project): FileSyncToolWindowPanel? {
             return panelByProject[project.hashCode().toString()]
         }
+
+        /** 重新应用日志字体大小到所有已打开的工具窗口面板（设置变更后调用）。 */
+        fun reapplyLogFontAll() {
+            panelByProject.values.forEach { it.reapplyLogFont() }
+        }
     }
 
     private val serverManager = ServerManager.getInstance()
@@ -139,17 +145,19 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private var historyRecords = listOf<HistoryRecord>()
     private val scriptTabPanel = ScriptTabPanel(project)
 
-    // 历史按钮（保留引用以便语言切换时刷新文案）
-    // 按钮同时显示图标与文字（JButton(text, icon)），并设置 toolTipText 作为补充说明。
+    // 历史按钮：使用 AnAction + ActionToolbar（与顶部工具栏同一机制），
+    // 间距由平台统一控制，紧凑且一致；按钮以图标显示，文案与说明通过 tooltip/description 呈现。
     // 回滚按钮图标与历史列表中“可回滚”记录的图标一致（均为 AllIcons.Actions.Rollback）。
-    private val historyRefreshButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.refresh"), AllIcons.Actions.Refresh, DeployXBundle.message("toolwindow.history.refresh.tooltip"))
-    private val historyRedeployButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.redeploy"), AllIcons.Actions.Execute, DeployXBundle.message("toolwindow.history.redeploy.tooltip"))
-    private val historyFillConfigButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.fillConfig"), AllIcons.Actions.Edit, DeployXBundle.message("toolwindow.history.fillConfig.tooltip"))
-    private val historyCopyReportButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.copyReport"), AllIcons.Actions.Copy, DeployXBundle.message("toolwindow.history.copyReport.tooltip"))
-    private val historyExportReportButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.exportReport"), AllIcons.Actions.Download, DeployXBundle.message("toolwindow.history.exportReport.tooltip"))
-    private val historyRollbackButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback, DeployXBundle.message("toolwindow.history.rollback.tooltip"))
-    private val historyViewDetailButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.viewDetail"), AllIcons.Actions.Preview, DeployXBundle.message("toolwindow.history.viewDetail.tooltip"))
-    private val historyClearButton = UiButtonFactory.createToolWindowButton(DeployXBundle.message("toolwindow.history.clear"), AllIcons.Actions.GC, DeployXBundle.message("toolwindow.history.clear.tooltip"))
+    private val historyRefreshAction = UiButtonFactory.createLocalizedAction("toolwindow.history.refresh", AllIcons.Actions.Refresh, "toolwindow.history.refresh.tooltip") { refreshHistory() }
+    private val historyRedeployAction = UiButtonFactory.createLocalizedAction("toolwindow.history.redeploy", AllIcons.Actions.Execute, "toolwindow.history.redeploy.tooltip") { redeployFromHistory() }
+    private val historyFillConfigAction = UiButtonFactory.createLocalizedAction("toolwindow.history.fillConfig", AllIcons.Actions.Edit, "toolwindow.history.fillConfig.tooltip") { fillFromHistory() }
+    private val historyCopyReportAction = UiButtonFactory.createLocalizedAction("toolwindow.history.copyReport", AllIcons.Actions.Copy, "toolwindow.history.copyReport.tooltip") { copyReportFromHistory() }
+    private val historyExportReportAction = UiButtonFactory.createLocalizedAction("toolwindow.history.exportReport", AllIcons.Actions.Download, "toolwindow.history.exportReport.tooltip") { exportReportFromHistory() }
+    private val historyRollbackAction = UiButtonFactory.createLocalizedAction("toolwindow.history.rollback", AllIcons.Actions.Rollback, "toolwindow.history.rollback.tooltip") { rollbackFromHistory() }
+    private val historyViewDetailAction = UiButtonFactory.createLocalizedAction("toolwindow.history.viewDetail", AllIcons.Actions.Preview, "toolwindow.history.viewDetail.tooltip") { viewHistoryDetail() }
+    private val historyClearAction = UiButtonFactory.createLocalizedAction("toolwindow.history.clear", AllIcons.Actions.GC, "toolwindow.history.clear.tooltip") { clearHistory() }
+    /** 历史工具栏（与顶部工具栏同机制，间距由平台统一控制） */
+    private var historyToolbar: ActionToolbar? = null
 
     /** 历史列表为空时的占位提示（替代原先的空白，明确告知用户“暂无记录”） */
     private val historyEmptyLabel = JBLabel(DeployXBundle.message("toolwindow.history.empty"), SwingConstants.CENTER)
@@ -303,34 +311,24 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             }
         })
 
-        historyRefreshButton.addActionListener { refreshHistory() }
-        historyRedeployButton.addActionListener { redeployFromHistory() }
-        historyFillConfigButton.addActionListener { fillFromHistory() }
-        historyCopyReportButton.addActionListener { copyReportFromHistory() }
-        historyExportReportButton.addActionListener { exportReportFromHistory() }
-        historyRollbackButton.addActionListener { rollbackFromHistory() }
-        historyViewDetailButton.addActionListener { viewHistoryDetail() }
-        historyClearButton.addActionListener { clearHistory() }
-
-        val historyButtonPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            // 统一按钮间距：功能按钮间 3px；回滚/查看详情与清空之间 6px 作为危险操作分组分隔，
-            // 全部固定值，避免 HorizontalGlue 造成间距随窗口宽度变化、视觉不一致。
-            add(historyRefreshButton)
-            add(Box.createHorizontalStrut(3))
-            add(historyRedeployButton)
-            add(Box.createHorizontalStrut(3))
-            add(historyFillConfigButton)
-            add(Box.createHorizontalStrut(3))
-            add(historyCopyReportButton)
-            add(Box.createHorizontalStrut(3))
-            add(historyExportReportButton)
-            add(Box.createHorizontalStrut(3))
-            add(historyRollbackButton)
-            add(Box.createHorizontalStrut(3))
-            add(historyViewDetailButton)
-            add(Box.createHorizontalStrut(6))
-            add(historyClearButton)
+        // 历史工具栏：与顶部工具栏同一机制（DefaultActionGroup + ActionToolbar），
+        // 间距由平台统一控制，紧凑一致；回滚与清空之间插入 Separator 作为危险操作分组。
+        val historyActionGroup = DefaultActionGroup().apply {
+            add(historyRefreshAction)
+            add(historyRedeployAction)
+            add(historyFillConfigAction)
+            add(historyCopyReportAction)
+            add(historyExportReportAction)
+            add(historyRollbackAction)
+            add(historyViewDetailAction)
+            addSeparator()
+            add(historyClearAction)
+        }
+        val historyToolbarInstance = ActionManager.getInstance().createActionToolbar("FileSyncHistoryToolbar", historyActionGroup, true)
+        historyToolbarInstance.targetComponent = this
+        historyToolbar = historyToolbarInstance
+        val historyButtonPanel = JPanel(BorderLayout()).apply {
+            add(historyToolbarInstance.component, BorderLayout.CENTER)
         }
         historyCardPanel = JPanel(historyCardLayout).apply {
             add(JBScrollPane(historyList), "list")
@@ -404,23 +402,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // 这里触发工具栏刷新即可应用新语言文本。
         toolbar?.updateActionsImmediately()
 
-        // 历史按钮
-        historyRefreshButton.text = DeployXBundle.message("toolwindow.history.refresh")
-        historyRefreshButton.toolTipText = DeployXBundle.message("toolwindow.history.refresh.tooltip")
-        historyRedeployButton.text = DeployXBundle.message("toolwindow.history.redeploy")
-        historyRedeployButton.toolTipText = DeployXBundle.message("toolwindow.history.redeploy.tooltip")
-        historyFillConfigButton.text = DeployXBundle.message("toolwindow.history.fillConfig")
-        historyFillConfigButton.toolTipText = DeployXBundle.message("toolwindow.history.fillConfig.tooltip")
-        historyCopyReportButton.text = DeployXBundle.message("toolwindow.history.copyReport")
-        historyCopyReportButton.toolTipText = DeployXBundle.message("toolwindow.history.copyReport.tooltip")
-        historyExportReportButton.text = DeployXBundle.message("toolwindow.history.exportReport")
-        historyExportReportButton.toolTipText = DeployXBundle.message("toolwindow.history.exportReport.tooltip")
-        historyRollbackButton.text = DeployXBundle.message("toolwindow.history.rollback")
-        historyRollbackButton.toolTipText = DeployXBundle.message("toolwindow.history.rollback.tooltip")
-        historyViewDetailButton.text = DeployXBundle.message("toolwindow.history.viewDetail")
-        historyViewDetailButton.toolTipText = DeployXBundle.message("toolwindow.history.viewDetail.tooltip")
-        historyClearButton.text = DeployXBundle.message("toolwindow.history.clear")
-        historyClearButton.toolTipText = DeployXBundle.message("toolwindow.history.clear.tooltip")
+        // 历史工具栏 Actions：每个 Action 在 update() 中按当前语言取文案，
+        // 触发工具栏刷新即可应用新语言文本。
+        historyToolbar?.updateActionsImmediately()
         historyEmptyLabel.text = DeployXBundle.message("toolwindow.history.empty")
 
         // Tab 标题（operation=0, log=1, history=2, script=3）
@@ -985,9 +969,21 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     private fun configureLogArea(area: JBTextArea) {
         area.isEditable = false
-        area.font = Font("Monospaced", Font.PLAIN, 12)
+        applyLogFont(area)
         area.lineWrap = true
         area.wrapStyleWord = true
+    }
+
+    /** 按设置中的字体大小刷新给定日志区的字体。 */
+    private fun applyLogFont(area: JBTextArea) {
+        val size = FileSyncSettings.getInstance().logFontSize
+        area.font = Font("Monospaced", Font.PLAIN, size)
+    }
+
+    /** 重新应用日志字体大小到所有已创建的日志区（主日志 + 各服务器子日志）。 */
+    fun reapplyLogFont() {
+        applyLogFont(logArea)
+        serverLogAreas.values.forEach { applyLogFont(it) }
     }
 
     private fun getOrCreateServerLogArea(serverId: String): JBTextArea {

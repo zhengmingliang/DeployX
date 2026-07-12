@@ -7,6 +7,8 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.FormBuilder
 import java.awt.BorderLayout
 import javax.swing.JPanel
+import javax.swing.JSpinner
+import javax.swing.SpinnerNumberModel
 
 /**
  * 通用设置面板 - 集中放置跨模块的通用偏好设置。
@@ -14,6 +16,7 @@ import javax.swing.JPanel
  * 当前包含：
  * - 语言切换（复用 [LanguageSettingsPanel]，已封装语言变更通知逻辑）
  * - 部署/上传完成后的系统通知开关
+ * - 日志区字体大小
  *
  * 后续新增的通用设置项（如主题、日志级别、默认行为等）可继续在此面板追加。
  */
@@ -27,6 +30,11 @@ class GeneralSettingsPanel : JPanel(BorderLayout()) {
     private val systemNotificationCheck = JBCheckBox(
         DeployXBundle.message("settings.general.systemNotification"),
         settings.systemNotification
+    )
+
+    /** 日志字体大小：8-36pt，步进 1 */
+    private val logFontSizeSpinner = JSpinner(
+        SpinnerNumberModel(settings.logFontSize, 8, 36, 1)
     )
 
     init {
@@ -44,7 +52,9 @@ class GeneralSettingsPanel : JPanel(BorderLayout()) {
             .addVerticalGap(8)
             .addComponent(systemNotificationCheck)
             .addComponent(JBLabel("<html><small>${DeployXBundle.message("settings.general.systemNotification.desc")}</small></html>"))
-            // TODO: 后续通用设置项在此追加
+            .addVerticalGap(8)
+            .addLabeledComponent(DeployXBundle.message("settings.general.logFontSize"), logFontSizeSpinner)
+            .addComponent(JBLabel("<html><small>${DeployXBundle.message("settings.general.logFontSize.desc")}</small></html>"))
             .panel
 
         add(formPanel, BorderLayout.NORTH)
@@ -52,16 +62,22 @@ class GeneralSettingsPanel : JPanel(BorderLayout()) {
 
     fun isModified(): Boolean {
         return languagePanel.isModified() ||
-                systemNotificationCheck.isSelected != settings.systemNotification
+                systemNotificationCheck.isSelected != settings.systemNotification ||
+                (logFontSizeSpinner.value as Int) != settings.logFontSize
     }
+
+    /** 仅判断日志字体大小是否被修改（用于 apply 后决定是否刷新已打开的日志区）。 */
+    fun isLogFontSizeModified(): Boolean = (logFontSizeSpinner.value as Int) != settings.logFontSize
 
     fun apply() {
         languagePanel.apply()
         settings.systemNotification = systemNotificationCheck.isSelected
+        settings.logFontSize = logFontSizeSpinner.value as Int
     }
 
     fun reset() {
         languagePanel.reset()
         systemNotificationCheck.isSelected = settings.systemNotification
+        logFontSizeSpinner.value = settings.logFontSize
     }
 }

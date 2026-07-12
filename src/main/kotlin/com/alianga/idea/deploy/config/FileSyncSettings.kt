@@ -37,6 +37,8 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
         var declinedRsyncAutoInstall: Boolean = false,
         // 部署/上传完成后是否弹出系统通知
         var systemNotification: Boolean = true,
+        // 日志区字体大小（pt），默认 12
+        var logFontSize: Int = 12,
         // 上次导出配置的目录（用于 JFileChooser 记住位置）
         var lastExportDir: String = "",
         // 上次导入配置的目录（用于 JFileChooser 记住位置）
@@ -119,6 +121,10 @@ class FileSyncSettings : PersistentStateComponent<FileSyncSettings.State> {
     var systemNotification: Boolean
         get() = myState.systemNotification
         set(value) { myState.systemNotification = value }
+
+    var logFontSize: Int
+        get() = myState.logFontSize.coerceIn(8, 36)
+        set(value) { myState.logFontSize = value }
 
     var lastExportDir: String
         get() = myState.lastExportDir

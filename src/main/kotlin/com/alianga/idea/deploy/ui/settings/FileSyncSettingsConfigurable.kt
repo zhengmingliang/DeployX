@@ -4,6 +4,7 @@ import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.service.ServerManager
+import com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowPanel
 import com.alianga.idea.deploy.util.ConfigExporter
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.options.Configurable
@@ -241,11 +242,16 @@ class FileSyncSettingsConfigurable : Configurable {
     }
 
     override fun apply() {
+        val logFontSizeChanged = generalPanel.isLogFontSizeModified()
         generalPanel.apply()
         serverPanel.apply()
         mappingPanel.apply()
         rsyncPanel.apply()
         scriptPanel.apply()
+        // 日志字体大小变更后，重新应用到所有已打开的工具窗口日志区
+        if (logFontSizeChanged) {
+            FileSyncToolWindowPanel.reapplyLogFontAll()
+        }
     }
 
     override fun reset() {

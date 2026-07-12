@@ -26,13 +26,17 @@ object UiButtonFactory {
     /**
      * 创建工具栏 Action，文案通过 bundle key 在 [update] 中动态获取，
      * 使语言切换后无需重建即可刷新显示文本。
+     *
+     * @param textKey 按钮文案（菜单/标签用）的 bundle key
+     * @param descriptionKey 悬停说明（tooltip）的 bundle key；为 null 时与文案相同
      */
-    fun createLocalizedAction(textKey: String, icon: Icon, handler: () -> Unit): AnAction {
-        return object : AnAction(DeployXBundle.message(textKey), DeployXBundle.message(textKey), icon) {
+    fun createLocalizedAction(textKey: String, icon: Icon, descriptionKey: String? = null, handler: () -> Unit): AnAction {
+        val descKey = descriptionKey ?: textKey
+        return object : AnAction(DeployXBundle.message(textKey), DeployXBundle.message(descKey), icon) {
             override fun actionPerformed(e: AnActionEvent) { handler() }
             override fun update(e: AnActionEvent) {
                 e.presentation.text = DeployXBundle.message(textKey)
-                e.presentation.description = DeployXBundle.message(textKey)
+                e.presentation.description = DeployXBundle.message(descKey)
             }
         }
     }
