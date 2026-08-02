@@ -43,8 +43,17 @@ import java.util.concurrent.ConcurrentHashMap
 @Service
 class RemoteFileBrowserService {
 
-    /** 为指定服务器打开一个浏览会话 */
-    fun openSession(server: ServerConfig): BrowserSession = BrowserSession(server)
+    /**
+     * 为指定服务器打开一个浏览会话。
+     *
+     * 注意：LOCAL 类型服务器不支持远程文件浏览（无 SSH）。
+     * 调用方应在打开前自行判断 [ServerConfig.isLocal] 并提示用户，
+     * 此处为防御性检查--LOCAL 服务器会抛出 [IllegalStateException]。
+     */
+    fun openSession(server: ServerConfig): BrowserSession {
+        check(!server.isLocal) { "Local server does not support remote file browser" }
+        return BrowserSession(server)
+    }
 
     // ===== 远程文件在 IDE 主编辑器中打开 + 保存回写 =====
 

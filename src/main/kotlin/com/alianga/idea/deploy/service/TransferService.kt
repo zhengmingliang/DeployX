@@ -16,7 +16,11 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.SystemInfo
 
 /**
- * 传输服务：根据配置自动选择 rsync 或 SFTP fallback。
+ * 传输服务：根据配置自动选择 rsync 或 SFTP fallback；LOCAL 服务器走本地拷贝。
+ *
+ * 1.0.6 起：
+ * - 新增 [DeployCancelToken] 透传，支持用户终止传输
+ * - [ServerConfig.ServerType.LOCAL] 服务器分流到 [LocalTransferService]，不经过 rsync/SFTP
  */
 @Service
 class TransferService {
@@ -41,12 +45,25 @@ class TransferService {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
-        return withRetry(logCallback) {
+        // LOCAL 服务器：直接本地拷贝，不走 SSH/rsync
+        if (serverConfig.isLocal) {
+            return LocalTransferService.getInstance().copyFilesFrom(
+                sourceBaseDir = localPath,
+                targetBaseDir = remotePath,
+                relativePaths = listOf(""),  // 整目录
+                options = options,
+                cancelToken = cancelToken,
+                logCallback = logCallback,
+                progressCallback = progressCallback
+            )
+        }
+        return withRetry(logCallback, cancelToken) {
             when (chooseMethod(serverConfig, logCallback)) {
-                "rsync" -> rsyncWrapper.sync(localPath, remotePath, serverConfig, options, logCallback, progressCallback)
-                "sftp" -> sftpClient.upload(localPath, remotePath, serverConfig, options, logCallback, progressCallback)
+                "rsync" -> rsyncWrapper.sync(localPath, remotePath, serverConfig, options, logCallback, progressCallback, cancelToken)
+                "sftp" -> sftpClient.upload(localPath, remotePath, serverConfig, options, logCallback, progressCallback, cancelToken)
                 else -> SyncResult(false, error = "未知传输方式")
             }
         }
@@ -59,12 +76,25 @@ class TransferService {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
-        return withRetry(logCallback) {
+        // LOCAL 服务器：本地拷贝
+        if (serverConfig.isLocal) {
+            return LocalTransferService.getInstance().copyFilesFrom(
+                sourceBaseDir = sourceBaseDir,
+                targetBaseDir = remoteBaseDir,
+                relativePaths = relativePaths,
+                options = options,
+                cancelToken = cancelToken,
+                logCallback = logCallback,
+                progressCallback = progressCallback
+            )
+        }
+        return withRetry(logCallback, cancelToken) {
             when (chooseMethod(serverConfig, logCallback)) {
-                "rsync" -> rsyncWrapper.syncFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback)
-                "sftp" -> sftpClient.uploadFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback)
+                "rsync" -> rsyncWrapper.syncFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback, cancelToken)
+                "sftp" -> sftpClient.uploadFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, progressCallback, cancelToken)
                 else -> SyncResult(false, error = "未知传输方式")
             }
         }
@@ -73,6 +103,7 @@ class TransferService {
     /**
      * 从服务器下载文件到本地（PULL）。
      * rsync 可用时使用 rsync pull，不可用时降级到 SFTP download。
+     * LOCAL 服务器：本地拷贝方向对称，直接复用 [LocalTransferService]。
      */
     fun download(
         localPath: String,
@@ -80,13 +111,26 @@ class TransferService {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(direction = SyncDirection.PULL),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
+        // LOCAL 服务器：本地->本地拷贝，方向对称
+        if (serverConfig.isLocal) {
+            return LocalTransferService.getInstance().copyFilesFrom(
+                sourceBaseDir = remotePath,
+                targetBaseDir = localPath,
+                relativePaths = listOf(""),
+                options = options,
+                cancelToken = cancelToken,
+                logCallback = logCallback,
+                progressCallback = progressCallback
+            )
+        }
         val pullOptions = options.copy(direction = SyncDirection.PULL)
-        return withRetry(logCallback) {
+        return withRetry(logCallback, cancelToken) {
             when (chooseMethod(serverConfig, logCallback)) {
-                "rsync" -> rsyncWrapper.pull(localPath, remotePath, serverConfig, pullOptions, logCallback, progressCallback)
-                "sftp" -> sftpClient.download(localPath, remotePath, serverConfig, pullOptions, logCallback, progressCallback)
+                "rsync" -> rsyncWrapper.pull(localPath, remotePath, serverConfig, pullOptions, logCallback, progressCallback, cancelToken)
+                "sftp" -> sftpClient.download(localPath, remotePath, serverConfig, pullOptions, logCallback, progressCallback, cancelToken)
                 else -> SyncResult(false, error = "未知传输方式")
             }
         }
@@ -102,13 +146,26 @@ class TransferService {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(direction = SyncDirection.PULL),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
+        // LOCAL 服务器：本地拷贝
+        if (serverConfig.isLocal) {
+            return LocalTransferService.getInstance().copyFilesFrom(
+                sourceBaseDir = remoteBaseDir,
+                targetBaseDir = localBaseDir,
+                relativePaths = relativePaths,
+                options = options,
+                cancelToken = cancelToken,
+                logCallback = logCallback,
+                progressCallback = progressCallback
+            )
+        }
         val pullOptions = options.copy(direction = SyncDirection.PULL)
-        return withRetry(logCallback) {
+        return withRetry(logCallback, cancelToken) {
             when (chooseMethod(serverConfig, logCallback)) {
-                "rsync" -> rsyncWrapper.pullFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, pullOptions, logCallback, progressCallback)
-                "sftp" -> sftpClient.downloadFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, pullOptions, logCallback, progressCallback)
+                "rsync" -> rsyncWrapper.pullFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, pullOptions, logCallback, progressCallback, cancelToken)
+                "sftp" -> sftpClient.downloadFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, pullOptions, logCallback, progressCallback, cancelToken)
                 else -> SyncResult(false, error = "未知传输方式")
             }
         }
@@ -117,14 +174,21 @@ class TransferService {
     /**
      * 传输重试包装器：对可重试的失败（网络/连接中断）最多重试 [MAX_RETRIES] 次，
      * 间隔 [RETRY_DELAY_MS] 毫秒。认证失败、路径不存在等不可重试的错误直接返回。
+     *
+     * 用户终止（[DeployCancelledException]）不重试，直接向上抛出。
      */
     private fun withRetry(
         logCallback: ((String) -> Unit)?,
+        cancelToken: DeployCancelToken?,
         block: () -> SyncResult
     ): SyncResult {
         var result = block()
         var attempt = 1
         while (!result.success && attempt < MAX_RETRIES && isRetriable(result)) {
+            // 重试前检查取消状态
+            if (cancelToken?.isCancelled() == true) {
+                throw DeployCancelledException()
+            }
             attempt++
             logCallback?.invoke(DeployXBundle.message("transfer.retry.attempt", attempt))
             Thread.sleep(RETRY_DELAY_MS)
@@ -138,6 +202,7 @@ class TransferService {
      * - rsync exit code 12（连接中断）、255（SSH 错误）可重试
      * - SFTP 连接异常（error 含 "connect" / "session" / "timeout"）可重试
      * - 认证失败（Permission denied）、路径不存在等不可重试
+     * - 用户终止不可重试（由 [withRetry] 提前抛出，不会进入此方法）
      */
     private fun isRetriable(result: SyncResult): Boolean {
         val error = result.error ?: return false
@@ -147,6 +212,9 @@ class TransferService {
         // 本地路径不存在不重试
         if (error.contains("not found", ignoreCase = true) ||
             error.contains("不存在", ignoreCase = true)) return false
+        // 用户终止不重试
+        if (error.contains("cancelled", ignoreCase = true) ||
+            error.contains("终止", ignoreCase = true)) return false
         // rsync exit code 12 / 255 可重试
         if (error.contains("code 12") || error.contains("code 255")) return true
         // SFTP 连接/会话/超时异常可重试

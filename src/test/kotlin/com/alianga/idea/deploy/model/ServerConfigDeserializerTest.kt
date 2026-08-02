@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.reflect.TypeToken
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -12,6 +13,9 @@ import org.junit.jupiter.api.Test
 /**
  * 回归测试：1.0.3 给 ServerConfig 新增 group/tags 字段后，旧的 servers.json
  * 缺失这两个字段，Gson 反序列化会塞 null，触发 NPE 导致服务器列表加载为空。
+ *
+ * 1.0.6 新增 type 字段（ServerType），同样存在缺失/null 触发 NPE 的风险，
+ * 本测试一并覆盖。
  *
  * 见 idea.log：
  *   NullPointerException: Parameter specified as non-null is null:
@@ -63,10 +67,14 @@ class ServerConfigDeserializerTest {
         assertEquals("164", first.id)
         assertEquals("", first.group)   // 缺失字段兜底为空串，而不是 null
         assertTrue(first.tags.isEmpty())
+        // 1.0.6：缺失 type 字段兜底为 SSH，而不是 null
+        assertEquals(ServerConfig.ServerType.SSH, first.type)
+        assertFalse(first.isLocal)
         // 关键：copy() 不再抛 NPE
         val copied = first.copy(password = "secret")
         assertEquals("secret", copied.password)
-        assertEquals("164", copied.group)
+        assertEquals("", copied.group)
+        assertEquals(ServerConfig.ServerType.SSH, copied.type)
 
         val second = servers[1]
         assertTrue(second.isDefault)
@@ -101,6 +109,39 @@ class ServerConfigDeserializerTest {
     }
 
     @Test
+    fun `local server type round trips`() {
+        val original = ServerConfig(
+            id = "local-prod", name = "本地投产目录", host = "", port = 0, user = "",
+            authType = ServerConfig.AuthType.PASSWORD, password = "",
+            keyFile = "", isDefault = false,
+            group = "", tags = emptyList(),
+            type = ServerConfig.ServerType.LOCAL
+        )
+        val json = gsonWithAdapter.toJson(original)
+        val back = gsonWithAdapter.fromJson(json, ServerConfig::class.java)
+        assertEquals(original, back)
+        assertEquals(ServerConfig.ServerType.LOCAL, back.type)
+        assertTrue(back.isLocal)
+        // LOCAL 类型的 displayAddress 应带 [local] 标记
+        assertEquals("[local] 本地投产目录", back.displayAddress)
+    }
+
+    @Test
+    fun `legacy json without type defaults to SSH`() {
+        val json = """{"id":"x","name":"y","host":"z","user":"u","port":22}"""
+        val server = gsonWithAdapter.fromJson(json, ServerConfig::class.java)
+        assertEquals(ServerConfig.ServerType.SSH, server.type)
+        assertFalse(server.isLocal)
+    }
+
+    @Test
+    fun `invalid type value falls back to SSH`() {
+        val json = """{"id":"x","name":"y","host":"z","user":"u","type":"unknown"}"""
+        val server = gsonWithAdapter.fromJson(json, ServerConfig::class.java)
+        assertEquals(ServerConfig.ServerType.SSH, server.type)
+    }
+
+    @Test
     fun `missing optional fields fall back to defaults`() {
         // 极简 JSON：只包含必填字段
         val minimal = """{"id":"x","name":"y","host":"z","user":"u"}"""
@@ -112,6 +153,8 @@ class ServerConfigDeserializerTest {
         assertEquals(false, server.isDefault)
         assertEquals("", server.group)
         assertTrue(server.tags.isEmpty())
+        // 1.0.6：type 缺失时默认 SSH
+        assertEquals(ServerConfig.ServerType.SSH, server.type)
     }
 
     @Test
@@ -119,11 +162,13 @@ class ServerConfigDeserializerTest {
         // 某些工具可能写入显式 null
         val jsonWithNulls = """
             {"id":"x","name":"y","host":"z","user":"u",
-             "group":null,"tags":null,"password":null}
+             "group":null,"tags":null,"password":null,"type":null}
         """.trimIndent()
         val server = gsonWithAdapter.fromJson(jsonWithNulls, ServerConfig::class.java)
         assertEquals("", server.group)
         assertTrue(server.tags.isEmpty())
         assertEquals("", server.password)
+        // type 为 null 时兜底为 SSH
+        assertEquals(ServerConfig.ServerType.SSH, server.type)
     }
 }

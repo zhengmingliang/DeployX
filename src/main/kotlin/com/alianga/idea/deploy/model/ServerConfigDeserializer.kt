@@ -11,12 +11,14 @@ import java.lang.reflect.Type
  *
  * 背景：1.0.3 给 ServerConfig 新增了 `group`/`tags` 字段，类型为非空 `String`/`List<String>`
  * 并带有 Kotlin 默认值（`""` / `emptyList()`）。但 Gson 反序列化不触发 Kotlin 默认参数机制，
- * 对 JSON 中缺失的字段会直接赋 `null`，破坏非空契约——随后调用 `copy()` 即抛
+ * 对 JSON 中缺失的字段会直接赋 `null`，破坏非空契约--随后调用 `copy()` 即抛
  * `NullPointerException: Parameter specified as non-null is null: ... parameter group`，
  * 导致 1.0.3 升级后旧 servers.json 加载失败、服务器列表为空。
  *
+ * 1.0.6 新增 `type` 字段（`ServerType`），同样存在上述风险，本反序列化器一并兜底。
+ *
  * 本反序列化器对所有可空缺失字段做兜底，保证反序列化后的 ServerConfig 满足非空约束。
- * 同时兼容旧版 JSON 中可能缺失的字段（port/auth_type/password/key_file/is_default 等）。
+ * 同时兼容旧版 JSON 中可能缺失的字段（port/auth_type/password/key_file/is_default/type 等）。
  */
 object ServerConfigDeserializer : JsonDeserializer<ServerConfig> {
     override fun deserialize(
@@ -41,6 +43,10 @@ object ServerConfigDeserializer : JsonDeserializer<ServerConfig> {
             ServerConfig.AuthType.entries.firstOrNull { it.value == value } ?: ServerConfig.AuthType.PASSWORD
         }
 
+        val serverType = str("type", "ssh").let { value ->
+            ServerConfig.ServerType.entries.firstOrNull { it.value == value } ?: ServerConfig.ServerType.SSH
+        }
+
         return ServerConfig(
             id = str("id"),
             name = str("name"),
@@ -52,7 +58,8 @@ object ServerConfigDeserializer : JsonDeserializer<ServerConfig> {
             keyFile = str("key_file"),
             isDefault = bool("is_default", false),
             group = str("group"),
-            tags = tags
+            tags = tags,
+            type = serverType
         )
     }
 

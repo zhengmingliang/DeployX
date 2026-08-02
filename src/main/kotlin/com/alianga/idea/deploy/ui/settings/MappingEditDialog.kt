@@ -169,11 +169,24 @@ class MappingEditDialog(
             val serverId = selectedServerStr.substringBefore(" - ")
             val server = ServerManager.getInstance().getServer(serverId) ?: return@addActionListener
 
-            // 打开远程路径选择对话框
-            val currentPath = remoteDirField.text.trim().ifBlank { "/" }
-            val dialog = RemotePathChooserDialog(server, currentPath)
-            if (dialog.showAndGet()) {
-                remoteDirField.text = dialog.getSelectedPath()
+            if (server.isLocal) {
+                // LOCAL 服务器：remoteDir 实际是本地目标目录，改用本地目录选择器
+                val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor()
+                    .withTitle(DeployXBundle.message("dialog.mapping.browser.selectLocal"))
+                    .withDescription(DeployXBundle.message("dialog.mapping.browser.selectLocal.desc"))
+                val fileChooser = com.intellij.openapi.fileChooser.FileChooserFactory.getInstance()
+                    .createFileChooser(descriptor, project, remoteDirField)
+                val chosen = fileChooser.choose(null, null)
+                if (chosen.isNotEmpty()) {
+                    remoteDirField.text = chosen.first().path
+                }
+            } else {
+                // SSH 服务器：打开远程路径选择对话框
+                val currentPath = remoteDirField.text.trim().ifBlank { "/" }
+                val dialog = RemotePathChooserDialog(server, currentPath)
+                if (dialog.showAndGet()) {
+                    remoteDirField.text = dialog.getSelectedPath()
+                }
             }
         }
         // 设置工具提示

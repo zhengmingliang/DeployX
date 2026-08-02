@@ -191,6 +191,7 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
         private val columns = arrayOf(
             DeployXBundle.message("settings.server.column.id"),
             DeployXBundle.message("settings.server.column.name"),
+            DeployXBundle.message("settings.server.column.type"),
             DeployXBundle.message("settings.server.column.host"),
             DeployXBundle.message("settings.server.column.port"),
             DeployXBundle.message("settings.server.column.user"),
@@ -216,11 +217,12 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
             return when (columnIndex) {
                 0 -> server.id
                 1 -> server.name
-                2 -> server.host
-                3 -> server.port
-                4 -> server.user
-                5 -> server.authType.value
-                6 -> if (server.isDefault) "✓" else ""
+                2 -> if (server.isLocal) DeployXBundle.message("dialog.server.type.local") else DeployXBundle.message("dialog.server.type.ssh")
+                3 -> server.host
+                4 -> if (server.isLocal) "-" else server.port.toString()
+                5 -> if (server.isLocal) "-" else server.user
+                6 -> if (server.isLocal) "-" else server.authType.value
+                7 -> if (server.isDefault) "✓" else ""
                 else -> ""
             }
         }

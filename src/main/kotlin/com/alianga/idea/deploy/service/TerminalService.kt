@@ -36,8 +36,16 @@ class TerminalService : Disposable {
 
     /**
      * 为指定服务器打开 SSH 终端（免密，认证在协议层完成）。
+     *
+     * 注意：LOCAL 类型服务器不支持 SSH 终端，调用此方法会返回 false。
+     * 调用方应在调用前判断 [ServerConfig.isLocal] 并提示用户。
      */
     fun openTerminal(project: Project, serverConfig: ServerConfig): Boolean {
+        // LOCAL 服务器不支持 SSH 终端
+        if (serverConfig.isLocal) {
+            LOG.warn("Local server does not support SSH terminal: ${serverConfig.id}")
+            return false
+        }
         LOG.info("========================================")
         LOG.info("Opening SSH terminal (password-free) for server: ${serverConfig.name} (${serverConfig.displayAddress})")
         LOG.info("========================================")
@@ -110,6 +118,11 @@ class TerminalService : Disposable {
      * 打开 SSH 终端并自动切换到指定目录。
      */
     fun openTerminalInDir(project: Project, serverConfig: ServerConfig, initialDirectory: String): Boolean {
+        // LOCAL 服务器不支持 SSH 终端
+        if (serverConfig.isLocal) {
+            LOG.warn("Local server does not support SSH terminal: ${serverConfig.id}")
+            return false
+        }
         LOG.info("Opening SSH terminal with cd to: $initialDirectory for ${serverConfig.displayAddress}")
         val title = "SSH: ${serverConfig.name} - ${serverConfig.user}@${serverConfig.host}"
         val pipeName = "${serverConfig.host}:${serverConfig.port}"

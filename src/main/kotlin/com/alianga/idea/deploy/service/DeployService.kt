@@ -67,7 +67,8 @@ class DeployService {
         dryRun: Boolean = false,
         logCallback: ((String) -> Unit)? = null,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
-        serverLogCallback: ((serverId: String, line: String) -> Unit)? = null
+        serverLogCallback: ((serverId: String, line: String) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): List<SyncResult> {
         if (items.isEmpty()) return emptyList()
 
@@ -91,7 +92,7 @@ class DeployService {
             groups.forEach { (key, groupItems) ->
                 executor.submit {
                     try {
-                        processUploadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun)
+                        processUploadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun, cancelToken)
                     } finally {
                         latch.countDown()
                     }
@@ -101,7 +102,7 @@ class DeployService {
             executor.shutdown()
         } else {
             groups.forEach { (key, groupItems) ->
-                processUploadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun)
+                processUploadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun, cancelToken)
             }
         }
 
@@ -118,8 +119,10 @@ class DeployService {
         serverLogCallback: ((serverId: String, line: String) -> Unit)?,
         logCallback: ((String) -> Unit)?,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)?,
-        dryRun: Boolean
+        dryRun: Boolean,
+        cancelToken: DeployCancelToken? = null
     ) {
+        cancelToken?.throwIfCancelled()
         val groupLog: (String) -> Unit = { line ->
             if (serverLogCallback != null) serverLogCallback.invoke(key.serverId, line) else logCallback?.invoke(line)
         }
@@ -139,7 +142,9 @@ class DeployService {
         groupLog(DeployXBundle.message("deploy.log.remoteRootDir", key.remoteBaseDir))
         groupLog(DeployXBundle.message("deploy.log.fileCount", groupItems.size))
 
-        val sshConnection = if (!dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
+        // LOCAL 服务器：跳过 SSH 命令执行，直接走本地拷贝（TransferService 内部分流）
+        val isLocal = server.isLocal
+        val sshConnection = if (!isLocal && !dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
             SshConnection(server)
         } else null
 
@@ -159,15 +164,20 @@ class DeployService {
                 }
             }
 
-            if (!dryRun && !key.preCommand.isNullOrBlank()) {
+            // LOCAL 服务器跳过远程前置命令；SSH 服务器执行前置命令
+            if (!isLocal && !dryRun && !key.preCommand.isNullOrBlank()) {
+                cancelToken?.throwIfCancelled()
                 val resolvedPreCommand = ScriptRefResolver.resolve(key.preCommand, server, key.remoteBaseDir)
                 groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                 val conn = sshConnection ?: return
                 val preResult = conn.executeCommand(resolvedPreCommand)
                 if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                 if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandFailedBatch", preResult.exitCode, preResult.error))
+            } else if (isLocal && !dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
+                groupLog(DeployXBundle.message("deploy.log.skipCommandsForLocal"))
             }
 
+            cancelToken?.throwIfCancelled()
             val relativePaths = groupItems.map { item ->
                 if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
             }.filter { it.isNotBlank() }
@@ -179,7 +189,8 @@ class DeployService {
                 serverConfig = server,
                 options = SyncOptions(excludePatterns = key.excludePatterns, dryRun = dryRun),
                 logCallback = groupLog,
-                progressCallback = progressCallback
+                progressCallback = progressCallback,
+                cancelToken = cancelToken
             )
 
             val resultWithReport = result.copy(
@@ -205,7 +216,8 @@ class DeployService {
                 saveUploadGroupHistory(key, groupItems, resultWithReport, duration, status)
             }
 
-            if (!dryRun && !key.postCommand.isNullOrBlank()) {
+            if (!isLocal && !dryRun && !key.postCommand.isNullOrBlank()) {
+                cancelToken?.throwIfCancelled()
                 val resolvedPostCommand = ScriptRefResolver.resolve(key.postCommand, server, key.remoteBaseDir)
                 groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                 val conn = sshConnection ?: return
@@ -213,6 +225,9 @@ class DeployService {
                 if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                 if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandFailedBatch", postResult.exitCode, postResult.error))
             }
+        } catch (e: DeployCancelledException) {
+            groupLog(DeployXBundle.message("toolwindow.log.aborted"))
+            results.add(SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("transfer.cancelled")))
         } finally {
             sshConnection?.disconnect()
         }
@@ -226,7 +241,8 @@ class DeployService {
         dryRun: Boolean = false,
         logCallback: ((String) -> Unit)? = null,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
-        serverLogCallback: ((serverId: String, line: String) -> Unit)? = null
+        serverLogCallback: ((serverId: String, line: String) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): List<SyncResult> {
         if (items.isEmpty()) return emptyList()
 
@@ -248,7 +264,7 @@ class DeployService {
             groups.forEach { (key, groupItems) ->
                 executor.submit {
                     try {
-                        processDownloadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun)
+                        processDownloadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun, cancelToken)
                     } finally {
                         latch.countDown()
                     }
@@ -258,7 +274,7 @@ class DeployService {
             executor.shutdown()
         } else {
             groups.forEach { (key, groupItems) ->
-                processDownloadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun)
+                processDownloadGroup(key, groupItems, results, serverLogCallback, logCallback, progressCallback, dryRun, cancelToken)
             }
         }
         return results
@@ -271,8 +287,10 @@ class DeployService {
         serverLogCallback: ((serverId: String, line: String) -> Unit)?,
         logCallback: ((String) -> Unit)?,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)?,
-        dryRun: Boolean
+        dryRun: Boolean,
+        cancelToken: DeployCancelToken? = null
     ) {
+        cancelToken?.throwIfCancelled()
         val server = ServerManager.getInstance().getServer(key.serverId)
         if (server == null) {
             results.add(SyncResult(false, error = DeployXBundle.message("deploy.error.serverNotFound", key.serverId)))
@@ -285,7 +303,7 @@ class DeployService {
         }
 
         groupLog(DeployXBundle.message("deploy.log.downloadGroupHeader"))
-        groupLog(DeployXBundle.message("deploy.log.server", key.serverId))
+        groupLog(DeployXBundle.message("deploy.log.server", server.displayAddress))
         groupLog(DeployXBundle.message("deploy.log.pullDirection"))
         groupLog(DeployXBundle.message("deploy.log.pullRemoteSource", key.remoteBaseDir))
         groupLog(DeployXBundle.message("deploy.log.pullLocalTarget", key.localBaseDir))
@@ -299,22 +317,29 @@ class DeployService {
         )
 
         val startTime = System.currentTimeMillis()
-        val syncResult = transferService.downloadFilesFrom(
-            localBaseDir = key.localBaseDir,
-            remoteBaseDir = key.remoteBaseDir,
-            relativePaths = relativePaths,
-            serverConfig = server,
-            options = options,
-            logCallback = { groupLog(it) },
-            progressCallback = progressCallback
-        )
-        results.add(syncResult)
+        try {
+            cancelToken?.throwIfCancelled()
+            val syncResult = transferService.downloadFilesFrom(
+                localBaseDir = key.localBaseDir,
+                remoteBaseDir = key.remoteBaseDir,
+                relativePaths = relativePaths,
+                serverConfig = server,
+                options = options,
+                logCallback = { groupLog(it) },
+                progressCallback = progressCallback,
+                cancelToken = cancelToken
+            )
+            results.add(syncResult)
 
-        // 仅在实际拉取（非 dry-run 预览）成功/失败后记录历史；预览不写历史
-        if (!dryRun) {
-            val duration = System.currentTimeMillis() - startTime
-            val status = if (syncResult.success) HistoryRecord.OperationStatus.SUCCESS else HistoryRecord.OperationStatus.FAILED
-            saveDownloadGroupHistory(key, groupItems, syncResult, duration, status)
+            // 仅在实际拉取（非 dry-run 预览）成功/失败后记录历史；预览不写历史
+            if (!dryRun) {
+                val duration = System.currentTimeMillis() - startTime
+                val status = if (syncResult.success) HistoryRecord.OperationStatus.SUCCESS else HistoryRecord.OperationStatus.FAILED
+                saveDownloadGroupHistory(key, groupItems, syncResult, duration, status)
+            }
+        } catch (e: DeployCancelledException) {
+            groupLog(DeployXBundle.message("toolwindow.log.aborted"))
+            results.add(SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("transfer.cancelled")))
         }
     }
 
@@ -325,7 +350,8 @@ class DeployService {
         items: List<DeployItem>,
         logCallback: ((String) -> Unit)? = null,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
-        serverLogCallback: ((serverId: String, line: String) -> Unit)? = null
+        serverLogCallback: ((serverId: String, line: String) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): List<DeployResult> {
         if (items.isEmpty()) return emptyList()
         val groups = items.groupBy {
@@ -345,6 +371,11 @@ class DeployService {
 
         val results = mutableListOf<DeployResult>()
         groups.forEach { (key, groupItems) ->
+            // 每个分组开始前检查取消状态
+            if (cancelToken?.isCancelled() == true) {
+                groupLog(serverLogCallback, logCallback, key.serverId, DeployXBundle.message("toolwindow.log.aborted"))
+                return@forEach
+            }
             val groupLog: (String) -> Unit = { line ->
                 if (serverLogCallback != null) serverLogCallback.invoke(key.serverId, line) else logCallback?.invoke(line)
             }
@@ -358,22 +389,30 @@ class DeployService {
                 return@forEach
             }
 
+            val isLocal = server.isLocal
             groupLog(DeployXBundle.message("deploy.log.deployGroupHeader", taskId))
             groupLog(DeployXBundle.message("deploy.log.server", server.displayAddress))
             groupLog(DeployXBundle.message("deploy.log.localRootDir", key.sourceBaseDir))
             groupLog(DeployXBundle.message("deploy.log.remoteRootDir", key.remoteBaseDir))
             groupLog(DeployXBundle.message("deploy.log.fileCount", groupItems.size))
 
-            // 计算需要 SSH 连接的步骤
-            val needsSshConnection = !key.preCommand.isNullOrBlank() ||
+            // LOCAL 服务器跳过所有 SSH 相关步骤；SSH 服务器按需建立连接
+            val needsSshConnection = !isLocal && (
+                !key.preCommand.isNullOrBlank() ||
                     !key.backupDir.isNullOrBlank() ||
                     !key.unzipDest.isNullOrBlank() ||
                     !key.postCommand.isNullOrBlank()
+            )
 
             // 相对路径预处理
             val relativePaths = groupItems.map { item ->
                 if (item.isDirectory) item.relativePath.trimEnd('/') + "/" else item.relativePath.trim('/')
             }.filter { it.isNotBlank() }
+
+            // LOCAL 服务器跳过 SSH 命令告警
+            if (isLocal && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
+                groupLog(DeployXBundle.message("deploy.log.skipCommandsForLocal"))
+            }
 
             // 先建立 SSH 连接（如果需要），确保连接可用后再上传
             val sshConnection = if (needsSshConnection) {
@@ -401,7 +440,8 @@ class DeployService {
 
             try {
                 // 步骤 1: 上传前命令（在备份和上传之前执行）
-                if (!key.preCommand.isNullOrBlank()) {
+                if (!isLocal && !key.preCommand.isNullOrBlank()) {
+                    cancelToken?.throwIfCancelled()
                     val resolvedPreCommand = ScriptRefResolver.resolve(key.preCommand, server, key.remoteBaseDir)
                     groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                     val conn = sshConnection ?: return@forEach
@@ -411,10 +451,11 @@ class DeployService {
                     else groupLog(DeployXBundle.message("deploy.log.preCommandSuccess"))
                 }
 
-                // 步骤 2: 备份（在上传之前执行，确保备份的是旧版本）
+                // 步骤 2: 备份（在上传之前执行，确保备份的是旧版本）-- LOCAL 服务器跳过
                 var backupPath: String? = null
                 val backupDir = key.backupDir
-                if (sshConnection != null && !backupDir.isNullOrBlank()) {
+                if (!isLocal && sshConnection != null && !backupDir.isNullOrBlank()) {
+                    cancelToken?.throwIfCancelled()
                     val backupResult = if (!key.backupSource.isNullOrBlank()) {
                         groupLog(DeployXBundle.message("deploy.log.backupConfigSource", if (needsSshConnection) 4 else 2, key.backupSource, backupDir))
                         BackupService.doBackup(sshConnection, key.backupSource, backupDir, groupLog)
@@ -434,11 +475,14 @@ class DeployService {
                         return@forEach
                     }
                     backupPath = backupResult.path
+                } else if (isLocal) {
+                    groupLog(DeployXBundle.message("deploy.log.skipBackup", if (needsSshConnection) 4 else 2))
                 } else {
                     groupLog(DeployXBundle.message("deploy.log.skipBackup", if (needsSshConnection) 4 else 2))
                 }
 
-                // 步骤 3: 上传文件（使用 rsync 命令）
+                // 步骤 3: 上传文件（使用 rsync 命令；LOCAL 服务器走本地拷贝）
+                cancelToken?.throwIfCancelled()
                 val uploadStep = if (needsSshConnection) 2 else 1
                 groupLog(DeployXBundle.message("deploy.log.batchUpload", uploadStep, if (needsSshConnection) 4 else 2))
                 val syncResult = TransferService.getInstance().transferFilesFrom(
@@ -448,7 +492,8 @@ class DeployService {
                     serverConfig = server,
                     options = SyncOptions(excludePatterns = key.excludePatterns),
                     logCallback = groupLog,
-                    progressCallback = progressCallback
+                    progressCallback = progressCallback,
+                    cancelToken = cancelToken
                 )
                 if (!syncResult.success) {
                     val result = DeployResult(
@@ -464,7 +509,7 @@ class DeployService {
                 }
                 groupLog(DeployXBundle.message("deploy.log.uploadComplete"))
 
-                // 如果不需要 SSH 连接，直接完成
+                // 如果不需要 SSH 连接（LOCAL 服务器或无 SSH 步骤），直接完成
                 if (!needsSshConnection) {
                     val duration = System.currentTimeMillis() - startTime
                     groupLog(DeployXBundle.message("deploy.log.deployGroupComplete", duration))
@@ -495,6 +540,7 @@ class DeployService {
 
                 // 步骤 4: 解压
                 if (!key.unzipDest.isNullOrBlank()) {
+                    cancelToken?.throwIfCancelled()
                     val zipItems = groupItems.filter { it.relativePath.endsWith(".zip", ignoreCase = true) }
                     when {
                         zipItems.isEmpty() -> groupLog(DeployXBundle.message("deploy.log.skipUnzipNoZip"))
@@ -540,6 +586,7 @@ class DeployService {
 
                 // 步骤 5: 上传后命令
                 if (!key.postCommand.isNullOrBlank()) {
+                    cancelToken?.throwIfCancelled()
                     val resolvedPostCommand = ScriptRefResolver.resolve(key.postCommand, server, key.remoteBaseDir)
                     groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                     val conn = sshConnection ?: return@forEach
@@ -575,6 +622,15 @@ class DeployService {
                 )
                 results.add(result)
                 saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS, backupPath)
+            } catch (e: DeployCancelledException) {
+                groupLog(DeployXBundle.message("toolwindow.log.aborted"))
+                val result = DeployResult(
+                    false,
+                    taskId = taskId,
+                    error = DeployXBundle.message("deploy.error.cancelled"),
+                    duration = System.currentTimeMillis() - startTime
+                )
+                results.add(result)
             } catch (e: Exception) {
                 LOG.error("Batch deploy group failed", e)
                 val result = DeployResult(false, taskId = taskId, error = DeployXBundle.message("deploy.error.deployException", e.message ?: ""), duration = System.currentTimeMillis() - startTime)
@@ -588,13 +644,24 @@ class DeployService {
         return results
     }
 
+    /** 工具：按 serverId 输出分组日志（供 cancelToken 提前退出时使用） */
+    private fun groupLog(
+        serverLogCallback: ((serverId: String, line: String) -> Unit)?,
+        logCallback: ((String) -> Unit)?,
+        serverId: String,
+        line: String
+    ) {
+        if (serverLogCallback != null) serverLogCallback.invoke(serverId, line) else logCallback?.invoke(line)
+    }
+
     /**
      * 完整部署
      */
     fun deploy(
         request: DeployRequest,
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): DeployResult {
         val startTime = System.currentTimeMillis()
         val taskId = UUID.randomUUID().toString().substring(0, 8)
@@ -612,11 +679,19 @@ class DeployService {
                 logs = listOf(DeployXBundle.message("deploy.log.serverNotFoundLog", request.serverId))
             )
 
-        // 判断是否需要 SSH 连接
-        val needsSshConnection = !request.preCommand.isNullOrBlank() ||
+        val isLocal = server.isLocal
+        // LOCAL 服务器跳过所有 SSH 步骤；SSH 服务器按需建立连接
+        val needsSshConnection = !isLocal && (
+            !request.preCommand.isNullOrBlank() ||
                 !request.backupDir.isNullOrBlank() ||
                 !request.unzipDest.isNullOrBlank() ||
                 !request.postCommand.isNullOrBlank()
+        )
+
+        // LOCAL 服务器跳过 SSH 命令告警
+        if (isLocal && (!request.preCommand.isNullOrBlank() || !request.postCommand.isNullOrBlank())) {
+            logCallback?.invoke(DeployXBundle.message("deploy.log.skipCommandsForLocal"))
+        }
 
         // 先建立 SSH 连接（如果需要），确保连接可用后再上传
         val sshConnection = if (needsSshConnection) {
@@ -644,8 +719,9 @@ class DeployService {
         } else null
 
         try {
-            // 步骤 1: 执行上传前命令（在备份和上传之前执行）
-            if (!request.preCommand.isNullOrBlank()) {
+            // 步骤 1: 执行上传前命令（在备份和上传之前执行）-- LOCAL 服务器跳过
+            if (!isLocal && !request.preCommand.isNullOrBlank()) {
+                cancelToken?.throwIfCancelled()
                 val resolvedPreCommand = ScriptRefResolver.resolve(request.preCommand, server, request.remotePath)
                 logCallback?.invoke(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
@@ -660,9 +736,10 @@ class DeployService {
                 }
             }
 
-            // 步骤 2: 备份（在上传之前执行，确保备份的是旧版本）
+            // 步骤 2: 备份（在上传之前执行，确保备份的是旧版本）-- LOCAL 服务器跳过
             var backupPath: String? = null
-            if (sshConnection != null && !request.backupDir.isNullOrBlank()) {
+            if (!isLocal && sshConnection != null && !request.backupDir.isNullOrBlank()) {
+                cancelToken?.throwIfCancelled()
                 val localFile = File(request.localPath)
                 val backupSource = if (!request.backupSource.isNullOrBlank()) {
                     request.backupSource
@@ -690,7 +767,8 @@ class DeployService {
                 logCallback?.invoke(DeployXBundle.message("deploy.log.skipBackup", if (needsSshConnection) 4 else 2))
             }
 
-            // 步骤 3: 上传文件（使用 rsync 命令）
+            // 步骤 3: 上传文件（使用 rsync 命令；LOCAL 服务器走本地拷贝）
+            cancelToken?.throwIfCancelled()
             val uploadStep = if (needsSshConnection) 2 else 1
             logCallback?.invoke(DeployXBundle.message("deploy.log.uploadFiles", uploadStep, if (needsSshConnection) 4 else 2))
             val syncOptions = SyncOptions(excludePatterns = request.excludePatterns)
@@ -700,7 +778,8 @@ class DeployService {
                 server,
                 syncOptions,
                 logCallback,
-                progressCallback
+                progressCallback,
+                cancelToken
             )
 
             if (!syncResult.success) {
@@ -717,7 +796,7 @@ class DeployService {
             }
             logCallback?.invoke(DeployXBundle.message("deploy.log.uploadComplete"))
 
-            // 如果不需要 SSH 连接，直接完成
+            // 如果不需要 SSH 连接（LOCAL 服务器或无 SSH 步骤），直接完成
             if (!needsSshConnection) {
                 val duration = System.currentTimeMillis() - startTime
                 logCallback?.invoke(DeployXBundle.message("deploy.log.deployComplete", duration))
@@ -746,6 +825,7 @@ class DeployService {
 
             // 步骤 4: 解压（可选）
             if (!request.unzipDest.isNullOrBlank()) {
+                cancelToken?.throwIfCancelled()
                 logCallback?.invoke(DeployXBundle.message("deploy.log.unzipRemoteFileStart"))
                 val filename = File(request.localPath).name
                 val remoteFile = "${request.remotePath}/$filename"
@@ -773,6 +853,7 @@ class DeployService {
 
             // 步骤 5: 执行上传后命令（可选）
             if (!request.postCommand.isNullOrBlank()) {
+                cancelToken?.throwIfCancelled()
                 val resolvedPostCommand = ScriptRefResolver.resolve(request.postCommand, server, request.remotePath)
                 logCallback?.invoke(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
@@ -814,6 +895,14 @@ class DeployService {
                 duration = duration,
                 reportGroup = reportGroup
             )
+        } catch (e: DeployCancelledException) {
+            logCallback?.invoke(DeployXBundle.message("toolwindow.log.aborted"))
+            return DeployResult(
+                success = false,
+                taskId = taskId,
+                error = DeployXBundle.message("deploy.error.cancelled"),
+                duration = System.currentTimeMillis() - startTime
+            )
         } catch (e: Exception) {
             LOG.error("Deploy failed", e)
             logCallback?.invoke(DeployXBundle.message("deploy.log.deployExceptionErrorLog", e.message ?: ""))
@@ -837,7 +926,8 @@ class DeployService {
         includePreCommand: Boolean = false,
         includePostCommand: Boolean = false,
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): DeployResult {
         LOG.info("Quick push: $localPath")
 
@@ -872,7 +962,7 @@ class DeployService {
             postCommand = if (includePostCommand && mapping.effectivePostCommandEnabled) mapping.postCommand.ifBlank { null } else null
         )
 
-        return deploy(request, logCallback, progressCallback)
+        return deploy(request, logCallback, progressCallback, cancelToken)
     }
 
     /**
@@ -881,24 +971,26 @@ class DeployService {
     fun redeploy(
         record: HistoryRecord,
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): DeployResult {
         logCallback?.invoke(DeployXBundle.message("deploy.log.redeployHeader"))
         logCallback?.invoke(DeployXBundle.message("deploy.log.originalOperation", record.summary))
         return when (record.type) {
-            HistoryRecord.OperationType.PULL -> redeployPull(record, logCallback, progressCallback)
-            else -> deploy(record.toDeployRequest(), logCallback, progressCallback)
+            HistoryRecord.OperationType.PULL -> redeployPull(record, logCallback, progressCallback, cancelToken)
+            else -> deploy(record.toDeployRequest(), logCallback, progressCallback, cancelToken)
         }
     }
 
     /**
-     * 对「从服务器拉取」历史记录执行重新拉取（远程 → 本地）。
+     * 对「从服务器拉取」历史记录执行重新拉取（远程 -> 本地）。
      * 记录中 sourcePath=本地目标目录、targetPath=远程源目录，relativePaths 为远程相对路径。
      */
     private fun redeployPull(
         record: HistoryRecord,
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): DeployResult {
         val server = ServerManager.getInstance().getServer(record.serverId)
         if (server == null) {
@@ -915,7 +1007,8 @@ class DeployService {
             serverConfig = server,
             options = options,
             logCallback = logCallback,
-            progressCallback = progressCallback
+            progressCallback = progressCallback,
+            cancelToken = cancelToken
         )
         return DeployResult(
             success = syncResult.success,
