@@ -6,6 +6,8 @@ import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.model.SyncDirection
 import com.alianga.idea.deploy.model.SyncOptions
 import com.alianga.idea.deploy.model.SyncResult
+import com.alianga.idea.deploy.service.DeployCancelToken
+import com.alianga.idea.deploy.service.DeployCancelledException
 import com.intellij.openapi.diagnostic.Logger
 import java.io.BufferedReader
 import java.io.File
@@ -70,11 +72,13 @@ class RsyncWrapper {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((SyncProgress) -> Unit)? = null
+        progressCallback: ((SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         val startTime = System.currentTimeMillis()
 
         val auth = prepareAuthContext(serverConfig)
+        var process: Process? = null
         try {
             // 验证本地路径
             val localFile = File(localPath)
@@ -93,7 +97,7 @@ class RsyncWrapper {
             // 执行命令
             val pb = ProcessBuilder(cmd).redirectErrorStream(true)
             auth.environment.forEach { (k, v) -> pb.environment()[k] = v }
-            val process = pb.start()
+            process = pb.start()
 
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val outputBuilder = StringBuilder()
@@ -103,6 +107,7 @@ class RsyncWrapper {
             // 读取输出并解析进度
             var line: String?
             while (reader.readLine().also { line = it } != null) {
+                cancelToken?.throwIfCancelled()
                 val currentLine = line ?: continue
                 outputBuilder.appendLine(currentLine)
 
@@ -162,6 +167,15 @@ class RsyncWrapper {
                     output = outputBuilder.toString()
                 )
             }
+        } catch (e: DeployCancelledException) {
+            // 用户终止：强制销毁 rsync 子进程
+            runCatching { process?.destroyForcibly() }
+            logCallback?.invoke(DeployXBundle.message("toolwindow.log.aborted"))
+            return SyncResult(
+                success = false,
+                duration = System.currentTimeMillis() - startTime,
+                error = DeployXBundle.message("transfer.cancelled")
+            )
         } catch (e: Exception) {
             LOG.error("rsync execution failed", e)
             val errMsg = DeployXBundle.message("ssh.rsync.executionException", e.message ?: "")
@@ -191,13 +205,15 @@ class RsyncWrapper {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(direction = SyncDirection.PULL),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((SyncProgress) -> Unit)? = null
+        progressCallback: ((SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         // 强制使用 PULL 方向
         val pullOptions = options.copy(direction = SyncDirection.PULL)
         val startTime = System.currentTimeMillis()
 
         val auth = prepareAuthContext(serverConfig)
+        var process: Process? = null
         try {
             // 确保本地目录存在
             val localDir = File(localPath).parentFile
@@ -213,7 +229,7 @@ class RsyncWrapper {
 
             val pb = ProcessBuilder(cmd).redirectErrorStream(true)
             auth.environment.forEach { (k, v) -> pb.environment()[k] = v }
-            val process = pb.start()
+            process = pb.start()
 
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val outputBuilder = StringBuilder()
@@ -223,6 +239,7 @@ class RsyncWrapper {
             // 读取输出并解析进度
             var line: String?
             while (reader.readLine().also { line = it } != null) {
+                cancelToken?.throwIfCancelled()
                 val currentLine = line ?: continue
                 outputBuilder.appendLine(currentLine)
                 logCallback?.invoke(currentLine)
@@ -279,6 +296,14 @@ class RsyncWrapper {
                     output = outputBuilder.toString()
                 )
             }
+        } catch (e: DeployCancelledException) {
+            runCatching { process?.destroyForcibly() }
+            logCallback?.invoke(DeployXBundle.message("toolwindow.log.aborted"))
+            return SyncResult(
+                success = false,
+                duration = System.currentTimeMillis() - startTime,
+                error = DeployXBundle.message("transfer.cancelled")
+            )
         } catch (e: Exception) {
             LOG.error("rsync pull execution failed", e)
             val errMsg = DeployXBundle.message("ssh.rsync.pullException", e.message ?: "")
@@ -304,7 +329,8 @@ class RsyncWrapper {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((SyncProgress) -> Unit)? = null
+        progressCallback: ((SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         val startTime = System.currentTimeMillis()
         if (relativePaths.isEmpty()) {
@@ -317,6 +343,7 @@ class RsyncWrapper {
         // 避免 Windows 下与 cygwin rsync 的 stdin 交互出现编码/阻塞问题；
         // 使用完毕后自动删除。
         val filesFromTemp = File.createTempFile("deployx_files_from_", ".txt").apply { deleteOnExit() }
+        var process: Process? = null
         try {
             filesFromTemp.outputStream().use { output ->
                 relativePaths.forEach { path ->
@@ -346,7 +373,7 @@ class RsyncWrapper {
 
             val pb = ProcessBuilder(cmd).redirectErrorStream(true)
             auth.environment.forEach { (k, v) -> pb.environment()[k] = v }
-            val process = pb.start()
+            process = pb.start()
 
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val outputBuilder = StringBuilder()
@@ -354,6 +381,7 @@ class RsyncWrapper {
             val transferredFileList = mutableListOf<String>()
             var line: String?
             while (reader.readLine().also { line = it } != null) {
+                cancelToken?.throwIfCancelled()
                 val currentLine = line ?: continue
                 outputBuilder.appendLine(currentLine)
                 logCallback?.invoke(currentLine)
@@ -399,6 +427,14 @@ class RsyncWrapper {
                 logCallback?.invoke("[ERROR] $errMsg")
                 SyncResult(false, transferredFiles = transferredFileList.size, transferredFileList = transferredFileList, duration = duration, error = errMsg, output = outputBuilder.toString())
             }
+        } catch (e: DeployCancelledException) {
+            runCatching { process?.destroyForcibly() }
+            logCallback?.invoke(DeployXBundle.message("toolwindow.log.aborted"))
+            return SyncResult(
+                success = false,
+                duration = System.currentTimeMillis() - startTime,
+                error = DeployXBundle.message("transfer.cancelled")
+            )
         } catch (e: Exception) {
             LOG.error("rsync files-from execution failed", e)
             val errMsg = DeployXBundle.message("ssh.rsync.filesFromException", e.message ?: "")
@@ -426,7 +462,8 @@ class RsyncWrapper {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(direction = SyncDirection.PULL),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((SyncProgress) -> Unit)? = null
+        progressCallback: ((SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         // 强制使用 PULL 方向
         val pullOptions = options.copy(direction = SyncDirection.PULL)
@@ -434,22 +471,24 @@ class RsyncWrapper {
             return SyncResult(false, error = DeployXBundle.message("ssh.rsync.filesFromEmpty"))
         }
 
-        // 拆分：空相对路径（目录 / 映射根）→ 整目录递归拉取；非空 → --files-from 精确拉取
+        // 拆分：空相对路径（目录 / 映射根）-> 整目录递归拉取；非空 -> --files-from 精确拉取
         val (dirPaths, filePaths) = relativePaths.partition { it.isBlank() }
 
         // 纯整目录拉取
         if (filePaths.isEmpty()) {
-            return pullWholeDirectory(localBaseDir, remoteBaseDir, serverConfig, pullOptions, logCallback, progressCallback)
+            return pullWholeDirectory(localBaseDir, remoteBaseDir, serverConfig, pullOptions, logCallback, progressCallback, cancelToken)
         }
 
         // 纯精确拉取（与历史行为一致）
         if (dirPaths.isEmpty()) {
-            return runPullFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, pullOptions, logCallback, progressCallback)
+            return runPullFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, pullOptions, logCallback, progressCallback, cancelToken)
         }
 
         // 混合：先整目录递归拉取，再对指定文件精确拉取，最后合并结果
-        val dirResult = pullWholeDirectory(localBaseDir, remoteBaseDir, serverConfig, pullOptions, logCallback, progressCallback)
-        val fileResult = runPullFilesFrom(localBaseDir, remoteBaseDir, filePaths, serverConfig, pullOptions, logCallback, progressCallback)
+        val dirResult = pullWholeDirectory(localBaseDir, remoteBaseDir, serverConfig, pullOptions, logCallback, progressCallback, cancelToken)
+        // 整目录拉取被终止则直接返回，不再执行精确拉取
+        if (cancelToken?.isCancelled() == true) return dirResult
+        val fileResult = runPullFilesFrom(localBaseDir, remoteBaseDir, filePaths, serverConfig, pullOptions, logCallback, progressCallback, cancelToken)
         return mergeSyncResults(listOf(dirResult, fileResult), logCallback)
     }
 
@@ -464,7 +503,8 @@ class RsyncWrapper {
         serverConfig: ServerConfig,
         pullOptions: SyncOptions,
         logCallback: ((String) -> Unit)?,
-        progressCallback: ((SyncProgress) -> Unit)?
+        progressCallback: ((SyncProgress) -> Unit)?,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         logCallback?.invoke(
             DeployXBundle.message(
@@ -474,7 +514,7 @@ class RsyncWrapper {
             )
         )
         // remoteBaseDir 末尾补斜杠：rsync 仅传目录内容（而非目录本身），与本地映射根目录对齐
-        return pull(localBaseDir, remoteBaseDir + "/", serverConfig, pullOptions, logCallback, progressCallback)
+        return pull(localBaseDir, remoteBaseDir + "/", serverConfig, pullOptions, logCallback, progressCallback, cancelToken)
     }
 
     /**
@@ -487,7 +527,8 @@ class RsyncWrapper {
         serverConfig: ServerConfig,
         pullOptions: SyncOptions,
         logCallback: ((String) -> Unit)?,
-        progressCallback: ((SyncProgress) -> Unit)?
+        progressCallback: ((SyncProgress) -> Unit)?,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         val startTime = System.currentTimeMillis()
         val auth = prepareAuthContext(serverConfig)
@@ -496,6 +537,7 @@ class RsyncWrapper {
         // 避免 Windows 下与 cygwin rsync 的 stdin 交互出现编码/阻塞问题；
         // 使用完毕后自动删除。
         val filesFromTemp = File.createTempFile("deployx_files_from_pull_", ".txt").apply { deleteOnExit() }
+        var process: Process? = null
         try {
             filesFromTemp.outputStream().use { output ->
                 filePaths.forEach { path ->
@@ -525,7 +567,7 @@ class RsyncWrapper {
 
             val pb = ProcessBuilder(cmd).redirectErrorStream(true)
             auth.environment.forEach { (k, v) -> pb.environment()[k] = v }
-            val process = pb.start()
+            process = pb.start()
 
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val outputBuilder = StringBuilder()
@@ -533,6 +575,7 @@ class RsyncWrapper {
             val transferredFileList = mutableListOf<String>()
             var line: String?
             while (reader.readLine().also { line = it } != null) {
+                cancelToken?.throwIfCancelled()
                 val currentLine = line ?: continue
                 outputBuilder.appendLine(currentLine)
                 logCallback?.invoke(currentLine)
@@ -578,6 +621,14 @@ class RsyncWrapper {
                 logCallback?.invoke("[ERROR] $errMsg")
                 SyncResult(false, transferredFiles = transferredFileList.size, transferredFileList = transferredFileList, duration = duration, error = errMsg, output = outputBuilder.toString())
             }
+        } catch (e: DeployCancelledException) {
+            runCatching { process?.destroyForcibly() }
+            logCallback?.invoke(DeployXBundle.message("toolwindow.log.aborted"))
+            return SyncResult(
+                success = false,
+                duration = System.currentTimeMillis() - startTime,
+                error = DeployXBundle.message("transfer.cancelled")
+            )
         } catch (e: Exception) {
             LOG.error("rsync pull files-from execution failed", e)
             val errMsg = DeployXBundle.message("ssh.rsync.pullFilesFromException", e.message ?: "")

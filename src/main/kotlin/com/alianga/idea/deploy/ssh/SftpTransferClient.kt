@@ -4,6 +4,8 @@ import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.model.SyncOptions
 import com.alianga.idea.deploy.model.SyncResult
+import com.alianga.idea.deploy.service.DeployCancelToken
+import com.alianga.idea.deploy.service.DeployCancelledException
 import com.jcraft.jsch.ChannelSftp
 import java.io.File
 import java.nio.file.FileSystems
@@ -24,13 +26,14 @@ class SftpTransferClient {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         val localFile = File(localPath)
         if (!localFile.exists()) return SyncResult(false, error = DeployXBundle.message("ssh.sftp.localPathNotFound", localPath))
         val remoteBase = remotePath.trimEnd('/')
         val relative = localFile.name + if (localFile.isDirectory) "/" else ""
-        return uploadFilesFrom(localFile.parent ?: ".", remoteBase, listOf(relative), serverConfig, options, logCallback, progressCallback)
+        return uploadFilesFrom(localFile.parent ?: ".", remoteBase, listOf(relative), serverConfig, options, logCallback, progressCallback, cancelToken)
     }
 
     fun uploadFilesFrom(
@@ -40,13 +43,14 @@ class SftpTransferClient {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         val startTime = System.currentTimeMillis()
 
         // dry-run 模式：遍历本地文件列表，收集待上传文件，不实际传输
         if (options.dryRun) {
-            return dryRunFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, options, logCallback, startTime)
+            return dryRunFilesFrom(sourceBaseDir, remoteBaseDir, relativePaths, options, logCallback, startTime, cancelToken)
         }
 
         val connection = SshConnection(serverConfig)
@@ -65,6 +69,7 @@ class SftpTransferClient {
                 val transferredFiles = mutableListOf<String>()
 
                 relativePaths.forEach { rawRelative ->
+                    cancelToken?.throwIfCancelled()
                     val relative = rawRelative.trim('/').replace("\\", "/")
                     if (relative.isBlank()) return@forEach
                     val source = sourceBase.resolve(relative).normalize()
@@ -72,7 +77,7 @@ class SftpTransferClient {
                         logCallback?.invoke(DeployXBundle.message("ssh.sftp.skipLocalNotFound", source))
                         return@forEach
                     }
-                    val uploaded = uploadPath(channel, sourceBase, source, remoteBase, matchers, logCallback, progressCallback, transferredFiles)
+                    val uploaded = uploadPath(channel, sourceBase, source, remoteBase, matchers, logCallback, progressCallback, transferredFiles, cancelToken)
                     count += uploaded.first
                     totalSize += uploaded.second
                 }
@@ -88,6 +93,9 @@ class SftpTransferClient {
             } finally {
                 channel.disconnect()
             }
+        } catch (e: DeployCancelledException) {
+            logCallback?.invoke(DeployXBundle.message("toolwindow.log.aborted"))
+            SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("transfer.cancelled"))
         } catch (e: Exception) {
             SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("ssh.sftp.uploadFailed", e.message ?: ""))
         } finally {
@@ -105,7 +113,8 @@ class SftpTransferClient {
         relativePaths: List<String>,
         options: SyncOptions,
         logCallback: ((String) -> Unit)?,
-        startTime: Long
+        startTime: Long,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         val sourceBase = Paths.get(sourceBaseDir)
         val remoteBase = remoteBaseDir.trimEnd('/')
@@ -115,17 +124,22 @@ class SftpTransferClient {
 
         logCallback?.invoke(DeployXBundle.message("ssh.sftp.dryRunPreview"))
 
-        relativePaths.forEach { rawRelative ->
-            val relative = rawRelative.trim('/').replace("\\", "/")
-            if (relative.isBlank()) return@forEach
-            val source = sourceBase.resolve(relative).normalize()
-            if (!Files.exists(source)) {
-                logCallback?.invoke(DeployXBundle.message("ssh.sftp.skipLocalNotFound", source))
-                return@forEach
+        try {
+            relativePaths.forEach { rawRelative ->
+                cancelToken?.throwIfCancelled()
+                val relative = rawRelative.trim('/').replace("\\", "/")
+                if (relative.isBlank()) return@forEach
+                val source = sourceBase.resolve(relative).normalize()
+                if (!Files.exists(source)) {
+                    logCallback?.invoke(DeployXBundle.message("ssh.sftp.skipLocalNotFound", source))
+                    return@forEach
+                }
+                collectFiles(sourceBase, source, remoteBase, matchers, logCallback, transferredFiles, cancelToken) { size ->
+                    totalSize += size
+                }
             }
-            collectFiles(sourceBase, source, remoteBase, matchers, logCallback, transferredFiles) { size ->
-                totalSize += size
-            }
+        } catch (e: DeployCancelledException) {
+            return SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("transfer.cancelled"))
         }
 
         return SyncResult(
@@ -148,11 +162,13 @@ class SftpTransferClient {
         matchers: List<PathMatcher>,
         logCallback: ((String) -> Unit)?,
         transferredFiles: MutableList<String>,
+        cancelToken: DeployCancelToken? = null,
         onSize: (Long) -> Unit
     ) {
         if (Files.isDirectory(source)) {
             Files.walk(source).use { stream ->
                 stream.filter { !Files.isDirectory(it) }.forEach { path ->
+                    cancelToken?.throwIfCancelled()
                     val rel = sourceBase.relativize(path).toString().replace(File.separatorChar, '/')
                     if (rel.isBlank() || isExcluded(rel, matchers)) return@forEach
                     val remotePath = joinRemotePath(remoteBase, rel)
@@ -180,13 +196,15 @@ class SftpTransferClient {
         matchers: List<PathMatcher>,
         logCallback: ((String) -> Unit)?,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)?,
-        transferredFiles: MutableList<String> = mutableListOf()
+        transferredFiles: MutableList<String> = mutableListOf(),
+        cancelToken: DeployCancelToken? = null
     ): Pair<Int, Long> {
         var count = 0
         var totalSize = 0L
         if (Files.isDirectory(source)) {
             Files.walk(source).use { stream ->
                 stream.forEach { path ->
+                    cancelToken?.throwIfCancelled()
                     val rel = sourceBase.relativize(path).toString().replace(File.separatorChar, '/')
                     if (rel.isBlank() || isExcluded(rel, matchers)) return@forEach
                     val remotePath = joinRemotePath(remoteBase, rel)
@@ -260,13 +278,14 @@ class SftpTransferClient {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         val localFile = File(localPath)
         // 确保本地父目录存在
         localFile.parentFile?.mkdirs()
         val relative = localFile.name
-        return downloadFilesFrom(localFile.parent ?: ".", remotePath, listOf(relative), serverConfig, options, logCallback, progressCallback)
+        return downloadFilesFrom(localFile.parent ?: ".", remotePath, listOf(relative), serverConfig, options, logCallback, progressCallback, cancelToken)
     }
 
     /**
@@ -279,13 +298,14 @@ class SftpTransferClient {
         serverConfig: ServerConfig,
         options: SyncOptions = SyncOptions(),
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         val startTime = System.currentTimeMillis()
 
         // dry-run 模式：遍历远程文件列表，收集待下载文件，不实际传输
         if (options.dryRun) {
-            return dryRunDownloadFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, startTime)
+            return dryRunDownloadFilesFrom(localBaseDir, remoteBaseDir, relativePaths, serverConfig, options, logCallback, startTime, cancelToken)
         }
 
         val connection = SshConnection(serverConfig)
@@ -304,9 +324,10 @@ class SftpTransferClient {
                 val transferredFiles = mutableListOf<String>()
 
                 relativePaths.forEach { rawRelative ->
+                    cancelToken?.throwIfCancelled()
                     val relative = rawRelative.trim('/').replace("\\", "/")
                     // 空相对路径表示“整目录拉取”：downloadPath 会递归下载 remoteBase 下的全部内容
-                    val downloaded = downloadPath(channel, localBase, remoteBase, relative, matchers, logCallback, progressCallback, transferredFiles)
+                    val downloaded = downloadPath(channel, localBase, remoteBase, relative, matchers, logCallback, progressCallback, transferredFiles, cancelToken)
                     count += downloaded.first
                     totalSize += downloaded.second
                 }
@@ -322,6 +343,9 @@ class SftpTransferClient {
             } finally {
                 channel.disconnect()
             }
+        } catch (e: DeployCancelledException) {
+            logCallback?.invoke(DeployXBundle.message("toolwindow.log.aborted"))
+            SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("transfer.cancelled"))
         } catch (e: Exception) {
             SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("ssh.sftp.downloadFailed", e.message ?: ""))
         } finally {
@@ -339,7 +363,8 @@ class SftpTransferClient {
         serverConfig: ServerConfig,
         options: SyncOptions,
         logCallback: ((String) -> Unit)?,
-        startTime: Long
+        startTime: Long,
+        cancelToken: DeployCancelToken? = null
     ): SyncResult {
         val localBase = Paths.get(localBaseDir)
         val remoteBase = remoteBaseDir.trimEnd('/')
@@ -357,10 +382,11 @@ class SftpTransferClient {
             val channel = connection.openSftpChannel()
             try {
                 relativePaths.forEach { rawRelative ->
+                    cancelToken?.throwIfCancelled()
                     val relative = rawRelative.trim('/').replace("\\", "/")
                     // 空相对路径表示“整目录拉取”：collectRemoteFiles 会递归收集 remoteBase 下的全部文件
                     val remotePath = joinRemotePath(remoteBase, relative)
-                    collectRemoteFiles(channel, localBase, remoteBase, relative, remotePath, matchers, logCallback, transferredFiles) { size ->
+                    collectRemoteFiles(channel, localBase, remoteBase, relative, remotePath, matchers, logCallback, transferredFiles, cancelToken) { size ->
                         totalSize += size
                     }
                 }
@@ -376,6 +402,9 @@ class SftpTransferClient {
             } finally {
                 channel.disconnect()
             }
+        } catch (e: DeployCancelledException) {
+            logCallback?.invoke(DeployXBundle.message("toolwindow.log.aborted"))
+            SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("transfer.cancelled"))
         } catch (e: Exception) {
             SyncResult(false, duration = System.currentTimeMillis() - startTime, error = DeployXBundle.message("ssh.sftp.downloadFailed", e.message ?: ""))
         } finally {
@@ -395,6 +424,7 @@ class SftpTransferClient {
         matchers: List<PathMatcher>,
         logCallback: ((String) -> Unit)?,
         transferredFiles: MutableList<String>,
+        cancelToken: DeployCancelToken? = null,
         onSize: (Long) -> Unit
     ) {
         try {
@@ -404,11 +434,12 @@ class SftpTransferClient {
                 @Suppress("UNCHECKED_CAST")
                 val entries = channel.ls(remotePath) as Vector<ChannelSftp.LsEntry>
                 entries.forEach { entry ->
+                    cancelToken?.throwIfCancelled()
                     val name = entry.filename
                     if (name != "." && name != "..") {
                         val subRelative = if (relative.isBlank()) name else "$relative/$name"
                         val subRemotePath = joinRemotePath(remoteBase, subRelative)
-                        collectRemoteFiles(channel, localBase, remoteBase, subRelative, subRemotePath, matchers, logCallback, transferredFiles, onSize)
+                        collectRemoteFiles(channel, localBase, remoteBase, subRelative, subRemotePath, matchers, logCallback, transferredFiles, cancelToken, onSize)
                     }
                 }
             } else {
@@ -420,6 +451,8 @@ class SftpTransferClient {
                     onSize(attrs.size)
                 }
             }
+        } catch (e: DeployCancelledException) {
+            throw e
         } catch (e: Exception) {
             logCallback?.invoke("[WARN] Cannot stat remote path, skipped: $remotePath")
         }
@@ -437,7 +470,8 @@ class SftpTransferClient {
         matchers: List<PathMatcher>,
         logCallback: ((String) -> Unit)?,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)?,
-        transferredFiles: MutableList<String> = mutableListOf()
+        transferredFiles: MutableList<String> = mutableListOf(),
+        cancelToken: DeployCancelToken? = null
     ): Pair<Int, Long> {
         var count = 0
         var totalSize = 0L
@@ -450,10 +484,11 @@ class SftpTransferClient {
                 @Suppress("UNCHECKED_CAST")
                 val entries = channel.ls(remotePath) as Vector<ChannelSftp.LsEntry>
                 entries.forEach { entry ->
+                    cancelToken?.throwIfCancelled()
                     val name = entry.filename
                     if (name != "." && name != "..") {
                         val subRelative = if (relative.isBlank()) name else "$relative/$name"
-                        val downloaded = downloadPath(channel, localBase, remoteBase, subRelative, matchers, logCallback, progressCallback, transferredFiles)
+                        val downloaded = downloadPath(channel, localBase, remoteBase, subRelative, matchers, logCallback, progressCallback, transferredFiles, cancelToken)
                         count += downloaded.first
                         totalSize += downloaded.second
                     }
@@ -472,6 +507,8 @@ class SftpTransferClient {
                     progressCallback?.invoke(RsyncWrapper.SyncProgress(currentFile = relative, percentage = 100))
                 }
             }
+        } catch (e: DeployCancelledException) {
+            throw e
         } catch (e: Exception) {
             logCallback?.invoke("[WARN] Cannot download path: $remotePath, error: ${e.message}")
         }
