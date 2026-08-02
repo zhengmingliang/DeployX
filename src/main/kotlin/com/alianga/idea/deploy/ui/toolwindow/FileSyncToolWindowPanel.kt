@@ -12,6 +12,8 @@ import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.model.UploadItem
 import com.alianga.idea.deploy.model.UpdateReport
 import com.alianga.idea.deploy.model.UpdateReportGroup
+import com.alianga.idea.deploy.service.DeployCancelToken
+import com.alianga.idea.deploy.service.DeployCancelledException
 import com.alianga.idea.deploy.service.DeployService
 import com.alianga.idea.deploy.service.HistoryManager
 import com.alianga.idea.deploy.service.MappingManager
@@ -126,6 +128,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val startDeployButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.startDeploy"), AllIcons.Actions.Execute) { startDeploy() }
     private val quickPushButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.quickPush"), AllIcons.Actions.Upload) { quickPush() }
     private val saveAsMappingButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.saveAsMapping"), AllIcons.Actions.MenuSaveall) { saveAsMapping() }
+    /** 终止按钮（1.0.6 新增）：运行中可点击终止当前部署/同步操作，初始禁用 */
+    private val abortButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.abort"), AllIcons.Actions.Suspend) { abortCurrentTask() }
+
+    /** 当前运行中任务的取消令牌（1.0.6 新增）。null 表示无任务运行。 */
+    @Volatile
+    private var currentCancelToken: DeployCancelToken? = null
 
     // 工具栏（保留引用以便语言切换后刷新 Action 显示文本）
     private var toolbar: com.intellij.openapi.actionSystem.ActionToolbar? = null
@@ -175,6 +183,16 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     /** 语言变更监听器注销回调，dispose 时调用以避免内存泄漏。 */
     private val languageChangeUnsubscribe: () -> Unit =
         DeployXBundle.addLanguageChangeListener { relocalize() }
+
+    /**
+     * 服务器列表变更监听器注销回调（1.0.6 新增）。
+     * ServerManager 增删改服务器后触发，在 EDT 上刷新目标服务器下拉，
+     * 使设置页新增/删除的服务器无需重启 IDE 即可出现在侧边栏。
+     */
+    private val serverListUnsubscribe: () -> Unit =
+        serverManager.addChangeListener {
+            SwingUtilities.invokeLater { refreshServerCombo() }
+        }
 
     init {
         panelByProject[project.hashCode().toString()] = this
@@ -251,9 +269,15 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(saveAsMappingButton)
         }
 
-        val progressPanel = JPanel(BorderLayout(8, 0)).apply {
+        // 进度面板：进度条 + 状态标签 + 终止按钮（1.0.6 调整：终止按钮放在进度区，
+        // 操作页底部始终可见，避免执行中自动跳转日志页后无法点击终止）
+        val progressInfoPanel = JPanel(BorderLayout(4, 0)).apply {
             add(progressBar, BorderLayout.CENTER)
             add(progressLabel, BorderLayout.EAST)
+        }
+        val progressPanel = JPanel(BorderLayout(8, 0)).apply {
+            add(progressInfoPanel, BorderLayout.CENTER)
+            add(abortButton, BorderLayout.EAST)
         }
 
         val operationPanel = JPanel()
@@ -387,6 +411,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         startDeployButton.text = DeployXBundle.message("toolwindow.button.startDeploy")
         quickPushButton.text = DeployXBundle.message("toolwindow.button.quickPush")
         saveAsMappingButton.text = DeployXBundle.message("toolwindow.button.saveAsMapping")
+        abortButton.text = DeployXBundle.message("toolwindow.button.abort")
+        abortButton.toolTipText = DeployXBundle.message("toolwindow.button.abort.tooltip")
         openTerminalButton.toolTipText = DeployXBundle.message("toolwindow.button.openTerminal")
         browseRemoteButton.toolTipText = DeployXBundle.message("toolwindow.button.browseRemote")
         remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
@@ -437,6 +463,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         backupDirField.isEnabled = false
         unzipDestField.isEnabled = false
 
+        // 终止按钮初始禁用（无任务运行时不可点击）
+        abortButton.isEnabled = false
+        abortButton.toolTipText = DeployXBundle.message("toolwindow.button.abort.tooltip")
+
         // 设置远程路径浏览按钮
         remotePathField.addActionListener {
             val selectedServerStr = serverCombo.selectedItem?.toString() ?: return@addActionListener
@@ -452,11 +482,87 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
     }
 
+    /**
+     * 终止当前正在运行的部署/同步任务（1.0.6 新增）。
+     * 触发 [currentCancelToken] 取消，传输层会在下一个检查点抛 [DeployCancelledException] 停止。
+     */
+    private fun abortCurrentTask() {
+        val token = currentCancelToken ?: return
+        token.cancel()
+        appendLog(DeployXBundle.message("toolwindow.log.abortRequested"))
+        abortButton.isEnabled = false
+    }
+
+    /**
+     * 启动一个可取消的后台任务（1.0.6 新增）。
+     *
+     * 统一管理 [DeployCancelToken] 的生命周期与终止按钮的启用/禁用：
+     * - 任务开始前创建 token、启用终止按钮
+     * - 任务结束后（无论成功/失败/终止）禁用终止按钮、清空 token
+     * - [taskBody] 的返回值会传递给 [onProgressDone]（在 EDT 上执行），便于更新 UI
+     *
+     * **IDEA 进程窗口取消联动**：[Task.Backgroundable] 设置了 canBeCancelled=true，
+     * 用户点击 IDEA 进度窗口的取消按钮会触发 [ProgressIndicator.cancel]。
+     * 本方法在 [run] 中轮询 [ProgressIndicator.isCanceled]，一旦检测到取消
+     * 立即调用 [DeployCancelToken.cancel]，使传输层尽快停止，不再需要用户额外点击"终止"按钮。
+     *
+     * @param title 后台任务标题
+     * @param onProgressDone EDT 上的完成回调，接收 (取消令牌, taskBody 返回值)
+     * @param taskBody 后台线程执行体，接收取消令牌，返回结果给 onProgressDone
+     */
+    private fun <T> launchCancelableTask(
+        title: String,
+        onProgressDone: (DeployCancelToken, T) -> Unit,
+        taskBody: (DeployCancelToken) -> T
+    ) {
+        val cancelToken = DeployCancelToken()
+        currentCancelToken = cancelToken
+        abortButton.isEnabled = true
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, title, true) {
+            private var result: T? = null
+
+            override fun run(indicator: ProgressIndicator) {
+                // 启动一个轻量守护线程轮询 IDEA 的 ProgressIndicator 取消状态，
+                // 一旦用户点击 IDEA 进程窗口的取消按钮，立即联动触发 cancelToken。
+                val indicatorWatcher = Thread({
+                    while (!Thread.currentThread().isInterrupted) {
+                        if (indicator.isCanceled && !cancelToken.isCancelled()) {
+                            cancelToken.cancel()
+                            return@Thread
+                        }
+                        Thread.sleep(150)
+                    }
+                }, "DeployX-cancel-watcher").apply { isDaemon = true }
+                indicatorWatcher.start()
+
+                try {
+                    result = taskBody(cancelToken)
+                } catch (e: DeployCancelledException) {
+                    // 任务被用户终止（终止按钮或 IDEA 进程取消），已由各服务层处理为"已终止"结果
+                } finally {
+                    indicatorWatcher.interrupt()
+                }
+            }
+
+            @Suppress("UNCHECKED_CAST")
+            override fun onFinished() {
+                SwingUtilities.invokeLater {
+                    abortButton.isEnabled = false
+                    currentCancelToken = null
+                    onProgressDone(cancelToken, result as T)
+                }
+            }
+        })
+    }
+
     private fun refreshServerCombo() {
         serverCombo.removeAllItems()
         val servers = serverManager.getServers()
         for (server in servers) {
-            serverCombo.addItem("${server.id} - ${server.name}")
+            // LOCAL 服务器追加 [本地] 标记便于识别
+            val typeMark = if (server.isLocal) " [${DeployXBundle.message("dialog.server.type.local")}]" else ""
+            serverCombo.addItem("${server.id} - ${server.name}$typeMark")
         }
         val defaultServer = serverManager.getDefaultServer()
         if (defaultServer != null) {
@@ -507,9 +613,19 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.deploying")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Redeploying...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                val result = deployService.redeploy(
+        launchCancelableTask(
+            "Redeploying...",
+            onProgressDone = { token, result: com.alianga.idea.deploy.model.DeployResult ->
+                progressBar.value = if (result.success) 100 else progressBar.value
+                progressLabel.text = when {
+                    token.isCancelled() -> DeployXBundle.message("toolwindow.progress.aborted")
+                    result.success -> DeployXBundle.message("toolwindow.progress.deployComplete")
+                    else -> DeployXBundle.message("toolwindow.progress.deployFailed")
+                }
+                refreshHistory()
+            },
+            taskBody = { cancelToken ->
+                deployService.redeploy(
                     record,
                     logCallback = { line -> appendLog(record.serverId, line) },
                     progressCallback = { progress ->
@@ -517,16 +633,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                             progressBar.value = progress.percentage
                             progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    }
+                    },
+                    cancelToken = cancelToken
                 )
-                SwingUtilities.invokeLater {
-                    progressBar.value = if (result.success) 100 else progressBar.value
-                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.deployComplete") else DeployXBundle.message("toolwindow.progress.deployFailed")
-                    refreshHistory()
-                }
-                }
-            })
-        }
+            }
+        )
+    }
 
         /** 从历史记录执行回滚 */
         private fun rollbackFromHistory() {
@@ -660,10 +772,21 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.uploading")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Uploading...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                indicator.text = "Batch uploading ${items.size} item(s)..."
-                val results = deployService.uploadBatch(
+        launchCancelableTask(
+            "Batch Uploading...",
+            onProgressDone = { token, results: List<com.alianga.idea.deploy.model.SyncResult> ->
+                val successCount = results.count { it.success }
+                updateLastReport("UPLOAD", results.mapNotNull { it.reportGroup })
+                progressBar.value = 100
+                progressLabel.text = if (token.isCancelled())
+                    DeployXBundle.message("toolwindow.progress.aborted")
+                else
+                    DeployXBundle.message("toolwindow.progress.uploadComplete", successCount, results.size)
+                refreshHistory()
+                if (!token.isCancelled()) notifyTransferResult(successCount, results.size)
+            },
+            taskBody = { cancelToken ->
+                deployService.uploadBatch(
                     items,
                     serverLogCallback = { serverId, line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
@@ -671,18 +794,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                             progressBar.value = progress.percentage.coerceIn(0, 100)
                             progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    }
+                    },
+                    cancelToken = cancelToken
                 )
-                SwingUtilities.invokeLater {
-                    val successCount = results.count { it.success }
-                    updateLastReport("UPLOAD", results.mapNotNull { it.reportGroup })
-                    progressBar.value = 100
-                    progressLabel.text = DeployXBundle.message("toolwindow.progress.uploadComplete", successCount, results.size)
-                    refreshHistory()
-                    notifyTransferResult(successCount, results.size)
-                }
             }
-        })
+        )
     }
 
     /**
@@ -697,10 +813,21 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDeploying")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Deploying...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                indicator.text = "Batch deploying ${items.size} item(s)..."
-                val results = deployService.deployBatch(
+        launchCancelableTask(
+            "Batch Deploying...",
+            onProgressDone = { token, results: List<com.alianga.idea.deploy.model.DeployResult> ->
+                val successCount = results.count { it.success }
+                updateLastReport("DEPLOY", results.mapNotNull { it.reportGroup })
+                progressBar.value = 100
+                progressLabel.text = if (token.isCancelled())
+                    DeployXBundle.message("toolwindow.progress.aborted")
+                else
+                    DeployXBundle.message("toolwindow.progress.batchDeployComplete", successCount, results.size)
+                refreshHistory()
+                if (!token.isCancelled()) notifyTransferResult(successCount, results.size)
+            },
+            taskBody = { cancelToken ->
+                deployService.deployBatch(
                     items,
                     serverLogCallback = { serverId, line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
@@ -708,18 +835,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                             progressBar.value = progress.percentage.coerceIn(0, 100)
                             progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    }
+                    },
+                    cancelToken = cancelToken
                 )
-                SwingUtilities.invokeLater {
-                    val successCount = results.count { it.success }
-                    updateLastReport("DEPLOY", results.mapNotNull { it.reportGroup })
-                    progressBar.value = 100
-                    progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDeployComplete", successCount, results.size)
-                    refreshHistory()
-                    notifyTransferResult(successCount, results.size)
-                }
             }
-        })
+        )
     }
 
     /**
@@ -734,10 +854,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.batchPreviewing")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Previewing...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                indicator.text = "Batch previewing ${items.size} item(s)..."
-                val results = deployService.uploadBatch(
+        launchCancelableTask(
+            "Batch Previewing...",
+            onProgressDone = { token, results: List<com.alianga.idea.deploy.model.SyncResult> ->
+                val successCount = results.count { it.success }
+                progressBar.value = 100
+                progressLabel.text = if (token.isCancelled())
+                    DeployXBundle.message("toolwindow.progress.aborted")
+                else
+                    DeployXBundle.message("toolwindow.progress.batchPreviewComplete", successCount, results.size)
+            },
+            taskBody = { cancelToken ->
+                deployService.uploadBatch(
                     items,
                     dryRun = true,
                     serverLogCallback = { serverId, line -> appendLog(serverId, line) },
@@ -746,15 +874,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                             progressBar.value = progress.percentage.coerceIn(0, 100)
                             progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    }
+                    },
+                    cancelToken = cancelToken
                 )
-                SwingUtilities.invokeLater {
-                    val successCount = results.count { it.success }
-                    progressBar.value = 100
-                    progressLabel.text = DeployXBundle.message("toolwindow.progress.batchPreviewComplete", successCount, results.size)
-                }
             }
-        })
+        )
     }
 
     /**
@@ -769,10 +893,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDownloading")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Batch Downloading...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                indicator.text = "Batch downloading ${items.size} item(s)..."
-                val results = deployService.downloadBatch(
+        launchCancelableTask(
+            "Batch Downloading...",
+            onProgressDone = { token, results: List<com.alianga.idea.deploy.model.SyncResult> ->
+                val successCount = results.count { it.success }
+                progressBar.value = 100
+                progressLabel.text = if (token.isCancelled())
+                    DeployXBundle.message("toolwindow.progress.aborted")
+                else
+                    DeployXBundle.message("toolwindow.progress.batchDownloadComplete", successCount, results.size)
+                refreshHistory()
+                if (!token.isCancelled()) notifyTransferResult(successCount, results.size)
+            },
+            taskBody = { cancelToken ->
+                deployService.downloadBatch(
                     items,
                     serverLogCallback = { serverId, line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
@@ -780,17 +914,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                             progressBar.value = progress.percentage.coerceIn(0, 100)
                             progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    }
+                    },
+                    cancelToken = cancelToken
                 )
-                SwingUtilities.invokeLater {
-                    val successCount = results.count { it.success }
-                    progressBar.value = 100
-                    progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDownloadComplete", successCount, results.size)
-                    refreshHistory()
-                    notifyTransferResult(successCount, results.size)
-                }
             }
-        })
+        )
     }
 
     /**
@@ -803,9 +931,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.deploying")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Deploying...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                val result = deployService.deploy(
+        launchCancelableTask(
+            "Deploying...",
+            onProgressDone = { token, result: com.alianga.idea.deploy.model.DeployResult ->
+                progressBar.value = if (result.success) 100 else progressBar.value
+                updateLastReport("DEPLOY", listOfNotNull(result.reportGroup))
+                progressLabel.text = when {
+                    token.isCancelled() -> DeployXBundle.message("toolwindow.progress.aborted")
+                    result.success -> DeployXBundle.message("toolwindow.progress.deployComplete")
+                    else -> DeployXBundle.message("toolwindow.progress.deployFailedWithError", result.error ?: "")
+                }
+                refreshHistory()
+            },
+            taskBody = { cancelToken ->
+                deployService.deploy(
                     request,
                     logCallback = { line -> appendLog(request.serverId, line) },
                     progressCallback = { progress ->
@@ -813,16 +952,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                             progressBar.value = progress.percentage
                             progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    }
+                    },
+                    cancelToken = cancelToken
                 )
-                SwingUtilities.invokeLater {
-                    progressBar.value = if (result.success) 100 else progressBar.value
-                    updateLastReport("DEPLOY", listOfNotNull(result.reportGroup))
-                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.deployComplete") else DeployXBundle.message("toolwindow.progress.deployFailedWithError", result.error ?: "")
-                    refreshHistory()
-                }
             }
-        })
+        )
     }
 
     /**
@@ -834,9 +968,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.pushing")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Quick Push...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                val result = deployService.push(
+        launchCancelableTask(
+            "Quick Push...",
+            onProgressDone = { token, result: com.alianga.idea.deploy.model.DeployResult ->
+                progressBar.value = if (result.success) 100 else progressBar.value
+                updateLastReport("QUICK_PUSH", listOfNotNull(result.reportGroup))
+                progressLabel.text = when {
+                    token.isCancelled() -> DeployXBundle.message("toolwindow.progress.aborted")
+                    result.success -> DeployXBundle.message("toolwindow.progress.pushComplete")
+                    else -> DeployXBundle.message("toolwindow.progress.pushFailedWithError", result.error ?: "")
+                }
+                refreshHistory()
+            },
+            taskBody = { cancelToken ->
+                deployService.push(
                     localPath,
                     serverId,
                     logCallback = { line -> appendLog(serverId, line) },
@@ -845,16 +990,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                             progressBar.value = progress.percentage
                             progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    }
+                    },
+                    cancelToken = cancelToken
                 )
-                SwingUtilities.invokeLater {
-                    progressBar.value = if (result.success) 100 else progressBar.value
-                    updateLastReport("QUICK_PUSH", listOfNotNull(result.reportGroup))
-                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.pushComplete") else DeployXBundle.message("toolwindow.progress.pushFailedWithError", result.error ?: "")
-                    refreshHistory()
-                }
             }
-        })
+        )
     }
 
     /**
@@ -865,17 +1005,22 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.previewing")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Previewing Sync...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                val result = SyncService.getInstance().previewSync(localPath, remotePath, serverId) { line ->
+        launchCancelableTask(
+            "Previewing Sync...",
+            onProgressDone = { token, result: com.alianga.idea.deploy.model.SyncResult ->
+                progressLabel.text = when {
+                    token.isCancelled() -> DeployXBundle.message("toolwindow.progress.aborted")
+                    result.success -> DeployXBundle.message("toolwindow.progress.previewComplete")
+                    else -> DeployXBundle.message("toolwindow.progress.previewFailed")
+                }
+                if (!token.isCancelled() && !result.success) appendLog("[ERROR] ${result.error}")
+            },
+            taskBody = { cancelToken ->
+                SyncService.getInstance().previewSync(localPath, remotePath, serverId) { line ->
                     appendLog(serverId, line)
                 }
-                SwingUtilities.invokeLater {
-                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.previewComplete") else DeployXBundle.message("toolwindow.progress.previewFailed")
-                    if (!result.success) appendLog("[ERROR] ${result.error}")
-                }
             }
-        })
+        )
     }
 
     private fun updateLastReport(operationType: String, groups: List<UpdateReportGroup>) {
@@ -1012,7 +1157,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 serverArea.append(line)
                 serverArea.caretPosition = serverArea.document.length
             }
-            tabbedPane.selectedIndex = 1
+            // 1.0.6：不再强制跳转日志页，避免执行中操作页的进度/终止按钮不可见。
+            // 日志在后台追加，用户可主动切换到日志页查看。
         }
         if (SwingUtilities.isEventDispatchThread()) block() else SwingUtilities.invokeLater(block)
     }
@@ -1031,18 +1177,24 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.previewing")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Previewing Sync...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                indicator.text = DeployXBundle.message("toolwindow.progress.previewing")
-                val result = SyncService.getInstance().previewSync(localPath, remotePath, serverId) { line ->
+        launchCancelableTask(
+            "Previewing Sync...",
+            onProgressDone = { token, result: com.alianga.idea.deploy.model.SyncResult ->
+                progressLabel.text = when {
+                    token.isCancelled() -> DeployXBundle.message("toolwindow.progress.aborted")
+                    result.success -> DeployXBundle.message("toolwindow.progress.previewComplete")
+                    else -> DeployXBundle.message("toolwindow.progress.previewFailed")
+                }
+                if (!token.isCancelled() && !result.success) appendLog("[ERROR] ${result.error}")
+            },
+            taskBody = { cancelToken ->
+                // previewSync 内部走 TransferService.transfer（dry-run），TransferService 已支持 cancelToken
+                // 但 SyncService.previewSync 签名未暴露 cancelToken；预览通常很快，这里不强制传递
+                SyncService.getInstance().previewSync(localPath, remotePath, serverId) { line ->
                     appendLog(serverId, line)
                 }
-                SwingUtilities.invokeLater {
-                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.previewComplete") else DeployXBundle.message("toolwindow.progress.previewFailed")
-                    if (!result.success) appendLog("[ERROR] ${result.error}")
-                }
             }
-        })
+        )
     }
 
     private fun startDeploy() {
@@ -1069,9 +1221,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.deploying")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Deploying...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                val result = deployService.deploy(
+        launchCancelableTask(
+            "Deploying...",
+            onProgressDone = { token, result: com.alianga.idea.deploy.model.DeployResult ->
+                progressBar.value = if (result.success) 100 else progressBar.value
+                updateLastReport("MANUAL_DEPLOY", listOfNotNull(result.reportGroup))
+                progressLabel.text = when {
+                    token.isCancelled() -> DeployXBundle.message("toolwindow.progress.aborted")
+                    result.success -> DeployXBundle.message("toolwindow.progress.deployComplete")
+                    else -> DeployXBundle.message("toolwindow.progress.deployFailed")
+                }
+                refreshHistory()
+            },
+            taskBody = { cancelToken ->
+                deployService.deploy(
                     request,
                     logCallback = { line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
@@ -1079,16 +1242,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                             progressBar.value = progress.percentage
                             progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    }
+                    },
+                    cancelToken = cancelToken
                 )
-                SwingUtilities.invokeLater {
-                    progressBar.value = if (result.success) 100 else progressBar.value
-                    updateLastReport("MANUAL_DEPLOY", listOfNotNull(result.reportGroup))
-                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.deployComplete") else DeployXBundle.message("toolwindow.progress.deployFailed")
-                    refreshHistory()
-                }
             }
-        })
+        )
     }
 
     private fun quickPush() {
@@ -1104,9 +1262,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.pushing")
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Quick Push...", true) {
-            override fun run(indicator: ProgressIndicator) {
-                val result = deployService.push(
+        launchCancelableTask(
+            "Quick Push...",
+            onProgressDone = { token, result: com.alianga.idea.deploy.model.DeployResult ->
+                progressBar.value = if (result.success) 100 else progressBar.value
+                updateLastReport("QUICK_PUSH", listOfNotNull(result.reportGroup))
+                progressLabel.text = when {
+                    token.isCancelled() -> DeployXBundle.message("toolwindow.progress.aborted")
+                    result.success -> DeployXBundle.message("toolwindow.progress.pushComplete")
+                    else -> DeployXBundle.message("toolwindow.progress.pushFailed")
+                }
+                refreshHistory()
+            },
+            taskBody = { cancelToken ->
+                deployService.push(
                     localPath,
                     serverId,
                     logCallback = { line -> appendLog(serverId, line) },
@@ -1115,16 +1284,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                             progressBar.value = progress.percentage
                             progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
                         }
-                    }
+                    },
+                    cancelToken = cancelToken
                 )
-                SwingUtilities.invokeLater {
-                    progressBar.value = if (result.success) 100 else progressBar.value
-                    updateLastReport("QUICK_PUSH", listOfNotNull(result.reportGroup))
-                    progressLabel.text = if (result.success) DeployXBundle.message("toolwindow.progress.pushComplete") else DeployXBundle.message("toolwindow.progress.pushFailed")
-                    refreshHistory()
-                }
             }
-        })
+        )
     }
 
     /**
@@ -1139,6 +1303,14 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val server = serverManager.getServer(serverId)
         if (server == null) {
             Messages.showErrorDialog(DeployXBundle.message("toolwindow.validation.serverNotFound"), DeployXBundle.message("toolwindow.log.browseRemoteTitle"))
+            return
+        }
+        // LOCAL 服务器不支持远程文件浏览
+        if (server.isLocal) {
+            Messages.showInfoMessage(
+                DeployXBundle.message("toolwindow.log.localServerNotSupported"),
+                DeployXBundle.message("toolwindow.log.browseRemoteTitle")
+            )
             return
         }
         com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
@@ -1158,6 +1330,14 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val server = serverManager.getServer(serverId)
         if (server == null) {
             Messages.showErrorDialog(DeployXBundle.message("toolwindow.validation.serverNotFound"), DeployXBundle.message("toolwindow.log.openTerminalTitle"))
+            return
+        }
+        // LOCAL 服务器不支持 SSH 终端
+        if (server.isLocal) {
+            Messages.showInfoMessage(
+                DeployXBundle.message("toolwindow.log.localServerNotSupported"),
+                DeployXBundle.message("toolwindow.log.openTerminalTitle")
+            )
             return
         }
 
