@@ -1,5 +1,43 @@
 # DeployX Changelog
 
+## [1.0.6] - 2026-07-27
+
+
+### ✨ 新功能
+- **终止部署/同步**：部署、同步、下载、推送、预览过程中可点击"终止"按钮立即停止当前操作
+  - 新增取消信号载体 `DeployCancelToken`，贯穿 UI → DeployService → TransferService → RsyncWrapper/SftpTransferClient
+  - **硬终止语义**：点击终止后立即销毁正在运行的 rsync 子进程（`Process.destroyForcibly()`），或断开 SSH 命令通道，并跳过批次中剩余分组
+  - rsync 传输循环、SFTP 上传/下载循环、本地拷贝循环均内置取消检查点，响应即时
+  - 并行批次（多服务器）中每个 worker 尽早检查取消标志提前退出，不阻塞 `CountDownLatch`
+  - 已完成传输的文件保留，半传文件由 rsync/本地拷贝下次增量同步自动修复
+  - 操作面板新增"终止"按钮，任务运行时启用、完成后自动禁用；进度标签显示"已终止"
+
+- **本地服务器（投产增量更新）**：服务器配置新增"本地"类型（`ServerType.LOCAL`），用于将当前项目文件增量更新到本地指定目录
+  - 典型场景：投产增量文件更新--把项目里改动的文件按映射目录结构增量拷贝到本地投产目录
+  - 复用映射的 `remoteDir` 字段作为本地目标目录，一个本地服务器可对应多个映射，各自指定不同目标目录
+  - 新增 `LocalTransferService`：基于 `java.nio.file.Files` 实现增量拷贝（按文件大小 + 修改时间判断，与 rsync 语义一致），支持排除规则、dry-run 预览、取消令牌
+  - `TransferService` 入口统一分流：LOCAL 服务器走本地拷贝，SSH 服务器走 rsync/SFTP，调用方无感知
+  - `DeployService` 适配：LOCAL 服务器跳过所有 SSH 步骤（远程命令、备份、解压），直接本地拷贝并生成报告
+  - 服务器编辑对话框新增"类型"下拉，LOCAL 类型隐藏 host/port/user/auth 字段；服务器表格新增"类型"列
+  - 映射编辑对话框：LOCAL 服务器的"目标目录"浏览按钮改用本地目录选择器
+  - 守卫：`RemoteFileBrowserService`/`TerminalService` 对 LOCAL 服务器禁用并提示；工具窗口"浏览远程"/"打开终端"对 LOCAL 服务器提示不支持
+
+
+### 🐛 Bug修复
+- **新增服务器后侧边栏下拉不刷新**：修复在设置页新增/编辑/删除服务器后，DeployX 侧边栏操作页的"目标服务器"下拉列表不更新、点刷新按钮也无效、需重启 IDE 的问题。`ServerManager` 新增变更监听机制（`addChangeListener`），增删改服务器后主动通知所有已打开的工具窗口面板在 EDT 上刷新下拉，实时同步
+- **执行中自动跳转日志页导致终止按钮不可见**：修复上传/部署执行时 `appendLog` 每次写日志都强制 `tabbedPane.selectedIndex = 1` 跳转日志页，导致操作页的终止按钮和进度条不可见的问题。移除强制跳转，日志在后台追加，用户可主动切换查看
+- **IDEA 进程窗口取消按钮无效**：修复 `Task.Backgroundable` 设置了 `canBeCancelled=true` 但从不检查 `ProgressIndicator.isCanceled`，导致用户点击 IDEA 自带进度窗口的取消按钮无法终止任务的问题。`launchCancelableTask` 新增守护线程轮询 `indicator.isCanceled`，一旦检测到取消立即联动触发 `cancelToken.cancel()`，与"终止"按钮等效
+- **新增/复制服务器未校验 ID 唯一性**：修复添加或复制服务器时输入已存在的 ID 会直接保存成功，导致 ID 冲突的问题。`ServerEditDialog.doValidate` 在新增/复制模式（ID 可编辑）下通过 `ServerManager.getServer` 检查 ID 是否已存在，重复时阻止保存并提示"已存在相同 ID 的服务器，请使用其他 ID"
+
+
+### 🛠 重构
+- **取消信号贯穿传输层**：`RsyncWrapper`（4 处执行点）、`SftpTransferClient`（上传/下载/dry-run）均新增 `cancelToken` 参数，在读取循环中检查取消状态，捕获 `DeployCancelledException` 时销毁进程/断开通道并返回"已终止"结果
+- **`launchCancelableTask` 统一任务生命周期**：`FileSyncToolWindowPanel` 提取泛型辅助方法，统一管理 11 个后台任务的 cancelToken 创建/销毁与终止按钮启用/禁用，消除重复样板代码
+- **`ServerConfigDeserializer` 兜底 `type` 字段**：新增 `type` 字段解析（缺失/null/非法值兜底为 SSH），避免 1.0.3 同款 NPE 回归；测试补充 4 个用例覆盖
+
+
+---
+
 ## [1.0.5] - 2026-07-11
 
 
@@ -279,6 +317,7 @@
 - 次版本号：向下兼容的功能性新增
 - 修订号：向下兼容的问题修正
 
+[1.0.6]: https://github.com/zhengmingliang/DeployX/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/zhengmingliang/DeployX/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/zhengmingliang/DeployX/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/zhengmingliang/DeployX/compare/v1.0.2...v1.0.3

@@ -17,6 +17,8 @@
             <li>🖥️ SSH terminal: protocol-level auth opens remote terminal
             <li>📚 Script library: reusable remote SSH commands with parameters, context interpolation and safety checks
             <li>🆕 Remote file browser: browse, edit and download remote files in a sidebar tree; drag-and-drop upload/download; edit in IDE with Ctrl+S auto-sync; "Open in Terminal" integration (new in v1.0.5)
+            <li>🛑 Abort: click "Abort" during deploy/sync/download/push/preview to immediately stop the current operation - destroys the rsync subprocess / drops the SSH channel and skips remaining batch groups (new in v1.0.6)
+            <li>📂 Local server: a new "Local" server type incrementally copies current-project files to a local directory via the mapping's target dir - the production-incremental-file-update scenario, no SSH needed (new in v1.0.6)
         </ul>
 
         <br>
@@ -33,6 +35,8 @@
             <li>📚 脚本库：可复用的远程命令片段，支持参数化、上下文插值与危险确认</li>
             <li>🖥️ SSH 终端：一键打开远程服务器终端，协议层认证真正免密登录</li>
             <li>🆕 远程文件浏览器：侧边栏树形浏览/编辑/下载远程文件；支持拖拽上传/下载；IDE 编辑器 Ctrl+S 自动回写；右键「在终端中打开」（v1.0.5 新增）</li>
+            <li>🛑 终止功能：部署/同步/下载/推送/预览过程中可点击「终止」按钮立即停止当前操作，销毁 rsync 子进程/断开 SSH 通道并跳过剩余批次（v1.0.6 新增）</li>
+            <li>📂 本地服务器：新增「本地」服务器类型，按映射目标目录将当前项目文件增量更新到本地指定目录，用于投产增量文件更新，无需 SSH（v1.0.6 新增）</li>
         </ul>
     ]]></description>
 

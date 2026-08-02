@@ -1,5 +1,19 @@
 <!--LANG:EN-->
 <h2> Changelog</h2>
+<h3>v1.0.6 - Abort &amp; Local Server</h3>
+<ul>
+    <li><b>🛑 Abort Deploy/Sync:</b> Click the "Abort" button during deploy / sync / download / push / preview to immediately stop the current operation. A new <code>DeployCancelToken</code> propagates through UI -&gt; DeployService -&gt; TransferService -&gt; RsyncWrapper/SftpTransferClient. <b>Hard-abort semantics:</b> immediately destroys the running rsync subprocess (<code>Process.destroyForcibly()</code>) or drops the SSH command channel, and skips remaining batch groups. rsync/SFTP/local-copy loops all have cancel checkpoints; already-transferred files are kept, half-transferred files are auto-fixed by the next incremental sync. The operation panel gains an "Abort" button (enabled while a task runs, auto-disabled on completion); the progress label shows "Aborted"</li>
+    <li><b>📂 Local Server (Production Incremental Update):</b> Server config gains a "Local" type (<code>ServerType.LOCAL</code>) for incrementally updating current-project files to a local directory - the production-incremental-file-update scenario. Reuses the mapping's <code>remoteDir</code> as the local target dir (one local server can map to multiple target dirs). New <code>LocalTransferService</code> does incremental copy via <code>java.nio.file.Files</code> (size + mtime, matching rsync semantics) with exclude rules, dry-run and cancel-token support. <code>TransferService</code> dispatches LOCAL servers to local copy; <code>DeployService</code> skips all SSH steps for LOCAL servers. Server-edit dialog adds a Type dropdown (LOCAL hides host/port/user/auth); server table adds a Type column; mapping-edit browse button switches to a local directory chooser for LOCAL servers. Guards: <code>RemoteFileBrowserService</code>/<code>TerminalService</code> reject LOCAL servers with a friendly message</li>
+    <li><b>🛠 Cancel Signal Through Transport Layer:</b> <code>RsyncWrapper</code> (4 execution points) and <code>SftpTransferClient</code> (upload/download/dry-run) add a <code>cancelToken</code> parameter, check cancellation in their read loops, and on <code>DeployCancelledException</code> destroy the process / drop the channel and return an "aborted" result</li>
+    <li><b>🛠 launchCancelableTask Helper:</b> <code>FileSyncToolWindowPanel</code> extracts a generic helper unifying cancel-token lifecycle and abort-button enable/disable across all 11 background tasks, removing boilerplate</li>
+    <li><b>🛠 ServerConfigDeserializer Backstop for <code>type</code>:</b> Parses the new <code>type</code> field (missing/null/invalid falls back to SSH), avoiding a repeat of the 1.0.3 NPE regression; 4 new test cases cover it</li>
+    <li><b>🐛 Server Dropdown Not Refreshing After Add:</b> Fixed the operation-panel target-server dropdown not updating after adding/editing/deleting a server in Settings - the refresh button didn't work either, requiring an IDE restart. <code>ServerManager</code> now has a change-listener mechanism (<code>addChangeListener</code>) that notifies open tool-window panels to refresh the combo on the EDT in real time</li>
+    <li><b>🐛 Auto-jumping to Log Tab Hides Abort Button:</b> Fixed <code>appendLog</code> forcing <code>tabbedPane.selectedIndex = 1</code> on every log line during upload/deploy, hiding the abort button and progress bar on the operation tab. Auto-jump removed; logs append in the background, users switch tabs manually</li>
+    <li><b>🐛 IDE Progress-Window Cancel Button Ineffective:</b> Fixed <code>Task.Backgroundable</code> passing <code>canBeCancelled=true</code> but never checking <code>ProgressIndicator.isCanceled</code>, so clicking the cancel button in the IDE's built-in progress window couldn't stop a task. <code>launchCancelableTask</code> now runs a daemon thread polling <code>indicator.isCanceled</code> and triggers <code>cancelToken.cancel()</code> on cancel - equivalent to the Abort button</li>
+    <li><b>🐛 Add/Copy Server Not Validating ID Uniqueness:</b> Fixed adding or copying a server with an existing ID saving successfully, causing an ID conflict. <code>ServerEditDialog.doValidate</code> now checks <code>ServerManager.getServer</code> for duplicates in add/copy mode (when the ID is editable), blocking the save with a "server with this ID already exists" message</li>
+    <li><b>🎨 Abort Button Relocated to Progress Area:</b> Moved the Abort button from the action-button row to the progress panel (bottom of the operation tab), so it stays visible alongside the progress bar regardless of tab focus</li>
+</ul>
+
 <h3>v1.0.5 - Remote File Browser & Rollback</h3>
 <ul>
     <li><b>🔄 Deployment Rollback:</b> One-click rollback to previous version for mappings with backup enabled. Rollback button appears in history for deploy records with backups, with full confirmation dialog and progress tracking. All rollback operations are logged in history with full reports</li>
@@ -132,6 +146,20 @@
 
 <!--LANG:ZH-->
 <h2> 更新日志</h2>
+<h3>v1.0.6 - 终止功能与本地服务器</h3>
+<ul>
+    <li><b>🛑 终止部署/同步：</b>部署、同步、下载、推送、预览过程中可点击"终止"按钮立即停止当前操作。新增取消信号载体 <code>DeployCancelToken</code>，贯穿 UI -&gt; DeployService -&gt; TransferService -&gt; RsyncWrapper/SftpTransferClient。<b>硬终止语义：</b>立即销毁正在运行的 rsync 子进程（<code>Process.destroyForcibly()</code>）或断开 SSH 命令通道，并跳过批次中剩余分组。rsync/SFTP/本地拷贝循环均内置取消检查点；已完成传输的文件保留，半传文件由下次增量同步自动修复。操作面板新增"终止"按钮（任务运行时启用、完成后自动禁用）；进度标签显示"已终止"</li>
+    <li><b>📂 本地服务器（投产增量更新）：</b>服务器配置新增"本地"类型（<code>ServerType.LOCAL</code>），用于将当前项目文件增量更新到本地指定目录--投产增量文件更新场景。复用映射的 <code>remoteDir</code> 作为本地目标目录（一个本地服务器可对应多个目标目录）。新增 <code>LocalTransferService</code>：基于 <code>java.nio.file.Files</code> 实现增量拷贝（按大小 + 修改时间，与 rsync 语义一致），支持排除规则、dry-run 预览、取消令牌。<code>TransferService</code> 入口统一分流 LOCAL 服务器到本地拷贝；<code>DeployService</code> 对 LOCAL 服务器跳过所有 SSH 步骤。服务器编辑对话框新增"类型"下拉（LOCAL 隐藏 host/port/user/auth）；服务器表格新增"类型"列；映射编辑的"目标目录"浏览按钮对 LOCAL 服务器改用本地目录选择器。守卫：<code>RemoteFileBrowserService</code>/<code>TerminalService</code> 对 LOCAL 服务器禁用并友好提示</li>
+    <li><b>🛠 取消信号贯穿传输层：</b><code>RsyncWrapper</code>（4 处执行点）、<code>SftpTransferClient</code>（上传/下载/dry-run）均新增 <code>cancelToken</code> 参数，在读取循环中检查取消状态，捕获 <code>DeployCancelledException</code> 时销毁进程/断开通道并返回"已终止"结果</li>
+    <li><b>🛠 launchCancelableTask 统一任务生命周期：</b><code>FileSyncToolWindowPanel</code> 提取泛型辅助方法，统一管理 11 个后台任务的 cancelToken 创建/销毁与终止按钮启用/禁用，消除重复样板代码</li>
+    <li><b>🛠 ServerConfigDeserializer 兜底 <code>type</code> 字段：</b>新增 <code>type</code> 字段解析（缺失/null/非法值兜底为 SSH），避免 1.0.3 同款 NPE 回归；测试补充 4 个用例覆盖</li>
+    <li><b>🐛 新增服务器后侧边栏下拉不刷新：</b>修复在设置页新增/编辑/删除服务器后，侧边栏操作页的"目标服务器"下拉不更新、点刷新也无效、需重启 IDE 的问题。<code>ServerManager</code> 新增变更监听机制（<code>addChangeListener</code>），增删改后主动通知已打开的工具窗口面板在 EDT 上刷新下拉，实时同步</li>
+    <li><b>🐛 执行中自动跳转日志页导致终止按钮不可见：</b>修复 <code>appendLog</code> 每次写日志都强制跳转日志页，导致操作页的终止按钮和进度条不可见。移除强制跳转，日志后台追加，用户主动切换查看</li>
+    <li><b>🐛 IDEA 进程窗口取消按钮无效：</b>修复 <code>Task.Backgroundable</code> 设了 <code>canBeCancelled=true</code> 但从不检查 <code>ProgressIndicator.isCanceled</code>，导致点击 IDEA 自带进度窗口的取消无法终止任务。<code>launchCancelableTask</code> 新增守护线程轮询 <code>indicator.isCanceled</code>，检测到取消立即联动 <code>cancelToken.cancel()</code>，与"终止"按钮等效</li>
+    <li><b>🐛 新增/复制服务器未校验 ID 唯一性：</b>修复添加或复制服务器时输入已存在的 ID 会直接保存成功、导致 ID 冲突的问题。<code>ServerEditDialog.doValidate</code> 在新增/复制模式（ID 可编辑）下通过 <code>ServerManager.getServer</code> 检查 ID 是否已存在，重复时阻止保存并提示"已存在相同 ID 的服务器，请使用其他 ID"</li>
+    <li><b>🎨 终止按钮移至进度区：</b>终止按钮从操作按钮行移到进度面板（操作页底部），与进度条并排始终可见，不受 Tab 焦点切换影响</li>
+</ul>
+
 <h3>v1.0.5 - 远程文件浏览器与部署回滚</h3>
 <ul>
     <li><b>🔄 部署回滚：</b>对启用了备份的映射支持一键回滚到之前的版本。历史记录中带有备份的部署会显示回滚按钮，包含完整的确认对话框和执行进度追踪。所有回滚操作都记录在历史中并生成完整报告</li>
