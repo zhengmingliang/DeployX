@@ -14,6 +14,9 @@ import java.util.concurrent.CopyOnWriteArrayList
  * 使用 CopyOnWriteArrayList 保证线程安全：
  * - 读操作无锁（适合 ActionUpdateThread.BGT 后台调用 + EDT 读取的并发场景）
  * - 写操作复制底层数组，开销可接受（服务器增删频率低）
+ *
+ * 1.0.6 起：增删改服务器后通过 [listeners] 通知订阅者（如工具窗口面板），
+ * 使侧边栏下拉列表实时刷新，无需手动点刷新或重启 IDE。
  */
 @Service
 class ServerManager {
@@ -23,6 +26,27 @@ class ServerManager {
 
         fun getInstance(): ServerManager =
             ApplicationManager.getApplication().getService(ServerManager::class.java)
+    }
+
+    /** 服务器列表变更监听器（增删改后触发，调用方应在 EDT 上刷新 UI） */
+    fun interface ServerChangeListener {
+        fun onServersChanged()
+    }
+
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<ServerChangeListener>()
+
+    /**
+     * 注册服务器列表变更监听器，返回取消注册的回调。
+     * 工具窗口面板在 init 时注册、dispose 时调用返回的回调注销，避免内存泄漏。
+     */
+    fun addChangeListener(listener: ServerChangeListener): () -> Unit {
+        listeners.add(listener)
+        return { listeners.remove(listener) }
+    }
+
+    /** 通知所有监听器服务器列表已变更。 */
+    private fun notifyChanged() {
+        listeners.forEach { runCatching { it.onServersChanged() } }
     }
 
     private val servers = CopyOnWriteArrayList<ServerConfig>()
@@ -76,6 +100,7 @@ class ServerManager {
         servers.add(config)
         saveToConfig()
         LOG.info("Added server: ${config.id} (${config.name})")
+        notifyChanged()
     }
 
     /**
@@ -87,6 +112,7 @@ class ServerManager {
             servers[index] = config
             saveToConfig()
             LOG.info("Updated server: $id")
+            notifyChanged()
         }
     }
 
@@ -101,6 +127,7 @@ class ServerManager {
             saveToConfig()
             // 同步清理 PasswordSafe 中的密码凭据
             ConfigManager.getInstance().removePassword(id)
+            notifyChanged()
         }
         LOG.info("Deleted server: $id")
     }
