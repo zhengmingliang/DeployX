@@ -1,5 +1,43 @@
 # DeployX Changelog
 
+## [1.0.7] - 2026-08-09
+
+
+### ✨ 新功能
+- **映射项目视图**：映射设置新增「项目 / 全部」切换
+  - 项目视图（默认）：只展示属于当前已打开项目的映射（映射 `localDir` 等于或位于任一已打开项目 `basePath` 之下即视为属于该项目），映射很多时不再杂乱
+  - 全部视图：展示所有映射（1.0.7 之前的行为）
+  - 因映射设置面板为应用级配置（`applicationConfigurable`），「当前项目」取 `ProjectManager.openProjects` 的**全部**已打开项目--映射属于任一已打开项目即在项目视图中展示，确保当前项目必然命中；无打开项目时自动回退到全部视图并提示
+  - 项目归属判断与 `findMappingsByLocalPath` 同口径（归一化后 `==` 或 `startsWith("$base/")`）
+
+- **远程浏览器路径下拉预填映射目录**：首次打开时下拉里原本只有当前路径（通常是 `/`），现在会一并列出当前服务器已配置的映射远程目录
+  - 路径历史优先在前，映射候选在后；去重后展示，点击即可跳转
+  - 映射目录不写入 `browserPathHistory`，只有用户真正进入过的路径才会记入历史（不改持久化结构）
+
+
+### ⚡ 性能优化
+- **远程浏览器目录切换提速**（用户反馈切换目录偏慢，三方向优化）
+  - **短 TTL 目录列表缓存**：`BrowserSession` 按路径缓存目录列表约 5 秒（`ConcurrentHashMap<String, CacheEntry>`），命中即返回快照副本、跳过 SFTP `ls` 往返
+    - 主动刷新（刷新按钮 / 右键刷新 / `reloadRoot` 路径切换）调用 `invalidateCache(path)` 绕过缓存，确保看到最新内容
+    - 上传 / 新建目录 / 删除成功后失效对应路径缓存，不会展示陈旧条目
+    - 连接重置（`forceDisconnect`）/ 会话关闭（`close`）清空全部缓存
+  - **缓存命中同步填充**：新增 `tryCachedListDirectory(path)` 在 EDT 上只读探测缓存，命中时直接同步填充子节点，跳过 `Task.Backgroundable` 调度 + `invokeLater` 往返，树瞬时展开
+
+
+### 🐛 Bug 修复
+- **项目视图过滤不到当前项目映射**：修复项目视图取 `openProjects.lastOrNull()` 作为「当前项目」可能选错（数组顺序不保证是最近激活顺序），导致当前打开项目的映射不展示的问题。改为匹配**任一**已打开项目，当前项目必然命中
+- **展开目录后残留「加载中...」占位节点**：修复 1.0.7 初版用 `treeModel.nodesWereInserted` 做细粒度优化时，该事件不会通知 JTree 移除旧占位子节点，导致展开目录后占位「加载中...」行残留、需手动刷新才消失的问题。回退为 `treeModel.reload(node)`（与 1.0.6 行为一致，已验证可正确清除占位行）
+- **右键刷新导致目录自动折叠**：修复右键刷新 / 上传 / 新建目录后用 `removeAllChildren + treeModel.reload(node)` 刷新节点时丢失子树展开状态、目录自动折叠的问题。新增 `refreshNodePreservingExpansion` 辅助方法：刷新前记录展开路径、刷新后恢复，体验更平滑；删除节点改用 `nodesWereRemoved` 精确事件避免折叠兄弟节点
+
+
+### 🛠 重构
+- **`listDirectory` 拆分**：原 `listDirectory` 拆为公开缓存入口 `listDirectory` + 私有 `listDirectoryRemote`（实际 SFTP `ls`），便于缓存层包裹
+- **`applyEntriesToNode` 抽取**：`loadChildren` 中「填充子节点 + 更新状态 + 根节点记录历史/展开」逻辑抽取为独立方法，同步缓存路径与后台任务路径共用
+- **`refreshNodePreservingExpansion` 抽取**：右键刷新 / 上传 / 新建目录的「重置节点 + 重新加载 + 保持展开」逻辑统一抽取，消除重复并修复折叠问题
+
+
+---
+
 ## [1.0.6] - 2026-07-27
 
 

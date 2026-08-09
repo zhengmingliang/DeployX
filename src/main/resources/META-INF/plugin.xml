@@ -19,6 +19,9 @@
             <li>🆕 Remote file browser: browse, edit and download remote files in a sidebar tree; drag-and-drop upload/download; edit in IDE with Ctrl+S auto-sync; "Open in Terminal" integration (new in v1.0.5)
             <li>🛑 Abort: click "Abort" during deploy/sync/download/push/preview to immediately stop the current operation - destroys the rsync subprocess / drops the SSH channel and skips remaining batch groups (new in v1.0.6)
             <li>📂 Local server: a new "Local" server type incrementally copies current-project files to a local directory via the mapping's target dir - the production-incremental-file-update scenario, no SSH needed (new in v1.0.6)
+            <li>🗂️ Mapping project view: a "Project / All" toggle in the mapping settings; Project view (default) shows only mappings belonging to any open project (new in v1.0.7)
+            <li>📂 Remote browser path dropdown: first open now lists the configured mapping remote dirs for the current server, so you can jump to them without typing (new in v1.0.7)
+            <li>⚡ Remote browser speed: short-TTL directory-list cache (cache hit skips the SFTP round-trip; refresh bypasses the cache) and synchronous fill on cache hit - directory switching is noticeably faster (new in v1.0.7)
         </ul>
 
         <br>
@@ -37,6 +40,9 @@
             <li>🆕 远程文件浏览器：侧边栏树形浏览/编辑/下载远程文件；支持拖拽上传/下载；IDE 编辑器 Ctrl+S 自动回写；右键「在终端中打开」（v1.0.5 新增）</li>
             <li>🛑 终止功能：部署/同步/下载/推送/预览过程中可点击「终止」按钮立即停止当前操作，销毁 rsync 子进程/断开 SSH 通道并跳过剩余批次（v1.0.6 新增）</li>
             <li>📂 本地服务器：新增「本地」服务器类型，按映射目标目录将当前项目文件增量更新到本地指定目录，用于投产增量文件更新，无需 SSH（v1.0.6 新增）</li>
+            <li>🗂️ 映射项目视图：映射设置新增「项目 / 全部」切换，项目视图（默认）只展示属于任一已打开项目的映射（v1.0.7 新增）</li>
+            <li>📂 远程浏览器路径下拉：首次打开即列出当前服务器已配置的映射远程目录，无需手输即可快速跳转（v1.0.7 新增）</li>
+            <li>⚡ 远程浏览器提速：短 TTL 目录列表缓存（命中跳过 SFTP 往返、刷新绕过缓存）+ 缓存命中同步填充，目录切换更流畅（v1.0.7 新增）</li>
         </ul>
     ]]></description>
 

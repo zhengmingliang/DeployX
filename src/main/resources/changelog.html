@@ -1,5 +1,20 @@
 <!--LANG:EN-->
 <h2> Changelog</h2>
+<h3>v1.0.7 - Mapping Project View & Remote Browser Speedup</h3>
+<ul>
+    <li><b>🗂️ Mapping Project View:</b> The mapping settings now have a "Project / All" toggle. <b>Project view (default)</b> shows only the mappings belonging to any open project (a mapping belongs to a project when its local dir equals or is under a project's base path); "All" shows every mapping - the previous behavior. Useful when many mappings are configured and the list gets cluttered</li>
+    <li><b>📂 Remote Browser Path Dropdown:</b> On first open the path dropdown used to contain only the current path (usually <code>/</code>). It now also lists the configured mapping remote dirs for the current server, so you can jump to a configured remote directory in one click without typing. Mapping dirs are shown after the path history; only dirs you actually enter are recorded into the history</li>
+    <li><b>⚡ Remote Browser Directory-Switch Speedup:</b> Switching directories felt slow. Two optimizations:
+        <ul>
+            <li><b>Short-TTL directory-list cache:</b> <code>BrowserSession</code> caches directory listings for ~5s keyed by path; a cache hit returns instantly and skips the SFTP <code>ls</code> round-trip. Active refresh (refresh button / right-click refresh / path change) bypasses the cache; uploads / new-dir / delete invalidate the affected path so stale entries are never shown</li>
+            <li><b>Synchronous fill on cache hit:</b> When the cache is hit, child nodes are filled synchronously on the EDT, skipping the <code>Task.Backgroundable</code> scheduling + <code>invokeLater</code> round-trip - the tree expands instantly</li>
+        </ul>
+    </li>
+    <li><b>🐛 Project View Missing Current Project's Mappings:</b> Fixed the project view taking <code>openProjects.lastOrNull()</code> as "the current project", which could pick the wrong one (the array order is not guaranteed to be most-recently-active), so the open project's mappings were not shown. Now matches <b>any</b> open project - the current project always matches</li>
+    <li><b>🐛 Stale "Loading..." Placeholder After Expand:</b> Fixed the 1.0.7 initial fine-grained optimization using <code>treeModel.nodesWereInserted</code>, which did not notify the JTree to remove the old placeholder child, leaving a "Loading..." row after expanding a directory until a manual refresh. Reverted to <code>treeModel.reload(node)</code> (matching 1.0.6's verified behavior)</li>
+    <li><b>🐛 Right-click Refresh Collapses the Directory:</b> Fixed right-click refresh / upload / new-dir using <code>removeAllChildren + treeModel.reload(node)</code> losing the subtree expansion state and auto-collapsing the directory. New <code>refreshNodePreservingExpansion</code> helper records expanded paths before refresh and restores them after; delete now uses <code>nodesWereRemoved</code> to avoid collapsing siblings</li>
+</ul>
+
 <h3>v1.0.6 - Abort &amp; Local Server</h3>
 <ul>
     <li><b>🛑 Abort Deploy/Sync:</b> Click the "Abort" button during deploy / sync / download / push / preview to immediately stop the current operation. A new <code>DeployCancelToken</code> propagates through UI -&gt; DeployService -&gt; TransferService -&gt; RsyncWrapper/SftpTransferClient. <b>Hard-abort semantics:</b> immediately destroys the running rsync subprocess (<code>Process.destroyForcibly()</code>) or drops the SSH command channel, and skips remaining batch groups. rsync/SFTP/local-copy loops all have cancel checkpoints; already-transferred files are kept, half-transferred files are auto-fixed by the next incremental sync. The operation panel gains an "Abort" button (enabled while a task runs, auto-disabled on completion); the progress label shows "Aborted"</li>
@@ -146,6 +161,21 @@
 
 <!--LANG:ZH-->
 <h2> 更新日志</h2>
+<h3>v1.0.7 - 映射项目视图与远程浏览器提速</h3>
+<ul>
+    <li><b>🗂️ 映射项目视图：</b>映射设置新增「项目 / 全部」切换。<b>项目视图（默认）</b>只展示属于任一已打开项目的映射（映射的本地目录等于或位于某项目 basePath 之下即视为属于该项目）；「全部」展示所有映射--即 1.0.7 之前的行为。映射很多时不再杂乱</li>
+    <li><b>📂 远程浏览器路径下拉：</b>首次打开时下拉里原本只有当前路径（通常是 <code>/</code>）。现在会一并列出当前服务器已配置的映射远程目录，点击即可跳转，无需手输。映射目录排在路径历史之后；只有用户真正进入过的路径才会记入历史</li>
+    <li><b>⚡ 远程浏览器目录切换提速：</b>切换目录感觉偏慢，做了两处优化：
+        <ul>
+            <li><b>短 TTL 目录列表缓存：</b><code>BrowserSession</code> 按路径缓存目录列表约 5 秒，命中即返回、跳过 SFTP <code>ls</code> 往返。主动刷新（刷新按钮 / 右键刷新 / 路径切换）绕过缓存；上传 / 新建目录 / 删除会失效对应路径缓存，不会展示陈旧内容</li>
+            <li><b>缓存命中同步填充：</b>命中缓存时直接在 EDT 上同步填充子节点，跳过 <code>Task.Backgroundable</code> 调度 + <code>invokeLater</code> 往返，树瞬时展开</li>
+        </ul>
+    </li>
+    <li><b>🐛 项目视图过滤不到当前项目映射：</b>修复项目视图取 <code>openProjects.lastOrNull()</code> 作为「当前项目」可能选错（数组顺序不保证是最近激活顺序），导致当前打开项目的映射不展示的问题。改为匹配<b>任一</b>已打开项目，当前项目必然命中</li>
+    <li><b>🐛 展开目录后残留「加载中...」占位节点：</b>修复 1.0.7 初版用 <code>treeModel.nodesWereInserted</code> 做细粒度优化时，该事件不会通知 JTree 移除旧占位子节点，导致展开目录后占位「加载中...」行残留、需手动刷新才消失的问题。回退为 <code>treeModel.reload(node)</code>（与 1.0.6 行为一致，已验证可正确清除占位行）</li>
+    <li><b>🐛 右键刷新导致目录自动折叠：</b>修复右键刷新 / 上传 / 新建目录后用 <code>removeAllChildren + treeModel.reload(node)</code> 刷新节点时丢失子树展开状态、目录自动折叠的问题。新增 <code>refreshNodePreservingExpansion</code> 辅助方法：刷新前记录展开路径、刷新后恢复；删除节点改用 <code>nodesWereRemoved</code> 精确事件避免折叠兄弟节点</li>
+</ul>
+
 <h3>v1.0.6 - 终止功能与本地服务器</h3>
 <ul>
     <li><b>🛑 终止部署/同步：</b>部署、同步、下载、推送、预览过程中可点击"终止"按钮立即停止当前操作。新增取消信号载体 <code>DeployCancelToken</code>，贯穿 UI -&gt; DeployService -&gt; TransferService -&gt; RsyncWrapper/SftpTransferClient。<b>硬终止语义：</b>立即销毁正在运行的 rsync 子进程（<code>Process.destroyForcibly()</code>）或断开 SSH 命令通道，并跳过批次中剩余分组。rsync/SFTP/本地拷贝循环均内置取消检查点；已完成传输的文件保留，半传文件由下次增量同步自动修复。操作面板新增"终止"按钮（任务运行时启用、完成后自动禁用）；进度标签显示"已终止"</li>

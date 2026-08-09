@@ -272,6 +272,8 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
     private fun reloadRoot(path: String) {
         val srv = currentServer ?: return
         val sess = session ?: return
+        // 用户主动刷新/路径切换：绕过目录列表缓存，确保看到最新内容
+        sess.invalidateCache(path)
         rootBrowseNode.entry = syntheticDirEntry(path)
         rootBrowseNode.loaded = false
         rootBrowseNode.removeAllChildren()
@@ -292,6 +294,15 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
         treeModel.reload(node)
         isLoading = true
 
+        // 1.0.7 性能优化：先在 EDT 上探测目录列表缓存，命中则同步填充节点，
+        // 跳过 Task.Backgroundable 调度 + invokeLater 往返，显著降低目录切换延迟。
+        // 缓存未命中时仍走后台任务发起 SFTP ls。
+        val cached = sess?.tryCachedListDirectory(path)
+        if (cached != null) {
+            applyEntriesToNode(node, cached, path, srv)
+            return
+        }
+
         ProgressManager.getInstance().run(object : Task.Backgroundable(null, DeployXBundle.message("remote.browser.loading"), true) {
             override fun run(indicator: ProgressIndicator) {
                 var entries: List<RemoteFileEntry>? = null
@@ -303,38 +314,97 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
                 ApplicationManager.getApplication().invokeLater {
                     if (isDisposed) return@invokeLater
                     isLoading = false
-                    node.removeAllChildren()
                     if (error != null) {
                         statusLabel.text = DeployXBundle.message("remote.browser.load.failed", error)
                         node.loaded = false
+                        node.removeAllChildren()
                         treeModel.reload(node)
                         if (node === rootBrowseNode) {
                             Messages.showErrorDialog(this@RemoteFileBrowserPanel, DeployXBundle.message("remote.browser.load.failed", error), DeployXBundle.message("remote.browser.error.title"))
                         }
                     } else {
-                        entries?.forEach { node.add(RemoteFileNode(it)) }
-                        treeModel.reload(node)
-                        statusLabel.text = DeployXBundle.message("remote.browser.status.loaded", entries?.size ?: 0, path)
-                        // 根节点加载成功：记录路径历史 + 自动展开
-                        if (node === rootBrowseNode) {
-                            srv?.let { settings.addBrowserPathHistory(it.id, path) }
-                            refreshPathCombo()
-                            tree.expandPath(TreePath(node.path))
-                        }
+                        applyEntriesToNode(node, entries ?: emptyList(), path, srv)
                     }
                 }
             }
         })
     }
 
+    /**
+     * 刷新单个节点并保持其子树的展开状态（1.0.7 修复）。
+     *
+     * 直接 `removeAllChildren + treeModel.reload(node)` 会丢失该节点下已展开的子目录
+     * （用户反馈：右键刷新后目录自动折叠）。这里先记录展开的子路径，重置节点后重新加载，
+     * 再恢复展开，体验更平滑。
+     *
+     * @param node 要刷新的节点（必须已加载过，否则无需刷新）
+     */
+    private fun refreshNodePreservingExpansion(node: RemoteFileNode) {
+        // 用户主动刷新：绕过缓存
+        node.entry?.path?.let { p -> session?.invalidateCache(p) }
+        // 记录当前该节点子树下展开的路径（用于刷新后恢复，避免目录自动折叠）
+        val expandedPaths = tree.getExpandedDescendants(TreePath(node.path))?.toList() ?: emptyList()
+        // 重置节点：清空子节点并标记需重新加载。loadChildren 内部会加占位 + reload 同步树。
+        node.loaded = false
+        node.removeAllChildren()
+        loadChildren(node)
+        // 恢复展开状态（loadChildren 的 reload 会折叠子树，这里重新展开）
+        for (path in expandedPaths) {
+            tree.expandPath(path)
+        }
+        // 确保被刷新的节点本身展开（刷新目录时应看到其子内容）
+        tree.expandPath(TreePath(node.path))
+    }
+
+    /**
+     * 将目录条目应用到节点（1.0.7 修复）。
+     *
+     * - 占位「加载中...」节点在加载开始时通过 [treeModel.reload] 加入；加载完成替换为真实
+     *   条目时，必须用能正确同步整棵子树结构的事件，否则 JTree 行缓存会残留占位行
+     *   （用户反馈：展开后总有一个「加载中...」不消失）。
+     * - 统一用 [treeModel.reload]（与 1.0.6 行为一致，已验证可正确清除占位行且不折叠节点）。
+     *   1.0.7 初版曾尝试用 [treeModel.nodesWereInserted] 做细粒度优化，但该事件不会通知
+     *   JTree 移除旧占位子节点，导致占位行残留，故回退为 reload。
+     * - 根节点加载成功时记录路径历史并自动展开。
+     */
+    private fun applyEntriesToNode(
+        node: RemoteFileNode,
+        entries: List<RemoteFileEntry>,
+        path: String,
+        srv: ServerConfig?
+    ) {
+        isLoading = false
+        node.removeAllChildren()
+        entries.forEach { node.add(RemoteFileNode(it)) }
+        treeModel.reload(node)
+        statusLabel.text = DeployXBundle.message("remote.browser.status.loaded", entries.size, path)
+        if (node === rootBrowseNode) {
+            srv?.let { settings.addBrowserPathHistory(it.id, path) }
+            refreshPathCombo()
+            tree.expandPath(TreePath(node.path))
+        }
+    }
+
     // ===== 路径历史 =====
 
     private fun refreshPathCombo() {
         val serverId = currentServer?.id ?: return
+        // 路径历史（用户手动进入过的路径）
         val history = settings.getBrowserPathHistory(serverId)
+        // 映射候选：当前服务器在该项目下配置的映射 remoteDir，首次打开即可快速选择
+        val mappingCandidates = MappingManager.getInstance().getMappings()
+            .filter { it.serverId == serverId && it.remoteDir.isNotBlank() }
+            .map { normalizePath(it.remoteDir) }
+            .distinct()
+        // 合并去重：历史优先在前，映射候选在后；与当前路径重复的不重复加入
+        val seen = mutableSetOf(normalizePath(currentPath))
+        val merged = buildList {
+            for (p in history) if (seen.add(p)) add(p)
+            for (p in mappingCandidates) if (seen.add(p)) add(p)
+        }
         suppressPathAction = true
         pathCombo.removeAllItems()
-        for (p in history) pathCombo.addItem(p)
+        for (p in merged) pathCombo.addItem(p)
         pathCombo.selectedItem = currentPath
         suppressPathAction = false
     }
@@ -410,7 +480,7 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
         popup.add(JMenuItem(DeployXBundle.message("remote.browser.menu.refresh"), AllIcons.Actions.Refresh).apply {
             val target = if (entry.isDirectory) node else node.parent as? RemoteFileNode
             addActionListener {
-                target?.let { it.loaded = false; it.removeAllChildren(); treeModel.reload(it); loadChildren(it) }
+                target?.let { refreshNodePreservingExpansion(it) }
             }
         })
         popup.add(JMenuItem(DeployXBundle.message("remote.browser.menu.copyPath"), AllIcons.Actions.Copy).apply {
@@ -473,7 +543,7 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
                 ApplicationManager.getApplication().invokeLater {
                     if (isDisposed) return@invokeLater
                     if (error != null) Messages.showErrorDialog(this@RemoteFileBrowserPanel, DeployXBundle.message("remote.browser.newdir.failed", error), DeployXBundle.message("remote.browser.error.title"))
-                    else { parentNode?.let { it.loaded = false; it.removeAllChildren(); treeModel.reload(it); loadChildren(it) }; statusLabel.text = DeployXBundle.message("remote.browser.newdir.success", fullPath) }
+                    else { sess.invalidateCache(parentDir); parentNode?.let { refreshNodePreservingExpansion(it) }; statusLabel.text = DeployXBundle.message("remote.browser.newdir.success", fullPath) }
                 }
             }
         })
@@ -492,7 +562,7 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
                 ApplicationManager.getApplication().invokeLater {
                     if (isDisposed) return@invokeLater
                     if (error != null) Messages.showErrorDialog(this@RemoteFileBrowserPanel, DeployXBundle.message("remote.browser.delete.failed", error), DeployXBundle.message("remote.browser.error.title"))
-                    else { (node.parent as? RemoteFileNode)?.let { it.remove(node); treeModel.reload(it) }; statusLabel.text = DeployXBundle.message("remote.browser.delete.done", entry.path) }
+                    else { (node.parent as? RemoteFileNode)?.let { parent -> parent.entry?.path?.let { p -> sess.invalidateCache(p) }; val removedIdx = parent.getIndex(node); parent.remove(node); treeModel.nodesWereRemoved(parent, intArrayOf(removedIdx), arrayOf(node)) }; statusLabel.text = DeployXBundle.message("remote.browser.delete.done", entry.path) }
                 }
             }
         })
@@ -520,8 +590,10 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
                     if (error != null) { Messages.showErrorDialog(this@RemoteFileBrowserPanel, DeployXBundle.message("remote.browser.upload.failed", error), DeployXBundle.message("remote.browser.error.title")) }
                     else {
                         statusLabel.text = DeployXBundle.message("remote.browser.upload.success", count, targetDir, RemoteFileEntry.formatSize(totalSize))
-                        // 刷新目标目录
-                        findNodeForPath(targetDir)?.let { it.loaded = false; it.removeAllChildren(); treeModel.reload(it); loadChildren(it) }
+                        // 上传改变了目标目录内容：失效缓存后刷新
+                        sess.invalidateCache(targetDir)
+                        // 刷新目标目录（保持展开状态）
+                        findNodeForPath(targetDir)?.let { refreshNodePreservingExpansion(it) }
                     }
                 }
             }

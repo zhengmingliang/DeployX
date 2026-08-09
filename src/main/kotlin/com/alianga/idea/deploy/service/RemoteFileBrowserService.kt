@@ -227,6 +227,18 @@ class RemoteFileBrowserService {
         /** 服务器地址（供 UI 使用） */
         val serverAddress: String get() = server.displayAddress
 
+        // ===== 目录列表短 TTL 缓存（1.0.7 性能优化） =====
+        /** 缓存条目：目录列表快照 + 过期时间戳 */
+        private data class CacheEntry(val entries: List<RemoteFileEntry>, val expireAt: Long)
+
+        /** 按 (serverId, path) 索引的目录列表缓存，命中且未过期时跳过 SFTP ls 往返 */
+        private val dirCache = ConcurrentHashMap<String, CacheEntry>()
+
+        /** 目录列表缓存 TTL（毫秒）。短 TTL 兼顾「切换目录快」与「目录内容时效性」 */
+        private val dirCacheTtlMs: Long = 5000L
+
+        private fun cacheKey(path: String): String = normalizePath(path)
+
         /**
          * 确保连接和 SFTP 通道可用，必要时重连。
          * @return true 表示通道已就绪可用
@@ -255,6 +267,8 @@ class RemoteFileBrowserService {
             try { channel?.disconnect() } catch (_: Exception) {}
             channel = null
             connection.disconnect()
+            // 连接重置后缓存可能不再可信，清空
+            dirCache.clear()
         }
 
         /** 带一次重连重试的 SFTP 操作包装。 */
@@ -271,9 +285,26 @@ class RemoteFileBrowserService {
 
         /**
          * 列出指定目录下的条目（按目录在前、名称不区分大小写排序）。
+         *
+         * 命中短 TTL 缓存时直接返回快照副本，跳过 SFTP `ls` 往返，显著降低目录切换延迟。
+         * 调用方主动刷新时应先调用 [invalidateCache] 绕过缓存。
          * @throws IOException 连接失败或目录不可读
          */
-        fun listDirectory(path: String): List<RemoteFileEntry> = withRetry {
+        fun listDirectory(path: String): List<RemoteFileEntry> {
+            val key = cacheKey(path)
+            // 命中且未过期：返回快照副本（避免调用方修改污染缓存）
+            dirCache[key]?.let { entry ->
+                if (System.currentTimeMillis() < entry.expireAt) {
+                    return ArrayList(entry.entries)
+                }
+            }
+            val entries = listDirectoryRemote(path)
+            dirCache[key] = CacheEntry(entries, System.currentTimeMillis() + dirCacheTtlMs)
+            return ArrayList(entries)
+        }
+
+        /** 实际发起 SFTP ls 的实现（不经过缓存） */
+        private fun listDirectoryRemote(path: String): List<RemoteFileEntry> = withRetry {
             if (!ensureConnected()) {
                 throw IOException("SFTP channel not connected to ${server.displayAddress}")
             }
@@ -301,6 +332,25 @@ class RemoteFileBrowserService {
                     )
                 }
                 .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+        }
+
+        /**
+         * 仅探测缓存，不发起网络请求。命中且未过期返回快照副本，否则返回 null。
+         * 供 UI 在 EDT 上快速判断是否可跳过后台任务同步填充节点。
+         */
+        fun tryCachedListDirectory(path: String): List<RemoteFileEntry>? {
+            val entry = dirCache[cacheKey(path)] ?: return null
+            if (System.currentTimeMillis() >= entry.expireAt) return null
+            return ArrayList(entry.entries)
+        }
+
+        /**
+         * 使目录列表缓存失效。
+         * - [path] 非空：失效该路径（上传/下载/新建目录/删除等局部变更后调用）
+         * - [path] 为空：清空全部缓存（连接重置/强制刷新时调用）
+         */
+        fun invalidateCache(path: String? = null) {
+            if (path == null) dirCache.clear() else dirCache.remove(cacheKey(path))
         }
 
         /**
@@ -489,6 +539,7 @@ class RemoteFileBrowserService {
                 // ignore
             }
             channel = null
+            dirCache.clear()
             connection.disconnect()
             LOG.info("Remote browser session closed for ${server.displayAddress}")
         }
