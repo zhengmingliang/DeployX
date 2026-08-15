@@ -32,6 +32,7 @@ import com.alianga.idea.deploy.ui.settings.MappingEditDialog
 import com.intellij.icons.AllIcons
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.progress.ProgressIndicator
@@ -93,7 +94,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     // 操作 tab 组件
     private val serverCombo = JComboBox<String>()
-    private val localPathField = JBTextField()
+    // 1.0.8：本地路径改为 TextFieldWithBrowseButton，支持选目录（与选文件并存）
+    private val localPathField = TextFieldWithBrowseButton()
     private val remotePathField = TextFieldWithBrowseButton()
     private val backupCheck = JBCheckBox(DeployXBundle.message("toolwindow.checkbox.backupBeforeDeploy"))
     private val backupDirField = JBTextField()
@@ -125,10 +127,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val openTerminalButton = UiButtonFactory.createIconButton(DeployXBundle.message("toolwindow.button.openTerminal"), AllIcons.Nodes.Console) { openTerminal() }
     private val browseRemoteButton = UiButtonFactory.createIconButton(DeployXBundle.message("toolwindow.button.browseRemote"), AllIcons.Nodes.Folder) { browseRemote() }
     private val previewButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.preview"), AllIcons.Actions.Preview) { previewSync() }
+    // 1.0.8 新增：预览拉取按钮
+    private val previewPullButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.previewPull"), AllIcons.Actions.Preview) { previewPull() }
     private val startDeployButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.startDeploy"), AllIcons.Actions.Execute) { startDeploy() }
+    // 1.0.8 新增：拉取按钮（从服务器下载到本地）
+    private val pullButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.pull"), AllIcons.Actions.Download) { pullFromServer() }
     private val quickPushButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.quickPush"), AllIcons.Actions.Upload) { quickPush() }
     private val saveAsMappingButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.saveAsMapping"), AllIcons.Actions.MenuSaveall) { saveAsMapping() }
-    /** 终止按钮（1.0.6 新增）：运行中可点击终止当前部署/同步操作，初始禁用 */
+    /**
+     * 终止按钮（1.0.6 新增，运行中可点击终止当前部署/同步操作，初始禁用）。
+     * 1.0.8 调整：从操作面板进度区迁移到日志面板顶部，使其在所有执行动作中
+     * 始终可见且与日志就近展示。
+     */
     private val abortButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.abort"), AllIcons.Actions.Suspend) { abortCurrentTask() }
 
     /** 当前运行中任务的取消令牌（1.0.6 新增）。null 表示无任务运行。 */
@@ -260,24 +270,28 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         val buttonPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
+            // 1.0.8 调整：操作按钮重排为 预览 | 预览拉取 | 部署 | 拉取 | 快速推送 | 保存为映射
             add(previewButton)
             add(Box.createHorizontalStrut(8))
+            add(previewPullButton)
+            add(Box.createHorizontalStrut(8))
             add(startDeployButton)
+            add(Box.createHorizontalStrut(8))
+            add(pullButton)
             add(Box.createHorizontalStrut(8))
             add(quickPushButton)
             add(Box.createHorizontalStrut(8))
             add(saveAsMappingButton)
         }
 
-        // 进度面板：进度条 + 状态标签 + 终止按钮（1.0.6 调整：终止按钮放在进度区，
-        // 操作页底部始终可见，避免执行中自动跳转日志页后无法点击终止）
+        // 进度面板：进度条 + 状态标签（1.0.8 调整：移除终止按钮，迁至日志面板顶部，
+        // 使终止操作在所有执行动作中始终可见且与日志就近展示）
         val progressInfoPanel = JPanel(BorderLayout(4, 0)).apply {
             add(progressBar, BorderLayout.CENTER)
             add(progressLabel, BorderLayout.EAST)
         }
-        val progressPanel = JPanel(BorderLayout(8, 0)).apply {
+        val progressPanel = JPanel(BorderLayout()).apply {
             add(progressInfoPanel, BorderLayout.CENTER)
-            add(abortButton, BorderLayout.EAST)
         }
 
         val operationPanel = JPanel()
@@ -295,7 +309,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // ===== 日志面板 =====
         configureLogArea(logArea)
-        logTabbedPane.addTab(DeployXBundle.message("toolwindow.tab.all"), AllIcons.Nodes.LogFolder, JBScrollPane(logArea))
+        // 1.0.8：每个 Tab 内部顶部加「复制此 Tab 日志」按钮，logArea 对应"全部" Tab（serverId=null）
+        logTabbedPane.addTab(DeployXBundle.message("toolwindow.tab.all"), AllIcons.Nodes.LogFolder, buildLogTabContent(logArea, null))
+        // 1.0.8：日志面板顶部加工具栏（终止按钮放在最右侧），始终可见
+        val logHeaderPanel = JPanel(BorderLayout()).apply {
+            add(buildLogHeaderCopyBar(), BorderLayout.WEST)
+            add(abortButton, BorderLayout.EAST)
+            border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
+        }
+        val logPanel = JPanel(BorderLayout()).apply {
+            add(logHeaderPanel, BorderLayout.NORTH)
+            add(logTabbedPane, BorderLayout.CENTER)
+        }
 
         // ===== 历史面板 =====
         // 自定义渲染器：可回滚的记录显示回滚图标，与「回滚」按钮图标保持一致，
@@ -370,7 +395,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // ===== Tab 面板 =====
         tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.operation"), AllIcons.Actions.Execute, JBScrollPane(operationPanel))
-        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.log"), AllIcons.Nodes.LogFolder, logTabbedPane)
+        // 1.0.8：日志 Tab 容器已包裹"终止按钮 + 复制按钮"工具栏，传 logPanel
+        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.log"), AllIcons.Nodes.LogFolder, logPanel)
         tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.history"), AllIcons.Vcs.History, historyPanel)
         tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.script"), AllIcons.FileTypes.Xml, scriptTabPanel)
 
@@ -467,6 +493,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         abortButton.isEnabled = false
         abortButton.toolTipText = DeployXBundle.message("toolwindow.button.abort.tooltip")
 
+        // 1.0.8：本地路径浏览按钮，支持选文件或选目录（FileChooserDescriptor 通过
+        // withFileFilter 接受 null + isForcedToShowFiles = false 实现二者皆可）
+        setupLocalPathBrowser()
+
         // 设置远程路径浏览按钮
         remotePathField.addActionListener {
             val selectedServerStr = serverCombo.selectedItem?.toString() ?: return@addActionListener
@@ -480,6 +510,85 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             }
         }
         remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
+    }
+
+    /**
+     * 1.0.8：本地路径浏览按钮。允许用户选择文件或目录（操作面板中"本地文件"也支持
+     * 选择目录，部署一个目录时直接按目录方式上传）。使用 [com.intellij.openapi.fileChooser.FileChooserFactory]
+     * 自定义 descriptor，关闭文件过滤、显示隐藏文件选项、允许选目录。
+     */
+    private fun setupLocalPathBrowser() {
+        localPathField.addActionListener {
+            val descriptor = FileChooserDescriptorFactory.createSingleFileOrFolderDescriptor()
+                .withTitle(DeployXBundle.message("toolwindow.button.browseLocal"))
+                .withDescription(DeployXBundle.message("toolwindow.button.browseLocal"))
+                .withShowHiddenFiles(false)
+            val fileChooser = com.intellij.openapi.fileChooser.FileChooserFactory.getInstance()
+                .createFileChooser(descriptor, project, localPathField)
+            // 1.0.8：尝试以当前路径为起点；如不存在则使用项目根或用户主目录
+            val initialFile = runCatching {
+                val current = localPathField.text.trim()
+                if (current.isNotEmpty()) {
+                    val f = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(
+                        if (java.io.File(current).exists()) java.io.File(current)
+                        else (project?.basePath?.let { java.io.File(it) } ?: java.io.File(System.getProperty("user.home")))
+                    )
+                    f
+                } else {
+                    project?.basePath?.let { com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(java.io.File(it)) }
+                }
+            }.getOrNull()
+            val chosen = fileChooser.choose(project, initialFile)
+            if (chosen.isNotEmpty()) {
+                localPathField.text = chosen.first().path
+            }
+        }
+        localPathField.toolTipText = DeployXBundle.message("toolwindow.button.browseLocal")
+    }
+
+    /** 日志面板顶部复制按钮工具栏（"复制全部日志"）。1.0.8 新增。 */
+    private fun buildLogHeaderCopyBar(): JPanel {
+        val copyAllButton = JButton(DeployXBundle.message("toolwindow.action.copyAllLog"), AllIcons.Actions.Copy)
+        copyAllButton.toolTipText = DeployXBundle.message("toolwindow.action.copyAllLog.tooltip")
+        copyAllButton.addActionListener { copyLogText(logArea.text) }
+        val bar = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            add(copyAllButton)
+        }
+        return bar
+    }
+
+    /**
+     * 构造一个日志 Tab 的容器：顶部"复制"按钮 + 下方滚动文本区。
+     * 1.0.8 修复：每个服务器分组 Tab 现在可独立复制自己的日志。
+     * @param serverId 此 Tab 对应的服务器 ID（"全部" Tab 传 null）
+     */
+    private fun buildLogTabContent(area: JBTextArea, serverId: String?): JPanel {
+        val copyButton = JButton(
+            DeployXBundle.message("toolwindow.action.copyLog"),
+            AllIcons.Actions.Copy
+        ).apply {
+            toolTipText = DeployXBundle.message("toolwindow.action.copyLog.tooltip")
+            addActionListener { copyLogText(area.text) }
+        }
+        val top = JPanel(BorderLayout()).apply {
+            add(copyButton, BorderLayout.WEST)
+            border = BorderFactory.createEmptyBorder(2, 4, 2, 4)
+        }
+        return JPanel(BorderLayout()).apply {
+            add(top, BorderLayout.NORTH)
+            add(JBScrollPane(area), BorderLayout.CENTER)
+        }
+    }
+
+    /** 1.0.8：复制日志文本到剪贴板并提示用户。空内容给出友好提示。 */
+    private fun copyLogText(text: String) {
+        if (text.isBlank()) {
+            Messages.showInfoMessage(project, DeployXBundle.message("toolwindow.report.noReportToCopy"), DeployXBundle.message("toolwindow.action.copyLog"))
+            return
+        }
+        CopyPasteManager.getInstance().setContents(StringSelection(text))
+        Messages.showInfoMessage(project, DeployXBundle.message("toolwindow.report.copied"), DeployXBundle.message("toolwindow.action.copyLog"))
     }
 
     /**
@@ -610,6 +719,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
 
         appendLog(DeployXBundle.message("toolwindow.log.redeploy"))
+        // 1.0.8：操作执行前自动切到日志页
+        switchToLogTab()
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.deploying")
 
@@ -768,6 +879,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             appendLog(DeployXBundle.message("toolwindow.log.noFilesToUpload"))
             return
         }
+        // 1.0.8：操作执行前自动切到日志页
+        switchToLogTab()
         appendLog(DeployXBundle.message("toolwindow.log.batchUploadStart", items.size))
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.uploading")
@@ -809,6 +922,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             appendLog(DeployXBundle.message("toolwindow.log.noItemsToDeploy"))
             return
         }
+        // 1.0.8：操作执行前自动切到日志页
+        switchToLogTab()
         appendLog(DeployXBundle.message("toolwindow.log.batchDeployStart", items.size))
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDeploying")
@@ -850,6 +965,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             appendLog(DeployXBundle.message("toolwindow.log.noPreviewItems"))
             return
         }
+        // 1.0.8：操作执行前自动切到日志页
+        switchToLogTab()
         appendLog(DeployXBundle.message("toolwindow.log.batchPreviewStart", items.size))
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.batchPreviewing")
@@ -882,26 +999,36 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     /**
-     * 公开方法：供右键菜单 Action 调用 files-from 批量下载。
+     * 公开方法：供右键菜单 Action 调用 files-from 批量下载（拉取）。
+     *
+     * 1.0.8 调整：自动切到日志页；并改名为「拉取」语义，操作面板"拉取"按钮也走这里。
      */
-    fun executeDownloadBatch(items: List<DownloadItem>) {
+    fun executeDownloadBatch(items: List<DownloadItem>) = executePullBatch(items)
+
+    /**
+     * 1.0.8 新增：批量拉取（从服务器下载到本地）入口。
+     * 流程与 [executeDeployBatch] 对称：自动切到日志页、设置进度条、调 [DeployService.downloadBatch]，
+     * 完成后刷新历史、发系统通知。
+     */
+    fun executePullBatch(items: List<DownloadItem>) {
         if (items.isEmpty()) {
             appendLog(DeployXBundle.message("toolwindow.log.noFilesToDownload"))
             return
         }
-        appendLog(DeployXBundle.message("toolwindow.log.batchDownloadStart", items.size))
+        switchToLogTab()
+        appendLog(DeployXBundle.message("toolwindow.log.batchPullStart", items.size))
         progressBar.value = 0
-        progressLabel.text = DeployXBundle.message("toolwindow.progress.batchDownloading")
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.pulling")
 
         launchCancelableTask(
-            "Batch Downloading...",
+            "Batch Pulling...",
             onProgressDone = { token, results: List<com.alianga.idea.deploy.model.SyncResult> ->
                 val successCount = results.count { it.success }
                 progressBar.value = 100
                 progressLabel.text = if (token.isCancelled())
                     DeployXBundle.message("toolwindow.progress.aborted")
                 else
-                    DeployXBundle.message("toolwindow.progress.batchDownloadComplete", successCount, results.size)
+                    DeployXBundle.message("toolwindow.progress.pullComplete")
                 refreshHistory()
                 if (!token.isCancelled()) notifyTransferResult(successCount, results.size)
             },
@@ -922,10 +1049,55 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     /**
+     * 1.0.8 新增：批量预览拉取（dry-run）。复用 [DeployService.downloadBatch] 的 dryRun 路径，
+     * 不写入历史；并生成一份 [UpdateReport]（operationType=PULL）写入 [lastUpdateReportText]，
+     * 使顶部"复制报告"按钮可复制预览结果。
+     */
+    fun executePreviewPullBatch(items: List<DownloadItem>) {
+        if (items.isEmpty()) {
+            appendLog(DeployXBundle.message("toolwindow.log.noFilesToDownload"))
+            return
+        }
+        switchToLogTab()
+        appendLog(DeployXBundle.message("toolwindow.log.batchPreviewPullStart", items.size))
+        progressBar.value = 0
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.previewPulling")
+
+        launchCancelableTask(
+            "Batch Previewing Pull...",
+            onProgressDone = { token, results: List<com.alianga.idea.deploy.model.SyncResult> ->
+                val successCount = results.count { it.success }
+                updateLastReport("PULL", results.mapNotNull { it.reportGroup })
+                progressBar.value = 100
+                progressLabel.text = if (token.isCancelled())
+                    DeployXBundle.message("toolwindow.progress.aborted")
+                else
+                    DeployXBundle.message("toolwindow.progress.previewPullComplete")
+            },
+            taskBody = { cancelToken ->
+                deployService.downloadBatch(
+                    items,
+                    dryRun = true,
+                    serverLogCallback = { serverId, line -> appendLog(serverId, line) },
+                    progressCallback = { progress ->
+                        SwingUtilities.invokeLater {
+                            progressBar.value = progress.percentage.coerceIn(0, 100)
+                            progressLabel.text = "${progress.currentFile} ${progress.percentage}% ${progress.speed}"
+                        }
+                    },
+                    cancelToken = cancelToken
+                )
+            }
+        )
+    }
+
+    /**
      * 公开方法：供右键菜单 Action 调用部署
      */
     fun executeDeploy(request: DeployRequest) {
         appendLog(DeployXBundle.message("toolwindow.log.startDeploy"))
+        // 1.0.8：操作执行前自动切到日志页
+        switchToLogTab()
         appendLog(DeployXBundle.message("toolwindow.log.local", request.localPath))
         appendLog(DeployXBundle.message("toolwindow.log.remote", request.serverId, request.remotePath))
         progressBar.value = 0
@@ -964,6 +1136,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      */
     fun executePush(localPath: String, serverId: String?) {
         appendLog(DeployXBundle.message("toolwindow.log.quickPush"))
+        // 1.0.8：操作执行前自动切到日志页
+        switchToLogTab()
         appendLog(DeployXBundle.message("toolwindow.log.local", localPath))
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.pushing")
@@ -1137,7 +1311,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 configureLogArea(area)
                 val server = serverManager.getServer(serverId)
                 val title = if (server != null && server.name != server.id) "${server.id} - ${server.name}" else serverId
-                logTabbedPane.addTab(title, AllIcons.Nodes.LogFolder, JBScrollPane(area))
+                // 1.0.8：每个服务器分组 Tab 内部顶部加「复制日志」按钮，修复了"切换到不同服务器
+                // 分组后点击复制还是复制最后一个完成部署的日志"的问题——每个 Tab 持有各自的
+                // area 引用，按钮直接读自己 area 的文本。
+                logTabbedPane.addTab(title, AllIcons.Nodes.LogFolder, buildLogTabContent(area, serverId))
             }
         }
     }
@@ -1157,10 +1334,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 serverArea.append(line)
                 serverArea.caretPosition = serverArea.document.length
             }
-            // 1.0.6：不再强制跳转日志页，避免执行中操作页的进度/终止按钮不可见。
-            // 日志在后台追加，用户可主动切换到日志页查看。
         }
         if (SwingUtilities.isEventDispatchThread()) block() else SwingUtilities.invokeLater(block)
+    }
+
+    /**
+     * 1.0.8 新增：切换到日志页 Tab（"日志" 在 tabbedPane 中的 index = 1）。
+     * 1.0.6 曾禁用自动跳转以避免操作页进度条/终止按钮不可见；本次把终止按钮
+     * 迁移到日志页顶部后，恢复自动跳转（用户点预览/部署/拉取/快速推送/预览拉取
+     * 后立即看到实时日志和终止按钮）。
+     */
+    fun switchToLogTab() {
+        if (tabbedPane.selectedIndex != 1) {
+            tabbedPane.selectedIndex = 1
+        }
     }
 
     private fun previewSync() {
@@ -1173,6 +1360,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             return
         }
 
+        // 1.0.8：操作执行前自动切到日志页（终止按钮已迁至日志页顶部）
+        switchToLogTab()
         appendLog(DeployXBundle.message("toolwindow.log.previewSync"))
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.previewing")
@@ -1195,6 +1384,81 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 }
             }
         )
+    }
+
+    /**
+     * 1.0.8 新增：单文件/目录的预览拉取（dry-run）。
+     * 复用 [SyncService.previewPull]，不写入历史、不执行实际下载。
+     */
+    private fun previewPull() {
+        val localPath = localPathField.text.trim()
+        val remotePath = remotePathField.text.trim()
+        val serverId = getSelectedServerId()
+
+        if (localPath.isEmpty() || remotePath.isEmpty() || serverId == null) {
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.validation.fillSyncInfo"), "Preview Pull")
+            return
+        }
+
+        switchToLogTab()
+        appendLog(DeployXBundle.message("toolwindow.log.startPreviewPull"))
+        appendLog(DeployXBundle.message("toolwindow.log.local", localPath))
+        appendLog(DeployXBundle.message("toolwindow.log.remote", serverId, remotePath))
+        progressBar.value = 0
+        progressLabel.text = DeployXBundle.message("toolwindow.progress.previewPulling")
+
+        launchCancelableTask(
+            "Previewing Pull...",
+            onProgressDone = { token, result: com.alianga.idea.deploy.model.SyncResult ->
+                progressLabel.text = when {
+                    token.isCancelled() -> DeployXBundle.message("toolwindow.progress.aborted")
+                    result.success -> DeployXBundle.message("toolwindow.progress.previewPullComplete")
+                    else -> DeployXBundle.message("toolwindow.progress.previewPullFailed")
+                }
+                if (!token.isCancelled() && !result.success) appendLog("[ERROR] ${result.error}")
+            },
+            taskBody = { _ ->
+                SyncService.getInstance().previewPull(remotePath, localPath, serverId) { line ->
+                    appendLog(serverId, line)
+                }
+            }
+        )
+    }
+
+    /**
+     * 1.0.8 新增：单文件/目录的拉取（从服务器下载到本地）。
+     * 通过构造一个 [DownloadItem] 并复用 [executePullBatch] 执行，与右键 Pull 一致。
+     */
+    private fun pullFromServer() {
+        val localPath = localPathField.text.trim()
+        val remotePath = remotePathField.text.trim()
+        val serverId = getSelectedServerId()
+
+        if (localPath.isEmpty() || remotePath.isEmpty() || serverId == null) {
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.validation.fillSyncInfo"), "Pull")
+            return
+        }
+
+        // 尝试用映射解析 localBaseDir / remoteBaseDir，失败时退化用表单值
+        val isDirectory = java.io.File(localPath).isDirectory
+        val resolved = MappingManager.getInstance().resolveMappingByLocalPath(localPath, isDirectory)
+        val (localBaseDir, remoteBaseDir, relativePath) = if (resolved != null) {
+            Triple(resolved.mapping.localDir, resolved.resolvedRemoteDir, resolved.relativePath)
+        } else {
+            // 无映射时以 localPath/remotePath 自身为基础（relativePath = ""）
+            Triple(localPath, remotePath, "")
+        }
+
+        val item = DownloadItem(
+            localPath = localPath,
+            isDirectory = isDirectory,
+            serverId = serverId,
+            mappingId = resolved?.mapping?.effectiveId.orEmpty(),
+            localBaseDir = localBaseDir,
+            remoteBaseDir = remoteBaseDir,
+            relativePath = relativePath
+        )
+        executePullBatch(listOf(item))
     }
 
     private fun startDeploy() {

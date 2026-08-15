@@ -65,6 +65,31 @@ class SyncService {
     }
 
     /**
+     * 1.0.8 新增：预览拉取（干跑模式）。
+     *
+     * 与 [previewSync] 方向相反：从服务器远端目录下载到本地路径。rsync 可用时
+     * 走 `rsync --dry-run`，否则降级到 SFTP dry-run；LOCAL 服务器走本地拷贝。
+     *
+     * @param remotePath 远端源目录或文件
+     * @param localPath 本地目标目录
+     */
+    fun previewPull(
+        remotePath: String,
+        localPath: String,
+        serverId: String,
+        options: SyncOptions = SyncOptions(),
+        logCallback: ((String) -> Unit)? = null
+    ): SyncResult {
+        LOG.info("Preview pull: $serverId:$remotePath -> $localPath")
+
+        val server = ServerManager.getInstance().getServer(serverId)
+            ?: return SyncResult(false, error = DeployXBundle.message("sync.error.serverNotFound", serverId))
+
+        val dryRunOptions = options.copy(dryRun = true)
+        return TransferService.getInstance().download(localPath, remotePath, server, dryRunOptions, logCallback)
+    }
+
+    /**
      * 检查 rsync 是否可用
      */
     fun isRsyncAvailable(): Boolean = RsyncWrapper.isRsyncAvailable()

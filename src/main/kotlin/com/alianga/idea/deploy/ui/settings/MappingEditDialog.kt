@@ -140,7 +140,7 @@ class MappingEditDialog(
                 maxLengthText = itemText
             }
         }
-        
+
         // ComboBoxWithWidePopup 允许下拉弹层比输入框本身更宽，从而完整显示最长的
         // 「服务器id - 名称」。prototypeDisplayValue 让系统按最长项计算首选宽度；
         // 不再手动 setPreferredSize，否则 ComboBoxWithWidePopup.getMinimumPopupWidth()
@@ -149,6 +149,14 @@ class MappingEditDialog(
             serverCombo.prototypeDisplayValue = maxLengthText
             serverCombo.setMinLength(maxLengthText.length)
         }
+
+        // 1.0.8 修复：「目标服务器」下拉关闭状态未能显示完整服务器名称。
+        // ComboBoxWithWidePopup 只保证弹层比输入框宽，关闭状态仍由 FormBuilder 给的列宽决定；
+        // 在 FormBuilder 的格子内显式给一个最小首选宽度，确保关闭态也展示完整文本不被截断。
+        val fontMetrics = serverCombo.getFontMetrics(serverCombo.font)
+        val maxTextWidth = fontMetrics.stringWidth(maxLengthText)
+        val preferredWidth = (maxTextWidth + 48).coerceAtLeast(360) // 48=padding+arrow+icon 估算
+        serverCombo.preferredSize = Dimension(preferredWidth, serverCombo.preferredSize.height)
     }
 
     private fun setupLocalDirBrowser() {

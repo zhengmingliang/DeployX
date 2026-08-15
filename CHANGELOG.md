@@ -1,5 +1,57 @@
 # DeployX Changelog
 
+## [1.0.8] - 2026-08-18
+
+
+### ✨ 新功能
+- **拉取 / 预览拉取**：操作面板新增「拉取」「预览拉取」两个按钮，从服务器拉取文件到本地
+  - 复用现有 `DeployService.downloadBatch` 路径（rsync/SFTP 走 `TransferService.download`，LOCAL 服务器走 `LocalTransferService`）；`SyncService.previewPull` 镜像 `previewSync`，参数方向相反便于阅读
+  - 操作面板的「拉取」会按表单中的本地路径 / 远端路径解析映射（复用 `MappingManager.resolveMappingByLocalPath` 的最长前缀匹配），构造 `DownloadItem` 后调用 `executePullBatch`
+  - 「预览拉取」生成 `UpdateReport(operationType=PULL)` 并写入 `lastUpdateReportText`，顶部「复制报告」按钮可一键复制预览结果
+  - 新增 `toolwindow.button.pull` / `toolwindow.button.previewPull` / `toolwindow.progress.pulling|pullComplete|previewPulling|previewPullComplete` / `toolwindow.log.startPull|startPreviewPull|batchPullStart|batchPreviewPullStart` 等文案（EN + zh_CN）
+
+- **操作按钮重排 + 终止按钮迁移 + 自动切日志页**：操作面板按钮重排为「预览 | 预览拉取 | 部署 | 拉取 | 快速推送 | 保存为映射」
+  - 1.0.6 修复"执行中不可见终止按钮"时把"自动跳日志页"禁用了；1.0.8 把终止按钮迁到日志面板顶部工具栏最右侧，使日志页与终止按钮就近、始终可见，从而**恢复**预览/部署/拉取等动作执行后**自动切到日志页**的体验
+  - 抽取 `switchToLogTab()`：`previewSync` / `startDeploy` / `quickPush` / `pullFromServer` / `previewPull` / `executeUploadBatch` / `executeDeployBatch` / `executePreviewBatch` / `executePullBatch` / `executePreviewPullBatch` / `executeDeploy` / `executePush` / `redeployFromHistory` 全部接入
+  - 进度面板从「进度条 + 状态 + 终止」简化为「进度条 + 状态」，布局更紧凑
+
+- **日志面板按服务器分组独立复制**：每个服务器分组 Tab 内部顶部加「复制日志」按钮
+  - 1.0.7 之前切换到不同服务器分组 Tab 后点击顶部「复制报告」复制的是 `lastUpdateReportText`（最后一次合并报告），不是当前 Tab 的日志。1.0.8 改为：每个 Tab 自己持有 `JBTextArea`，「复制日志」按钮直接读自己 area 的文本
+  - 顶部「全部」Tab 同样改造为「复制全部日志」按钮，行为一致
+  - 新增 `toolwindow.action.copyLog` / `toolwindow.action.copyAllLog` 文案（EN + zh_CN）
+
+- **本地文件路径支持浏览目录**：操作面板「本地文件」由 `JBTextField` 改为 `TextFieldWithBrowseButton`，新增浏览按钮
+  - 弹窗使用 `FileChooserDescriptorFactory.createSingleFileOrFolderDescriptor()`，**同时支持选文件或选目录**
+  - 选目录后表单会直接写入目录路径，部署/快速推送等后端已按字符串路径工作，传目录会自然走目录部署路径，无需改后端
+  - 新增 `toolwindow.button.browseLocal` 文案（EN + zh_CN）
+
+
+### 🐛 Bug 修复
+- **多嵌套映射匹配错位**：修复同一项目下配置嵌套映射（如 `/opt/.../report_ui_mdc` 和 `/opt/.../report_ui_mdc/public/webExcel`）时，选中内层文件被错误归到外层映射的问题
+  - 原因：`MappingManager.findMappingByLocalPath` / `resolveMappingByLocalPath` 用 `firstOrNull()` 取匹配项，列表顺序决定了结果，往往取到外层（更宽）映射
+  - 修复：新增私有 `pickMostSpecific` / `pickMostSpecificResolved`，按 `normalizePath(mapping.localDir).length` 倒序取最长前缀（最具体）的映射；长度相同时保留插入顺序
+  - 仅修改单数方法（多数调用方按唯一映射走），复数方法 `findMappingsByLocalPath` / `resolveMappingsByLocalPath` 保持不变（设置面板、远程浏览器仍需全部匹配用于筛选）
+
+- **映射编辑对话框「目标服务器」下拉关闭态截断**：修复 `MappingEditDialog` 中 `serverCombo`（`ComboBoxWithWidePopup`）关闭状态下因 FormBuilder 给的列宽不够，文本被省略号截断的问题
+  - `ComboBoxWithWidePopup` 只保证弹层比输入框宽，关闭态仍按 `FormBuilder` 分配的列宽显示
+  - 修复：在 `setupServerCombo` 末尾按最长项的字符串宽度（`fontMetrics.stringWidth`）+ 48px padding 显式设置 `serverCombo.preferredSize`，强制 FormBuilder 给出足够列宽
+  - 弹层宽度仍由 `prototypeDisplayValue` + `setMinLength` 控制，未受影响
+
+
+### 🛠 重构
+- **`executeDownloadBatch` 委派给 `executePullBatch`**：原 `executeDownloadBatch` 改名为 `executePullBatch`（保留旧名做兼容委派），语义更清晰
+- **`buildLogTabContent` 抽取**：把"复制按钮 + 滚动文本区"的日志 Tab 容器从 `getOrCreateServerLogArea` 与"全部" Tab 构造处抽出共享
+- **`setupLocalPathBrowser` 抽取**：本地路径浏览逻辑独立方法，避免 `setupActions` 过长
+- **`copyLogText` 抽取**：复制文本到剪贴板并提示，公共方法
+
+
+### ✅ 测试
+- **`MappingManagerLongestPrefixTest`**：覆盖嵌套映射多匹配、最长前缀胜出、平局取先插入、空列表、路径归一化（正反斜杠 + 尾斜杠）
+
+
+---
+
+
 ## [1.0.7] - 2026-08-09
 
 

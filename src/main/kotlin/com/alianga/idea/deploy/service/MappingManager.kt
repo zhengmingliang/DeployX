@@ -80,9 +80,15 @@ class MappingManager {
 
     /**
      * 根据本地路径查找第一个匹配的映射
+     *
+     * 1.0.8 修复：当一个项目配置了多个嵌套的本地目录映射（如
+     *   `/opt/.../report_ui_mdc` 和 `/opt/.../report_ui_mdc/public/webExcel`）
+     *   时，若选中的文件位于更具体的子目录，原来按 `firstOrNull()` 简单取第一个匹配
+     *   容易取到外层（更宽）的映射。现在按 `localDir` 长度倒序排序，**最长前缀**（最具体）的
+     *   映射胜出；长度相同时保留插入顺序。
      */
     fun findMappingByLocalPath(localPath: String): MappingConfig? =
-        findMappingsByLocalPath(localPath).firstOrNull()
+        pickMostSpecific(findMappingsByLocalPath(localPath))
 
     /**
      * 根据本地路径解析映射，并按相对路径计算远程目标目录。
@@ -108,7 +114,25 @@ class MappingManager {
     }
 
     fun resolveMappingByLocalPath(localPath: String, isDirectory: Boolean = File(localPath).isDirectory): ResolvedMapping? =
-        resolveMappingsByLocalPath(localPath, isDirectory).firstOrNull()
+        pickMostSpecificResolved(resolveMappingsByLocalPath(localPath, isDirectory))
+
+    /**
+     * 1.0.8 新增：从多个匹配的映射中按 `localDir` 长度倒序取最长前缀的映射（最具体）。
+     * 长度相同时保留列表原顺序。
+     */
+    private fun pickMostSpecific(matches: List<MappingConfig>): MappingConfig? {
+        if (matches.isEmpty()) return null
+        return matches.maxByOrNull { normalizePath(it.localDir).length }
+    }
+
+    /**
+     * 1.0.8 新增：从多个 `ResolvedMapping` 中按 `mapping.localDir` 长度倒序取最长前缀的项。
+     * 与 `pickMostSpecific` 语义一致，但作用于解析后的结果。
+     */
+    private fun pickMostSpecificResolved(matches: List<ResolvedMapping>): ResolvedMapping? {
+        if (matches.isEmpty()) return null
+        return matches.maxByOrNull { normalizePath(it.mapping.localDir).length }
+    }
 
     /**
      * 添加映射（自动生成ID）
