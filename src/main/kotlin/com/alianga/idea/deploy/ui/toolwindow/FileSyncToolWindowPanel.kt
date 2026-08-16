@@ -53,6 +53,7 @@ import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.CardLayout
+import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
 import java.awt.datatransfer.StringSelection
@@ -268,9 +269,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             .addLabeledComponent(postCommandLabel, postCommandField)
             .panel
 
-        val buttonPanel = JPanel().apply {
+        // 1.0.8 调整：6 个按钮拥挤在一行不便点击，拆为两行
+        // 第 1 行：预览 | 预览拉取 | 部署 | 拉取（preview 与 deploy 一一对应）
+        // 第 2 行：快速推送 | 保存为映射（辅助动作）
+        val buttonRow1 = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
-            // 1.0.8 调整：操作按钮重排为 预览 | 预览拉取 | 部署 | 拉取 | 快速推送 | 保存为映射
             add(previewButton)
             add(Box.createHorizontalStrut(8))
             add(previewPullButton)
@@ -278,10 +281,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(startDeployButton)
             add(Box.createHorizontalStrut(8))
             add(pullButton)
-            add(Box.createHorizontalStrut(8))
+        }
+        val buttonRow2 = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(quickPushButton)
             add(Box.createHorizontalStrut(8))
             add(saveAsMappingButton)
+        }
+        val buttonPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(buttonRow1)
+            add(Box.createVerticalStrut(6))
+            add(buttonRow2)
+            // 整体左对齐，避免被 FormBuilder/外层拉伸填满
+            alignmentX = Component.LEFT_ALIGNMENT
         }
 
         // 进度面板：进度条 + 状态标签（1.0.8 调整：移除终止按钮，迁至日志面板顶部，

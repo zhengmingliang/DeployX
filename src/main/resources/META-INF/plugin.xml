@@ -149,6 +149,13 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
 
+        <!-- 1.0.8 新增：预览拉取（右键） -->
+        <action id="DeployX.PreviewPull"
+                class="com.alianga.idea.deploy.action.PreviewPullAction"
+                icon="/icons/toolWindow.svg">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+
         <!-- Preview Sync Action -->
         <action id="DeployX.PreviewSync"
                 class="com.alianga.idea.deploy.action.PreviewSyncAction"
