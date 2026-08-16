@@ -60,7 +60,8 @@ class QuickPushAction : AbstractDeployAction<UploadItem>() {
         selection: ServerSelectionResult
     ): List<UploadItem> {
         return resolvedByFile.mapNotNull { (file, resolvedMappings) ->
-            val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
+            // 1.0.8：嵌套映射场景下，按最长 localDir 前缀选最具体的映射
+            val resolved = ActionUtils.pickMostSpecificByServer(resolvedMappings, targetServer.id)
                 ?: return@mapNotNull null
             val mapping = resolved.mapping
             UploadItem(

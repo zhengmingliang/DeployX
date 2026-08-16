@@ -30,9 +30,8 @@ class PreviewPullAction : AbstractDeployAction<DownloadItem>() {
         selection: ServerSelectionResult
     ): List<DownloadItem> {
         return resolvedByFile.mapNotNull { (file, resolvedMappings) ->
-            // 与 PullFromServerAction 一致：1.0.8 起使用最长前缀匹配（MappingManager.pickMostSpecific 已自动选好），
-            // 再按目标服务器 id 过滤；当嵌套映射属于不同服务器时取最具体的、且属于目标服务器的那一个。
-            val resolved = resolvedMappings.firstOrNull { it.mapping.serverId == targetServer.id }
+            // 1.0.8：嵌套映射场景下，按最长 localDir 前缀选最具体的映射（与 PullFromServerAction 保持一致）
+            val resolved = ActionUtils.pickMostSpecificByServer(resolvedMappings, targetServer.id)
                 ?: return@mapNotNull null
             val mapping = resolved.mapping
             DownloadItem(

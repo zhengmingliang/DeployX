@@ -107,5 +107,27 @@ object ActionUtils {
             )
         }
     }
+
+    /**
+     * 1.0.8 新增：在同一服务器的多匹配中挑出**最长 `localDir` 前缀**（最具体）的解析项。
+     *
+     * [AbstractDeployAction] 用 `resolveMappingsByLocalPath` 拿到的是一个路径下所有匹配的映射
+     * 列表（外层、内层、共享同一 `serverId` 的多个映射都会进入），按 `firstOrNull { serverId == ... }`
+     * 简单取第一个会选中**插入顺序中最先注册**的那一个（往往是外层、最宽的），导致内层映射永远走不到。
+     *
+     * 改用本方法：先按 `serverId` 过滤，再按 `localDir` 长度倒序取最长前缀（最具体），
+     * 长度相同时保留解析结果中的原顺序。返回 `null` 表示该服务器没有任何匹配。
+     *
+     * @param resolvedMappings [MappingManager.resolveMappingsByLocalPath] 的返回列表
+     * @param serverId 目标服务器 ID
+     */
+    fun pickMostSpecificByServer(
+        resolvedMappings: List<MappingManager.ResolvedMapping>,
+        serverId: String
+    ): MappingManager.ResolvedMapping? {
+        return resolvedMappings
+            .filter { it.mapping.serverId == serverId }
+            .maxByOrNull { it.mapping.localDir.length }
+    }
 }
 

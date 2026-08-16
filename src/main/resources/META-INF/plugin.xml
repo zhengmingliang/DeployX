@@ -154,6 +154,7 @@
                 class="com.alianga.idea.deploy.action.PreviewPullAction"
                 icon="/icons/toolWindow.svg">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
 
         <!-- Preview Sync Action -->
@@ -217,6 +218,7 @@
             <reference id="DeployX.QuickPush"/>
             <separator/>
             <reference id="DeployX.PreviewSync"/>
+            <reference id="DeployX.PreviewPull"/>
             <separator/>
             <reference id="DeployX.OpenSshTerminal"/>
             <separator/>
