@@ -28,6 +28,7 @@ class ShowDeployXMenuAction : AnAction() {
             "DeployX.PullFromServer",
             "DeployX.QuickPush",
             "DeployX.PreviewSync",
+            "DeployX.PreviewPull",
             "DeployX.OpenSshTerminal",
             "DeployX.OpenRemoteBrowser",
         )
