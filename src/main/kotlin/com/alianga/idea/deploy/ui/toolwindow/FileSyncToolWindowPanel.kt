@@ -44,6 +44,7 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
+import com.intellij.ui.components.JBOptionButton
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextArea
@@ -57,10 +58,13 @@ import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
 import java.awt.datatransfer.StringSelection
+import java.awt.event.ActionEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import javax.swing.AbstractAction
+import javax.swing.Action
 import javax.swing.*
 
 /**
@@ -96,8 +100,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     // 操作 tab 组件
     private val serverCombo = JComboBox<String>()
     // 1.0.8：本地路径改为 TextFieldWithBrowseButton，支持选目录（与选文件并存）
-    private val localPathField = TextFieldWithBrowseButton()
-    private val remotePathField = TextFieldWithBrowseButton()
+    // 1.0.9：传入 JBTextField 以便使用 emptyText 占位提示
+    private val localPathField = TextFieldWithBrowseButton(JBTextField(), null)
+    private val remotePathField = TextFieldWithBrowseButton(JBTextField(), null)
     private val backupCheck = JBCheckBox(DeployXBundle.message("toolwindow.checkbox.backupBeforeDeploy"))
     private val backupDirField = JBTextField()
     private val unzipCheck = JBCheckBox(DeployXBundle.message("toolwindow.checkbox.unzipAfterUpload"))
@@ -127,14 +132,47 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     // 操作面板按钮（保留引用以便语言切换时刷新文案）
     private val openTerminalButton = UiButtonFactory.createIconButton(DeployXBundle.message("toolwindow.button.openTerminal"), AllIcons.Nodes.Console) { openTerminal() }
     private val browseRemoteButton = UiButtonFactory.createIconButton(DeployXBundle.message("toolwindow.button.browseRemote"), AllIcons.Nodes.Folder) { browseRemote() }
-    private val previewButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.preview"), AllIcons.Actions.Preview) { previewSync() }
-    // 1.0.8 新增：预览拉取按钮
-    private val previewPullButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.previewPull"), AllIcons.Actions.Preview) { previewPull() }
-    private val startDeployButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.startDeploy"), AllIcons.Actions.Execute) { startDeploy() }
-    // 1.0.8 新增：拉取按钮（从服务器下载到本地）
+    /**
+     * 1.0.9 重构：「预览 ▾」split 按钮。默认点 = 预览同步；下拉箭头弹出"预览同步 / 预览拉取"两项。
+     * 文本走 AbstractAction.NAME，relocalize() 通过 putValue 刷新。
+     */
+    private val previewDefaultAction = object : AbstractAction(
+        DeployXBundle.message("toolwindow.button.preview"), AllIcons.Actions.Preview
+    ) { override fun actionPerformed(e: ActionEvent) = previewSync() }
+    private val previewSyncOption = object : AbstractAction(
+        DeployXBundle.message("toolwindow.button.previewSync.option"), AllIcons.Actions.Preview
+    ) { override fun actionPerformed(e: ActionEvent) = previewSync() }
+    private val previewPullOption = object : AbstractAction(
+        DeployXBundle.message("toolwindow.button.previewPull.option"), AllIcons.Actions.Preview
+    ) { override fun actionPerformed(e: ActionEvent) = previewPull() }
+    private val previewButton = JBOptionButton(
+        previewDefaultAction, arrayOf(previewSyncOption, previewPullOption)
+    ).apply {
+        toolTipText = DeployXBundle.message("toolwindow.button.preview.tooltip")
+        optionTooltipText = DeployXBundle.message("toolwindow.button.preview.optionTooltip")
+        addSeparator = true
+    }
+    /**
+     * 1.0.9 重构：主按钮「部署」。用 JBOptionButton(action, emptyArray()) 拿到 IDE 默认按钮
+     * accent 填充样式，区别于次要按钮（拉取/快速推送）和 split 按钮（预览）。
+     */
+    private val deployDefaultAction = object : AbstractAction(
+        DeployXBundle.message("toolwindow.button.startDeploy"), AllIcons.Actions.Execute
+    ) { override fun actionPerformed(e: ActionEvent) = startDeploy() }
+    private val startDeployButton = JBOptionButton(deployDefaultAction, emptyArray()).apply {
+        toolTipText = DeployXBundle.message("toolwindow.button.startDeploy.tooltip")
+    }
+    // 拉取（次要动作，保留普通 JButton 样式）
     private val pullButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.pull"), AllIcons.Actions.Download) { pullFromServer() }
     private val quickPushButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.quickPush"), AllIcons.Actions.Upload) { quickPush() }
-    private val saveAsMappingButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.saveAsMapping"), AllIcons.Actions.MenuSaveall) { saveAsMapping() }
+    /**
+     * 1.0.9 重构：保存为映射改为小图标按钮，放到服务器行最右（与 browseRemote/openTerminal 并列），
+     * 不再占用底部动作区。tooltip 文案由 relocalize() 刷新。
+     */
+    private val saveAsMappingButton = UiButtonFactory.createIconButton(
+        DeployXBundle.message("toolwindow.button.saveAsMapping.tooltip"),
+        AllIcons.Actions.MenuSaveall
+    ) { saveAsMapping() }
     /**
      * 终止按钮（1.0.6 新增，运行中可点击终止当前部署/同步操作，初始禁用）。
      * 1.0.8 调整：从操作面板进度区迁移到日志面板顶部，使其在所有执行动作中
@@ -186,6 +224,14 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     // Tab 面板
     private val tabbedPane = JBTabbedPane()
+
+    // 1.0.9 重构：操作面板的 3 个 TitledBorder 分组 panel 引用（保留以便 relocalize 时刷新标题）
+    private lateinit var serverPathPanel: JPanel
+    private lateinit var deployOptionsPanel: JPanel
+    private lateinit var hooksPanel: JPanel
+    // 部署选项下两个缩进的子 panel（备份目录/解压目录）
+    private lateinit var backupIndentedPanel: JPanel
+    private lateinit var unzipIndentedPanel: JPanel
 
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
     private var lastUpdateReport: UpdateReport? = null
@@ -240,43 +286,70 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         this.toolbar = toolbar
 
         // ===== 操作面板 =====
+        // 1.0.9 重构：3 个 TitledBorder 分组（服务器与路径 / 部署选项 / 执行命令），
+        // 按钮区分主次层级，「保存为映射」改为小图标放到服务器行最右。
         val serverButtonsPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(browseRemoteButton)
             add(Box.createHorizontalStrut(4))
             add(openTerminalButton)
+            add(Box.createHorizontalStrut(4))
+            // 1.0.9：保存为映射改为小图标，放服务器行最右，不再占用底部动作区
+            add(saveAsMappingButton)
         }
         val serverWithTerminalPanel = JPanel(BorderLayout(6, 0)).apply {
             add(serverCombo, BorderLayout.CENTER)
             add(serverButtonsPanel, BorderLayout.EAST)
         }
-        val serverPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent(targetServerLabel, serverWithTerminalPanel)
-            .panel
 
-        val filePanel = FormBuilder.createFormBuilder()
+        // 分组 1：服务器与路径
+        serverPathPanel = FormBuilder.createFormBuilder()
+            .addLabeledComponent(targetServerLabel, serverWithTerminalPanel)
             .addLabeledComponent(localFileLabel, localPathField)
             .addLabeledComponent(remotePathLabel, remotePathField)
-            .panel
+            .panel.apply {
+                border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.serverAndPaths"))
+            }
 
-        val deployPanel = FormBuilder.createFormBuilder()
+        // 分组 2：部署选项（备份/解压，未勾选时缩进子字段灰显）
+        // 缩进由子 Panel 的 EmptyBorder left=12 实现
+        backupIndentedPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.emptyLeft(12)
+            val inner = FormBuilder.createFormBuilder()
+                .addLabeledComponent(backupDirLabel, backupDirField)
+                .panel
+            add(inner, BorderLayout.CENTER)
+        }
+        unzipIndentedPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.emptyLeft(12)
+            val inner = FormBuilder.createFormBuilder()
+                .addLabeledComponent(unzipDirLabel, unzipDestField)
+                .panel
+            add(inner, BorderLayout.CENTER)
+        }
+        deployOptionsPanel = FormBuilder.createFormBuilder()
             .addComponent(backupCheck)
-            .addLabeledComponent(backupDirLabel, backupDirField)
+            .addComponent(backupIndentedPanel)
             .addComponent(unzipCheck)
-            .addLabeledComponent(unzipDirLabel, unzipDestField)
-            .addVerticalGap(8)
+            .addComponent(unzipIndentedPanel)
+            .panel.apply {
+                border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.deployOptions"))
+            }
+
+        // 分组 3：执行命令
+        hooksPanel = FormBuilder.createFormBuilder()
             .addLabeledComponent(preCommandLabel, preCommandField)
             .addLabeledComponent(postCommandLabel, postCommandField)
-            .panel
+            .panel.apply {
+                border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.hooks"))
+            }
 
-        // 1.0.8 调整：6 个按钮拥挤在一行不便点击，拆为两行
-        // 第 1 行：预览 | 预览拉取 | 部署 | 拉取（preview 与 deploy 一一对应）
-        // 第 2 行：快速推送 | 保存为映射（辅助动作）
+        // 底部动作区：1.0.9 调整为主次层级
+        // 第 1 行：预览 (split) | 部署 (主按钮) | 拉取
+        // 第 2 行：快速推送
         val buttonRow1 = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(previewButton)
-            add(Box.createHorizontalStrut(8))
-            add(previewPullButton)
             add(Box.createHorizontalStrut(8))
             add(startDeployButton)
             add(Box.createHorizontalStrut(8))
@@ -285,8 +358,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val buttonRow2 = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(quickPushButton)
-            add(Box.createHorizontalStrut(8))
-            add(saveAsMappingButton)
         }
         val buttonPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -297,24 +368,24 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             alignmentX = Component.LEFT_ALIGNMENT
         }
 
-        // 进度面板：进度条 + 状态标签（1.0.8 调整：移除终止按钮，迁至日志面板顶部，
-        // 使终止操作在所有执行动作中始终可见且与日志就近展示）
+        // 进度面板：进度条 + 状态标签。1.0.9 加 8px 顶部内边距
         val progressInfoPanel = JPanel(BorderLayout(4, 0)).apply {
             add(progressBar, BorderLayout.CENTER)
             add(progressLabel, BorderLayout.EAST)
         }
         val progressPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(8, 0, 0, 0)
             add(progressInfoPanel, BorderLayout.CENTER)
         }
 
         val operationPanel = JPanel()
         operationPanel.layout = BoxLayout(operationPanel, BoxLayout.Y_AXIS)
         operationPanel.border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
-        operationPanel.add(serverPanel)
+        operationPanel.add(serverPathPanel)
         operationPanel.add(Box.createVerticalStrut(8))
-        operationPanel.add(filePanel)
+        operationPanel.add(deployOptionsPanel)
         operationPanel.add(Box.createVerticalStrut(8))
-        operationPanel.add(deployPanel)
+        operationPanel.add(hooksPanel)
         operationPanel.add(Box.createVerticalStrut(8))
         operationPanel.add(buttonPanel)
         operationPanel.add(Box.createVerticalStrut(8))
@@ -445,16 +516,37 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         backupCheck.text = DeployXBundle.message("toolwindow.checkbox.backupBeforeDeploy")
         unzipCheck.text = DeployXBundle.message("toolwindow.checkbox.unzipAfterUpload")
 
-        // 操作面板按钮
-        previewButton.text = DeployXBundle.message("toolwindow.button.preview")
-        startDeployButton.text = DeployXBundle.message("toolwindow.button.startDeploy")
+        // 1.0.9 重构：3 个 TitledBorder 分组标题刷新
+        if (::serverPathPanel.isInitialized) {
+            serverPathPanel.border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.serverAndPaths"))
+            deployOptionsPanel.border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.deployOptions"))
+            hooksPanel.border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.hooks"))
+        }
+
+        // 1.0.9 重构：JBOptionButton 文本走 AbstractAction.NAME，刷新后 repaint
+        previewDefaultAction.putValue(Action.NAME, DeployXBundle.message("toolwindow.button.preview"))
+        previewSyncOption.putValue(Action.NAME, DeployXBundle.message("toolwindow.button.previewSync.option"))
+        previewPullOption.putValue(Action.NAME, DeployXBundle.message("toolwindow.button.previewPull.option"))
+        deployDefaultAction.putValue(Action.NAME, DeployXBundle.message("toolwindow.button.startDeploy"))
+        previewButton.toolTipText = DeployXBundle.message("toolwindow.button.preview.tooltip")
+        previewButton.optionTooltipText = DeployXBundle.message("toolwindow.button.preview.optionTooltip")
+        startDeployButton.toolTipText = DeployXBundle.message("toolwindow.button.startDeploy.tooltip")
+        // 次要动作按钮文本（JButton 仍用 .text）
+        pullButton.text = DeployXBundle.message("toolwindow.button.pull")
         quickPushButton.text = DeployXBundle.message("toolwindow.button.quickPush")
-        saveAsMappingButton.text = DeployXBundle.message("toolwindow.button.saveAsMapping")
+        // 保存为映射：1.0.9 改为小图标按钮，只刷 tooltip
+        saveAsMappingButton.toolTipText = DeployXBundle.message("toolwindow.button.saveAsMapping.tooltip")
         abortButton.text = DeployXBundle.message("toolwindow.button.abort")
         abortButton.toolTipText = DeployXBundle.message("toolwindow.button.abort.tooltip")
         openTerminalButton.toolTipText = DeployXBundle.message("toolwindow.button.openTerminal")
         browseRemoteButton.toolTipText = DeployXBundle.message("toolwindow.button.browseRemote")
         remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
+
+        // 1.0.9：5 个路径输入框的 emptyText 占位提示跟随语言切换
+        applyPathPlaceholders()
+        // 同步 backup/unzip 子字段的 enabled 状态（虽然 listener 已经处理，刷新语言时再保险一次）
+        updateBackupEnabled()
+        updateUnzipEnabled()
 
         // 进度标签：处于空闲"就绪"态（英文 Ready 或中文 就绪）时刷新为新语言文案；
         // 运行中或完成态的动态文案不覆盖，下次操作会重新设置。
@@ -497,10 +589,15 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     private fun setupActions() {
-        backupCheck.addChangeListener { backupDirField.isEnabled = backupCheck.isSelected }
-        unzipCheck.addChangeListener { unzipDestField.isEnabled = unzipCheck.isSelected }
-        backupDirField.isEnabled = false
-        unzipDestField.isEnabled = false
+        // 1.0.9 重构：备份/解压子字段联动。缩进由子 panel.border 完成，禁用/启用按 selection 切换
+        // （同时切换 label 与子 panel 的 enabled 状态，整个缩进区会一起灰显）
+        backupCheck.addChangeListener { updateBackupEnabled() }
+        unzipCheck.addChangeListener { updateUnzipEnabled() }
+        updateBackupEnabled()
+        updateUnzipEnabled()
+
+        // 1.0.9：路径输入框 placeholder 占位提示
+        applyPathPlaceholders()
 
         // 终止按钮初始禁用（无任务运行时不可点击）
         abortButton.isEnabled = false
@@ -523,6 +620,30 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             }
         }
         remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
+    }
+
+    /** 1.0.9 重构：根据 backupCheck 状态切换缩进子字段的 enabled（包含 label）。 */
+    private fun updateBackupEnabled() {
+        val enabled = backupCheck.isSelected
+        backupDirField.isEnabled = enabled
+        backupDirLabel.isEnabled = enabled
+    }
+
+    /** 1.0.9 重构：根据 unzipCheck 状态切换缩进子字段的 enabled（包含 label）。 */
+    private fun updateUnzipEnabled() {
+        val enabled = unzipCheck.isSelected
+        unzipDestField.isEnabled = enabled
+        unzipDirLabel.isEnabled = enabled
+    }
+
+    /** 1.0.9 重构：5 个路径输入框的 emptyText 占位提示。relocalize 也会再调一次以响应语言切换。 */
+    private fun applyPathPlaceholders() {
+        // TextFieldWithBrowseButton.getTextField() 静态返回类型是 JTextField，但构造时传入
+        // 了 JBTextField，所以这里做类型转换以调用 JBTextField.getEmptyText()
+        (localPathField.textField as? JBTextField)?.emptyText?.text = DeployXBundle.message("toolwindow.placeholder.localPath")
+        (remotePathField.textField as? JBTextField)?.emptyText?.text = DeployXBundle.message("toolwindow.placeholder.remotePath")
+        backupDirField.emptyText?.text = DeployXBundle.message("toolwindow.placeholder.backupDir")
+        unzipDestField.emptyText?.text = DeployXBundle.message("toolwindow.placeholder.unzipDest")
     }
 
     /**
