@@ -7,16 +7,16 @@ import com.intellij.ui.CollectionListModel
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
-import java.awt.Dimension
+import com.intellij.util.ui.JBUI
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.JComponent
-import javax.swing.JScrollPane
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
 import javax.swing.text.JTextComponent
@@ -110,28 +110,26 @@ class ServerSelectionDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val scrollPane = JScrollPane(serverList)
-        // 调大列表尺寸，尽量显示全服务器列表
-        scrollPane.preferredSize = Dimension(520, 320)
-        scrollPane.minimumSize = Dimension(420, 220)
+        val scrollPane = JBScrollPane(serverList).apply {
+            preferredSize = JBUI.size(480, 280)
+        }
 
         val builder = FormBuilder.createFormBuilder()
             .addComponent(JBLabel(messageText))
-            .addVerticalGap(6)
+            .addVerticalGap(JBUI.scale(6))
             .addComponent(searchField)
-            .addVerticalGap(4)
+            .addVerticalGap(JBUI.scale(4))
             .addComponent(scrollPane)
 
         if (showCommandOptions) {
             builder
-                .addVerticalGap(8)
+                .addVerticalGap(JBUI.scale(8))
                 .addComponent(executePreCommandCheck)
                 .addComponent(executePostCommandCheck)
         }
 
         val panel = builder.panel
-        // 调大对话框整体尺寸以容纳更多服务器
-        panel.preferredSize = Dimension(580, if (showCommandOptions) 500 else 440)
+        panel.preferredSize = JBUI.size(520, if (showCommandOptions) 460 else 400)
 
         // 注册键盘事件路由：对话框可见时，按字母/数字键自动把焦点转到搜索框
         registerKeyRouting()

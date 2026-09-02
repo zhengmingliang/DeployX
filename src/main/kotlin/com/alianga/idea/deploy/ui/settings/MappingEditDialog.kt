@@ -14,9 +14,12 @@ import com.intellij.openapi.ui.TextBrowseFolderListener
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.ComboBoxWithWidePopup
 import com.intellij.ui.components.JBCheckBox
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
+import com.intellij.util.ui.JBUI
 import java.awt.Dimension
+import javax.swing.ScrollPaneConstants
 import javax.swing.JComboBox
 import javax.swing.JComponent
 
@@ -49,7 +52,7 @@ class MappingEditDialog(
         project = project,
         contextProvider = { buildContext() },
         multiline = true,
-        preferredScrollSize = Dimension(560, 130),
+        preferredScrollSize = JBUI.size(520, 120),
         fullscreenTitle = DeployXBundle.message("dialog.mapping.fullscreen.preCommandTitle")
     )
 
@@ -58,7 +61,7 @@ class MappingEditDialog(
         project = project,
         contextProvider = { buildContext() },
         multiline = true,
-        preferredScrollSize = Dimension(560, 130),
+        preferredScrollSize = JBUI.size(520, 120),
         fullscreenTitle = DeployXBundle.message("dialog.mapping.fullscreen.postCommandTitle")
     )
 
@@ -155,7 +158,7 @@ class MappingEditDialog(
         // 在 FormBuilder 的格子内显式给一个最小首选宽度，确保关闭态也展示完整文本不被截断。
         val fontMetrics = serverCombo.getFontMetrics(serverCombo.font)
         val maxTextWidth = fontMetrics.stringWidth(maxLengthText)
-        val preferredWidth = (maxTextWidth + 48).coerceAtLeast(360) // 48=padding+arrow+icon 估算
+        val preferredWidth = (maxTextWidth + JBUI.scale(48)).coerceAtLeast(JBUI.scale(280))
         serverCombo.preferredSize = Dimension(preferredWidth, serverCombo.preferredSize.height)
     }
 
@@ -257,25 +260,29 @@ class MappingEditDialog(
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.localDir"), localDirField)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.targetServer"), serverCombo)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.remoteDir"), remoteDirField)
-            .addVerticalGap(8)
+            .addVerticalGap(JBUI.scale(8))
             .addComponent(backupEnabledCheck)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.backupDirectory"), backupDirField)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.backupSource"), backupSourceField)
-            .addVerticalGap(8)
+            .addVerticalGap(JBUI.scale(8))
             .addComponent(unzipEnabledCheck)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.unzipDestination"), unzipDestField)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.excludeRules"), excludeField)
-            .addVerticalGap(12)
+            .addVerticalGap(JBUI.scale(12))
             .addComponent(preCommandEnabledCheck)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.preUploadCommand"), preCommandField)
-            .addVerticalGap(4)
+            .addVerticalGap(JBUI.scale(4))
             .addComponent(postCommandEnabledCheck)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.postUploadCommand"), postCommandField)
             .addComponent(autoCdCheck)
             .panel
 
-        panel.preferredSize = Dimension(700, 800)
-        return panel
+        // 表单较高：小屏下纵向滚动，避免按钮/字段被裁切；禁止横向滚动以免把浏览按钮藏到视口外
+        return JBScrollPane(panel).apply {
+            border = JBUI.Borders.empty()
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            preferredSize = JBUI.size(640, 560)
+        }
     }
 
     override fun doValidate(): ValidationInfo? {

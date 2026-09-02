@@ -3,6 +3,7 @@ package com.alianga.idea.deploy.ui.settings
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.MappingConfig
 import com.alianga.idea.deploy.service.MappingManager
+import com.alianga.idea.deploy.ui.AdaptiveRowPanel
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -13,6 +14,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBRadioButton
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import javax.swing.ButtonGroup
 import javax.swing.JPanel
@@ -59,16 +61,21 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
         projectViewRadio.addActionListener { refreshTable() }
         allViewRadio.addActionListener { refreshTable() }
 
-        val viewPanel = JPanel(BorderLayout(8, 0)).apply {
-            border = com.intellij.util.ui.JBUI.Borders.empty(0, 0, 4, 0)
-            val radios = JPanel().apply {
-                layout = java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0)
-                add(projectViewRadio)
-                add(allViewRadio)
-            }
-            add(radios, BorderLayout.WEST)
-            add(searchField, BorderLayout.CENTER)
-            add(projectUnavailableLabel, BorderLayout.EAST)
+        val radios = JPanel().apply {
+            layout = java.awt.FlowLayout(java.awt.FlowLayout.LEADING, JBUI.scale(4), 0)
+            add(projectViewRadio)
+            add(allViewRadio)
+        }
+        // 搜索框为主、视图单选为辅：设置页变窄时单选换到搜索框下方，避免挤掉输入
+        val filterRow = AdaptiveRowPanel(
+            main = searchField,
+            side = radios,
+            minMainWidth = JBUI.scale(180)
+        )
+        val viewPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.emptyBottom(4)
+            add(filterRow, BorderLayout.CENTER)
+            add(projectUnavailableLabel, BorderLayout.SOUTH)
         }
         add(viewPanel, BorderLayout.NORTH)
 

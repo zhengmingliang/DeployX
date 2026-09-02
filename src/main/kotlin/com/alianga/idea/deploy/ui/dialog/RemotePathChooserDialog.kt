@@ -3,6 +3,7 @@ package com.alianga.idea.deploy.ui.dialog
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.ssh.SshConnection
+import com.alianga.idea.deploy.ui.WrapLayout
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
@@ -19,7 +20,8 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
-import java.awt.Dimension
+import com.intellij.util.ui.JBUI
+import java.awt.FlowLayout
 import javax.swing.*
 
 /**
@@ -363,17 +365,14 @@ class RemotePathChooserDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val buttonPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
+        val buttonPanel = JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(8), JBUI.scale(4))).apply {
             add(loadButton)
-            add(Box.createHorizontalStrut(5))
             add(upButton)
-            add(Box.createHorizontalStrut(5))
             add(newButton)
         }
 
         val scrollPane = JBScrollPane(directoryList).apply {
-            preferredSize = Dimension(500, 400)
+            preferredSize = JBUI.size(480, 360)
         }
 
         val hintLabel = JLabel(DeployXBundle.message("dialog.remote.path.hint")).apply {
@@ -383,9 +382,9 @@ class RemotePathChooserDialog(
         return FormBuilder.createFormBuilder()
             .addLabeledComponent(DeployXBundle.message("dialog.remote.path.label.remotePath"), pathField)
             .addComponent(buttonPanel)
-            .addVerticalGap(8)
+            .addVerticalGap(JBUI.scale(8))
             .addComponent(scrollPane)
-            .addVerticalGap(8)
+            .addVerticalGap(JBUI.scale(8))
             .addComponent(hintLabel)
             .panel
     }

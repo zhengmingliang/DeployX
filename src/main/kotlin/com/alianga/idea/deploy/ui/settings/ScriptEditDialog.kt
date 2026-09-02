@@ -16,11 +16,10 @@ import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.FormBuilder
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Font
-import javax.swing.Box
-import javax.swing.BoxLayout
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -75,8 +74,7 @@ class ScriptEditDialog(
         ServerManager.getInstance().getServers().forEach { server ->
             serverCombo.addItem("${server.id} - ${server.name} (${server.displayAddress})")
         }
-        serverCombo.preferredSize = Dimension(520, serverCombo.preferredSize.height)
-        serverCombo.minimumSize = Dimension(360, serverCombo.minimumSize.height)
+        serverCombo.preferredSize = Dimension(JBUI.scale(480), serverCombo.preferredSize.height)
     }
 
     private fun fillData(script: ScriptConfig) {
@@ -99,7 +97,7 @@ class ScriptEditDialog(
 
     override fun createCenterPanel(): JComponent {
         val commandScroll = commandArea.apply {
-            preferredSize = Dimension(640, 240)
+            preferredSize = JBUI.size(560, 220)
         }
         val variablesArea = JBTextArea(buildVariablesHelpText(), 8, 60).apply {
             isEditable = false
@@ -108,11 +106,11 @@ class ScriptEditDialog(
             wrapStyleWord = true
         }
         val variablesScroll = JBScrollPane(variablesArea).apply {
-            preferredSize = Dimension(640, 150)
+            preferredSize = JBUI.size(560, 140)
             horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
         }
         val descriptionScroll = JBScrollPane(descriptionField).apply {
-            preferredSize = Dimension(640, 72)
+            preferredSize = JBUI.size(560, 72)
             horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
         }
         val contentPanel = FormBuilder.createFormBuilder()
@@ -121,7 +119,7 @@ class ScriptEditDialog(
             .addLabeledComponent(DeployXBundle.message("dialog.script.label.group"), groupField)
             .addLabeledComponent(DeployXBundle.message("dialog.script.label.tags"), tagsField)
             .addLabeledComponent(DeployXBundle.message("dialog.script.label.bindServer"), serverCombo)
-            .addVerticalGap(8)
+            .addVerticalGap(JBUI.scale(8))
             .addLabeledComponent(DeployXBundle.message("dialog.script.label.commandTemplate"), commandScroll)
             .addLabeledComponent(DeployXBundle.message("dialog.script.label.variableHelp"), variablesScroll)
             .addLabeledComponent(DeployXBundle.message("dialog.script.label.workingDir"), workingDirField)
@@ -142,7 +140,7 @@ class ScriptEditDialog(
         return JBTabbedPane().apply {
             addTab(DeployXBundle.message("dialog.script.tabs.scriptContent"), JBScrollPane(contentPanel).apply { horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER })
             addTab(DeployXBundle.message("dialog.script.tabs.paramDefinition"), paramsPanel)
-            preferredSize = Dimension(780, 720)
+            preferredSize = JBUI.size(720, 620)
         }
     }
 
@@ -295,20 +293,16 @@ private class ScriptParamEditDialog(private val existingParam: ScriptParam?) : D
     }
 
     override fun createCenterPanel(): JComponent {
-        val panel = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
-        panel.add(
-            FormBuilder.createFormBuilder()
-                .addLabeledComponent(DeployXBundle.message("dialog.param.label.name"), nameField)
-                .addLabeledComponent(DeployXBundle.message("dialog.param.label.displayLabel"), labelField)
-                .addLabeledComponent(DeployXBundle.message("dialog.param.label.type"), typeCombo)
-                .addComponent(requiredCheck)
-                .addLabeledComponent(DeployXBundle.message("dialog.param.label.defaultValue"), defaultField)
-                .addLabeledComponent(DeployXBundle.message("dialog.param.label.enumOptions"), optionsField)
-                .addLabeledComponent(DeployXBundle.message("dialog.param.label.description"), JBScrollPane(descriptionField))
-                .panel
-        )
-        panel.add(Box.createVerticalStrut(4))
-        panel.preferredSize = Dimension(460, 320)
+        val panel = FormBuilder.createFormBuilder()
+            .addLabeledComponent(DeployXBundle.message("dialog.param.label.name"), nameField)
+            .addLabeledComponent(DeployXBundle.message("dialog.param.label.displayLabel"), labelField)
+            .addLabeledComponent(DeployXBundle.message("dialog.param.label.type"), typeCombo)
+            .addComponent(requiredCheck)
+            .addLabeledComponent(DeployXBundle.message("dialog.param.label.defaultValue"), defaultField)
+            .addLabeledComponent(DeployXBundle.message("dialog.param.label.enumOptions"), optionsField)
+            .addLabeledComponent(DeployXBundle.message("dialog.param.label.description"), JBScrollPane(descriptionField))
+            .panel
+        panel.preferredSize = JBUI.size(460, 320)
         return panel
     }
 
