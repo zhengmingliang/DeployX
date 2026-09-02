@@ -22,7 +22,9 @@ import com.alianga.idea.deploy.service.SyncService
 import com.alianga.idea.deploy.service.TerminalService
 import com.alianga.idea.deploy.service.UpdateReportFormatter
 import com.alianga.idea.deploy.ui.CommandFieldWithScriptButton
+import com.alianga.idea.deploy.ui.AdaptiveRowPanel
 import com.alianga.idea.deploy.ui.UiButtonFactory
+import com.alianga.idea.deploy.ui.WrapLayout
 import com.alianga.idea.deploy.ui.dialog.HistoryDetailDialog
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
 import com.alianga.idea.deploy.ui.dialog.RollbackDialog
@@ -56,7 +58,9 @@ import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Component
 import java.awt.Dimension
+import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Rectangle
 import java.awt.datatransfer.StringSelection
 import java.awt.event.ActionEvent
 import java.awt.event.MouseAdapter
@@ -163,8 +167,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         toolTipText = DeployXBundle.message("toolwindow.button.startDeploy.tooltip")
     }
     // 拉取（次要动作，保留普通 JButton 样式）
-    private val pullButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.pull"), AllIcons.Actions.Download) { pullFromServer() }
-    private val quickPushButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.quickPush"), AllIcons.Actions.Upload) { quickPush() }
+    private val pullButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.pull"), AllIcons.Actions.Download) { pullFromServer() }.apply {
+        toolTipText = DeployXBundle.message("toolwindow.button.pull.tooltip")
+    }
+    private val quickPushButton = UiButtonFactory.createActionButton(DeployXBundle.message("toolwindow.button.quickPush"), AllIcons.Actions.Upload) { quickPush() }.apply {
+        toolTipText = DeployXBundle.message("toolwindow.button.quickPush.tooltip")
+    }
     /**
      * 1.0.9 重构：保存为映射改为小图标按钮，放到服务器行最右（与 browseRemote/openTerminal 并列），
      * 不再占用底部动作区。tooltip 文案由 relocalize() 刷新。
@@ -297,10 +305,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             // 1.0.9：保存为映射改为小图标，放服务器行最右，不再占用底部动作区
             add(saveAsMappingButton)
         }
-        val serverWithTerminalPanel = JPanel(BorderLayout(6, 0)).apply {
-            add(serverCombo, BorderLayout.CENTER)
-            add(serverButtonsPanel, BorderLayout.EAST)
-        }
+        // 服务器行：宽度足够时按钮组停靠下拉框右侧；侧边栏拉窄时自动换到下拉框下方，
+        // 避免右侧按钮被裁剪不可见
+        val serverWithTerminalPanel = AdaptiveRowPanel(
+            main = serverCombo,
+            side = serverButtonsPanel,
+            minMainWidth = JBUI.scale(160)
+        )
 
         // 分组 1：服务器与路径
         serverPathPanel = FormBuilder.createFormBuilder()
@@ -344,41 +355,42 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.hooks"))
             }
 
-        // 底部动作区：1.0.9 调整为主次层级
-        // 第 1 行：预览 (split) | 部署 (主按钮) | 拉取
-        // 第 2 行：快速推送
-        val buttonRow1 = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
+        // 底部动作区：WrapLayout 自动换行，按钮始终可见。
+        // 对齐策略：宽度足够单行放下时整体居中（面板中部）；不足时靠左并换行。
+        val buttonPanel = object : JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(8), JBUI.scale(6))) {
+            override fun doLayout() {
+                val flow = layout as? WrapLayout ?: return super.doLayout()
+                flow.alignment = if (width >= flow.singleRowWidth(this)) FlowLayout.CENTER else FlowLayout.LEADING
+                super.doLayout()
+            }
+        }.apply {
             add(previewButton)
-            add(Box.createHorizontalStrut(8))
             add(startDeployButton)
-            add(Box.createHorizontalStrut(8))
             add(pullButton)
-        }
-        val buttonRow2 = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(quickPushButton)
-        }
-        val buttonPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(buttonRow1)
-            add(Box.createVerticalStrut(6))
-            add(buttonRow2)
-            // 整体左对齐，避免被 FormBuilder/外层拉伸填满
             alignmentX = Component.LEFT_ALIGNMENT
         }
 
-        // 进度面板：进度条 + 状态标签。1.0.9 加 8px 顶部内边距
-        val progressInfoPanel = JPanel(BorderLayout(4, 0)).apply {
+        // 进度面板：进度条整行、状态标签在下一行。进度文本含文件路径与速度，较长，
+        // 放右侧在窄面板下会被截断，换行到下方后始终完整可见。1.0.9 加 8px 顶部内边距
+        val progressInfoPanel = JPanel(BorderLayout(0, JBUI.scale(2))).apply {
             add(progressBar, BorderLayout.CENTER)
-            add(progressLabel, BorderLayout.EAST)
+            add(progressLabel, BorderLayout.SOUTH)
         }
         val progressPanel = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(8, 0, 0, 0)
             add(progressInfoPanel, BorderLayout.CENTER)
         }
 
-        val operationPanel = JPanel()
+        // 操作面板实现 Scrollable 且宽度跟随视口：内容整体收缩换行，而不是出现
+        // 横向滚动条把右侧按钮藏在可视区外（拉窄时由各子面板自行换行/收缩兜底）
+        val operationPanel = object : JPanel(), Scrollable {
+            override fun getPreferredScrollableViewportSize(): Dimension? = preferredSize
+            override fun getScrollableUnitIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int = JBUI.scale(16)
+            override fun getScrollableBlockIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int = JBUI.scale(64)
+            override fun getScrollableTracksViewportWidth(): Boolean = true
+            override fun getScrollableTracksViewportHeight(): Boolean = false
+        }
         operationPanel.layout = BoxLayout(operationPanel, BoxLayout.Y_AXIS)
         operationPanel.border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
         operationPanel.add(serverPathPanel)
@@ -534,6 +546,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // 次要动作按钮文本（JButton 仍用 .text）
         pullButton.text = DeployXBundle.message("toolwindow.button.pull")
         quickPushButton.text = DeployXBundle.message("toolwindow.button.quickPush")
+        pullButton.toolTipText = DeployXBundle.message("toolwindow.button.pull.tooltip")
+        quickPushButton.toolTipText = DeployXBundle.message("toolwindow.button.quickPush.tooltip")
         // 保存为映射：1.0.9 改为小图标按钮，只刷 tooltip
         saveAsMappingButton.toolTipText = DeployXBundle.message("toolwindow.button.saveAsMapping.tooltip")
         abortButton.text = DeployXBundle.message("toolwindow.button.abort")
