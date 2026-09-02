@@ -18,10 +18,14 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
+import java.awt.BorderLayout
 import java.awt.Dimension
+import java.awt.Rectangle
+import javax.swing.JPanel
 import javax.swing.ScrollPaneConstants
 import javax.swing.JComboBox
 import javax.swing.JComponent
+import javax.swing.Scrollable
 
 /**
  * 映射编辑对话框
@@ -277,10 +281,20 @@ class MappingEditDialog(
             .addComponent(autoCdCheck)
             .panel
 
-        // 表单较高：小屏下纵向滚动，避免按钮/字段被裁切；禁止横向滚动以免把浏览按钮藏到视口外
-        return JBScrollPane(panel).apply {
+        // 表单较高：小屏下纵向滚动，避免按钮/字段被裁切；禁止横向滚动以免把浏览按钮藏到视口外。
+        // 内容跟踪视口宽度，避免外层滚动条与命令编辑器内层滚动抢宽度；滚轮单位用 JBUI。
+        val scrollable = object : JPanel(BorderLayout()), Scrollable {
+            init { add(panel, BorderLayout.NORTH) }
+            override fun getPreferredScrollableViewportSize(): Dimension = preferredSize
+            override fun getScrollableUnitIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int = JBUI.scale(16)
+            override fun getScrollableBlockIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int = JBUI.scale(64)
+            override fun getScrollableTracksViewportWidth(): Boolean = true
+            override fun getScrollableTracksViewportHeight(): Boolean = false
+        }
+        return JBScrollPane(scrollable).apply {
             border = JBUI.Borders.empty()
             horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
             preferredSize = JBUI.size(640, 560)
         }
     }

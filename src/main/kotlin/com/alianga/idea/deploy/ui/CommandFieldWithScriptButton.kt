@@ -10,6 +10,7 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.project.Project
 import com.intellij.ui.EditorTextField
 import com.intellij.ui.components.JBTextField
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.Dimension
 import javax.swing.BoxLayout
@@ -44,7 +45,7 @@ class CommandFieldWithScriptButton(
     preferredScrollSize: Dimension? = null,
     showLineNumbers: Boolean = true,
     private val fullscreenTitle: String? = null
-) : JPanel(BorderLayout(4, 0)) {
+) : JPanel(BorderLayout(JBUI.scale(4), 0)) {
 
     /** 多行模式：基于 IDEA 编辑器的 EditorTextField；单行模式：JBTextField */
     private val editorField: EditorTextField? = if (multiline) {

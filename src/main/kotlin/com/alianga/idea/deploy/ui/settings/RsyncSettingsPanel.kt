@@ -4,6 +4,8 @@ import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.ssh.RsyncWrapper
 import com.alianga.idea.deploy.service.TransferService
+import com.alianga.idea.deploy.ui.AdaptiveRowPanel
+import com.alianga.idea.deploy.ui.WrapLayout
 import com.alianga.idea.deploy.util.RsyncDownloader
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.progress.ProgressIndicator
@@ -15,8 +17,9 @@ import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
-import javax.swing.BoxLayout
+import java.awt.FlowLayout
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JPanel
@@ -37,7 +40,7 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
     private val connectTimeoutField = JBTextField(settings.connectTimeout.toString())
     private val rsyncStatusLabel = JBLabel("")
     private val sshpassStatusLabel = JBLabel("")
-    private val osHelpLabel = JBLabel(osHelpText())
+    private val osHelpLabel = JBLabel(osHelpText()).apply { setAllowAutoWrapping(true) }
 
     /** rsync 检测结果，控制下载按钮可见性 */
     private var rsyncAvailable = false
@@ -48,6 +51,10 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
         addActionListener { startDownloadAndInstall() }
     }
 
+    private val detectButton = JButton(DeployXBundle.message("settings.rsync.button.detectTools")).apply {
+        addActionListener { checkTools() }
+    }
+
     init {
         transferModeCombo.selectedItem = settings.transferMode
         setupUI()
@@ -55,41 +62,61 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun setupUI() {
-        val infoLabel = JBLabel("<html><i>${DeployXBundle.message("settings.rsync.info")}</i></html>")
+        val infoLabel = JBLabel("<html>${DeployXBundle.message("settings.rsync.info")}</html>").apply {
+            setAllowAutoWrapping(true)
+        }
 
-        val detectPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            add(rsyncStatusLabel)
-            add(JButton(DeployXBundle.message("settings.rsync.button.detectTools")).apply { addActionListener { checkTools() } })
+        val detectButtons = JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(6), JBUI.scale(4))).apply {
+            isOpaque = false
+            add(detectButton)
             add(downloadButton)
         }
-        val sshpassPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            add(sshpassStatusLabel)
-        }
+        val detectPanel = AdaptiveRowPanel(
+            main = rsyncStatusLabel,
+            side = detectButtons,
+            minMainWidth = JBUI.scale(160)
+        )
 
         val formPanel = FormBuilder.createFormBuilder()
             .addComponent(infoLabel)
-            .addVerticalGap(8)
-            .addLabeledComponent(DeployXBundle.message("settings.rsync.transferMode"), transferModeCombo)
-            .addLabeledComponent(DeployXBundle.message("settings.rsync.rsyncPath"), rsyncPathField)
-            .addLabeledComponent(DeployXBundle.message("settings.rsync.rsyncOptions"), rsyncOptionsField)
-            .addVerticalGap(4)
+            .addVerticalGap(JBUI.scale(8))
+            .addComponent(AdaptiveRowPanel.labeled(
+                JBLabel(DeployXBundle.message("settings.rsync.transferMode")),
+                transferModeCombo
+            ))
+            .addComponent(AdaptiveRowPanel.labeled(
+                JBLabel(DeployXBundle.message("settings.rsync.rsyncPath")),
+                rsyncPathField
+            ))
+            .addComponent(AdaptiveRowPanel.labeled(
+                JBLabel(DeployXBundle.message("settings.rsync.rsyncOptions")),
+                rsyncOptionsField
+            ))
+            .addVerticalGap(JBUI.scale(4))
             .addComponent(compressCheck)
             .addComponent(showProgressCheck)
-            .addVerticalGap(8)
-            .addLabeledComponent(DeployXBundle.message("settings.rsync.connectTimeout"), connectTimeoutField)
-            .addVerticalGap(8)
-            .addLabeledComponent(DeployXBundle.message("settings.rsync.status.rsync"), detectPanel)
-            .addLabeledComponent(DeployXBundle.message("settings.rsync.status.sshpass"), sshpassPanel)
-            .addVerticalGap(8)
+            .addVerticalGap(JBUI.scale(8))
+            .addComponent(AdaptiveRowPanel.labeled(
+                JBLabel(DeployXBundle.message("settings.rsync.connectTimeout")),
+                connectTimeoutField
+            ))
+            .addVerticalGap(JBUI.scale(8))
+            .addComponent(AdaptiveRowPanel.labeled(
+                JBLabel(DeployXBundle.message("settings.rsync.status.rsync")),
+                detectPanel,
+                minFieldWidth = JBUI.scale(180)
+            ))
+            .addComponent(AdaptiveRowPanel.labeled(
+                JBLabel(DeployXBundle.message("settings.rsync.status.sshpass")),
+                sshpassStatusLabel
+            ))
+            .addVerticalGap(JBUI.scale(8))
             .addComponent(osHelpLabel)
-            .panel
+            .panel.apply {
+                border = JBUI.Borders.empty(0, 0, JBUI.scale(8), 0)
+            }
 
-        val wrapper = JPanel()
-        wrapper.layout = BoxLayout(wrapper, BoxLayout.Y_AXIS)
-        wrapper.add(formPanel)
-        add(wrapper, BorderLayout.NORTH)
+        add(formPanel, BorderLayout.NORTH)
     }
 
     private fun checkTools() {
@@ -188,10 +215,10 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
             }
         }
         val scrollPane = javax.swing.JScrollPane(editorPane)
-        scrollPane.preferredSize = java.awt.Dimension(520, 200)
+        scrollPane.preferredSize = JBUI.size(520, 200)
         dialog.contentPane.add(scrollPane, BorderLayout.CENTER)
-        val okButton = JButton("OK").apply { addActionListener { dialog.dispose() } }
-        val buttonPanel = JPanel().apply { add(okButton) }
+        val okButton = JButton(DeployXBundle.message("common.ok")).apply { addActionListener { dialog.dispose() } }
+        val buttonPanel = JPanel(FlowLayout(FlowLayout.CENTER)).apply { add(okButton) }
         dialog.contentPane.add(buttonPanel, BorderLayout.SOUTH)
         dialog.pack()
         dialog.setLocationRelativeTo(null)
@@ -204,7 +231,7 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
             SystemInfo.isMac -> DeployXBundle.message("settings.rsync.help.macos")
             else -> DeployXBundle.message("settings.rsync.help.linux")
         }
-        return "<html><body style='width:520px'>$text<br/>${DeployXBundle.message("settings.rsync.help.sftpNote")}</body></html>"
+        return "<html>$text<br/>${DeployXBundle.message("settings.rsync.help.sftpNote")}</html>"
     }
 
     fun isModified(): Boolean {
