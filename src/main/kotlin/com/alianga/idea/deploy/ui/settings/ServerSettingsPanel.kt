@@ -11,6 +11,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.ui.ToolbarDecorator
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import javax.swing.JPanel
 import javax.swing.event.DocumentEvent
@@ -40,7 +41,11 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
             override fun removeUpdate(e: DocumentEvent) = refreshTable()
             override fun changedUpdate(e: DocumentEvent) = refreshTable()
         })
-        add(searchField, BorderLayout.NORTH)
+        val searchPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.emptyBottom(4)
+            add(searchField, BorderLayout.CENTER)
+        }
+        add(searchPanel, BorderLayout.NORTH)
 
         // 创建带工具栏的表格
         val decorator = ToolbarDecorator.createDecorator(table)

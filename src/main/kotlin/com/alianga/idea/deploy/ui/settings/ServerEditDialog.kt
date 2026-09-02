@@ -19,10 +19,9 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
+import com.intellij.util.ui.JBUI
 import java.awt.CardLayout
-import java.awt.Dimension
 import java.awt.event.ItemEvent
-import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -84,11 +83,10 @@ class ServerEditDialog(
         }
 
         // 密码卡片：密码输入框 + 显示明文复选框
-        val passwordCard = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(passwordField)
-            add(showPasswordCheck)
-        }
+        val passwordCard = FormBuilder.createFormBuilder()
+            .addComponent(passwordField)
+            .addComponent(showPasswordCheck)
+            .panel
         showPasswordCheck.addItemListener {
             passwordField.echoChar = if (showPasswordCheck.isSelected) 0.toChar() else defaultEchoChar
         }
@@ -195,7 +193,7 @@ class ServerEditDialog(
             .addLabeledComponent(DeployXBundle.message("dialog.server.label.tags"), tagsField)
             .panel
 
-        panel.preferredSize = Dimension(400, 420)
+        panel.preferredSize = JBUI.size(460, 420)
         return panel
     }
 

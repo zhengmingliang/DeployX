@@ -392,7 +392,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             override fun getScrollableTracksViewportHeight(): Boolean = false
         }
         operationPanel.layout = BoxLayout(operationPanel, BoxLayout.Y_AXIS)
-        operationPanel.border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+        operationPanel.border = JBUI.Borders.empty(8)
         operationPanel.add(serverPathPanel)
         operationPanel.add(Box.createVerticalStrut(8))
         operationPanel.add(deployOptionsPanel)
@@ -408,10 +408,16 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // 1.0.8：每个 Tab 内部顶部加「复制此 Tab 日志」按钮，logArea 对应"全部" Tab（serverId=null）
         logTabbedPane.addTab(DeployXBundle.message("toolwindow.tab.all"), AllIcons.Nodes.LogFolder, buildLogTabContent(logArea, null))
         // 1.0.8：日志面板顶部加工具栏（终止按钮放在最右侧），始终可见
-        val logHeaderPanel = JPanel(BorderLayout()).apply {
-            add(buildLogHeaderCopyBar(), BorderLayout.WEST)
-            add(abortButton, BorderLayout.EAST)
-            border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
+        // 窄宽时「终止」换到复制按钮下方，避免 EAST 把复制按钮挤出可视区
+        val abortHolder = JPanel(FlowLayout(FlowLayout.LEADING, 0, 0)).apply {
+            add(abortButton)
+        }
+        val logHeaderPanel = AdaptiveRowPanel(
+            main = buildLogHeaderCopyBar(),
+            side = abortHolder,
+            minMainWidth = JBUI.scale(140)
+        ).apply {
+            border = JBUI.Borders.empty(4)
         }
         val logPanel = JPanel(BorderLayout()).apply {
             add(logHeaderPanel, BorderLayout.NORTH)
@@ -721,7 +727,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
         val top = JPanel(BorderLayout()).apply {
             add(copyButton, BorderLayout.WEST)
-            border = BorderFactory.createEmptyBorder(2, 4, 2, 4)
+            border = JBUI.Borders.empty(2, 4)
         }
         return JPanel(BorderLayout()).apply {
             add(top, BorderLayout.NORTH)

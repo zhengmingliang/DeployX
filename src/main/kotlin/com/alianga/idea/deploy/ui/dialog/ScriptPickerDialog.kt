@@ -7,6 +7,7 @@ import com.alianga.idea.deploy.model.ScriptParam
 import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.service.ScriptManager
 import com.alianga.idea.deploy.service.ServerManager
+import com.alianga.idea.deploy.ui.WrapLayout
 import com.google.gson.GsonBuilder
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
@@ -20,8 +21,9 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
-import java.awt.Dimension
+import java.awt.FlowLayout
 import java.awt.Font
 import javax.swing.ButtonGroup
 import javax.swing.DefaultListModel
@@ -78,24 +80,25 @@ class ScriptPickerDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val left = JPanel(BorderLayout(4, 4)).apply {
+        val gap = JBUI.scale(4)
+        val left = JPanel(BorderLayout(gap, gap)).apply {
             add(searchField, BorderLayout.NORTH)
             add(JBScrollPane(scriptList), BorderLayout.CENTER)
-            preferredSize = Dimension(280, 520)
+            preferredSize = JBUI.size(260, 440)
         }
-        val modePanel = JPanel().apply {
+        val modePanel = JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(8), JBUI.scale(4))).apply {
             add(insertRadio)
             add(referenceRadio)
         }
-        val right = JPanel(BorderLayout(4, 4)).apply {
+        val right = JPanel(BorderLayout(gap, gap)).apply {
             add(paramsPanel, BorderLayout.NORTH)
             add(JBScrollPane(previewArea), BorderLayout.CENTER)
             add(modePanel, BorderLayout.SOUTH)
         }
         return JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right).apply {
-            preferredSize = Dimension(900, 580)
-            dividerLocation = 300
-            resizeWeight = 0.3
+            preferredSize = JBUI.size(780, 520)
+            dividerLocation = JBUI.scale(280)
+            resizeWeight = 0.32
         }
     }
 

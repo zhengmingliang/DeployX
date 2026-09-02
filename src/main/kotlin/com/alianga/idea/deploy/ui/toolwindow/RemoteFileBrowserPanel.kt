@@ -8,6 +8,7 @@ import com.alianga.idea.deploy.service.MappingManager
 import com.alianga.idea.deploy.service.RemoteFileBrowserService
 import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.service.TerminalService
+import com.alianga.idea.deploy.ui.AdaptiveRowPanel
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
@@ -25,8 +26,8 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.FormBuilder
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
-import java.awt.Dimension
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.Transferable
 import java.awt.datatransfer.UnsupportedFlavorException
@@ -67,10 +68,11 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
             isContentAreaFilled = false
             isBorderPainted = false
             isFocusPainted = false
-            border = BorderFactory.createEmptyBorder(2, 2, 2, 2)
-            preferredSize = Dimension(26, 26)
-            maximumSize = Dimension(26, 26)
-            minimumSize = Dimension(22, 22)
+            border = JBUI.Borders.empty(2)
+            val size = JBUI.size(26)
+            preferredSize = size
+            maximumSize = size
+            minimumSize = JBUI.size(22)
         }
     }
 
@@ -178,35 +180,41 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
     }
 
     private fun buildLayout() {
-        val serverPanel = JPanel(BorderLayout(6, 0)).apply {
+        val serverPanel = JPanel(BorderLayout(JBUI.scale(6), 0)).apply {
             add(JBLabel(DeployXBundle.message("remote.browser.label.server")), BorderLayout.WEST)
             add(serverCombo, BorderLayout.CENTER)
         }
-        val pathPanel = JPanel(BorderLayout(6, 0)).apply {
-            add(JBLabel(DeployXBundle.message("remote.browser.label.path")), BorderLayout.WEST)
-            add(pathCombo, BorderLayout.CENTER)
-            val btnPanel = JPanel().apply {
-                layout = BoxLayout(this, BoxLayout.X_AXIS)
-                add(goButton); add(Box.createHorizontalStrut(4))
-                add(upButton); add(Box.createHorizontalStrut(4))
-                add(refreshButton); add(Box.createHorizontalStrut(4))
-                add(newDirButton); add(Box.createHorizontalStrut(4))
-                add(historyButton)
-            }
-            add(btnPanel, BorderLayout.EAST)
+        val btnPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            val gap = JBUI.scale(4)
+            add(goButton); add(Box.createHorizontalStrut(gap))
+            add(upButton); add(Box.createHorizontalStrut(gap))
+            add(refreshButton); add(Box.createHorizontalStrut(gap))
+            add(newDirButton); add(Box.createHorizontalStrut(gap))
+            add(historyButton)
         }
-        val treeScroll = JBScrollPane(tree).apply { preferredSize = Dimension(500, 400) }
+        // 路径输入为主、按钮组为辅：窄宽时按钮换到路径下方，避免 5 个图标把路径框挤没
+        val pathRow = AdaptiveRowPanel(
+            main = pathCombo,
+            side = btnPanel,
+            minMainWidth = JBUI.scale(140)
+        )
+        val pathPanel = JPanel(BorderLayout(JBUI.scale(6), 0)).apply {
+            add(JBLabel(DeployXBundle.message("remote.browser.label.path")), BorderLayout.WEST)
+            add(pathRow, BorderLayout.CENTER)
+        }
+        val treeScroll = JBScrollPane(tree)
         val hintLabel = JBLabel(DeployXBundle.message("remote.browser.hint")).apply { foreground = JBColor.GRAY }
 
         val content = FormBuilder.createFormBuilder()
             .addComponent(serverPanel)
-            .addVerticalGap(6)
+            .addVerticalGap(JBUI.scale(6))
             .addComponent(pathPanel)
-            .addVerticalGap(6)
+            .addVerticalGap(JBUI.scale(6))
             .addComponentFillVertically(treeScroll, 0)
-            .addVerticalGap(6)
+            .addVerticalGap(JBUI.scale(6))
             .addComponent(hintLabel)
-            .addVerticalGap(4)
+            .addVerticalGap(JBUI.scale(4))
             .addComponent(statusLabel)
             .panel
         add(content, BorderLayout.CENTER)
