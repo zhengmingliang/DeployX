@@ -314,10 +314,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         )
 
         // 分组 1：服务器与路径
+        // FormBuilder 两列 GridBag：标签列 weightx=0 不换行，窄宽时把字段列挤到不可用。
+        // 改为单列 + AdaptiveRowPanel.labeled，极窄时标签落到字段上方，字段仍满宽。
         serverPathPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent(targetServerLabel, serverWithTerminalPanel)
-            .addLabeledComponent(localFileLabel, localPathField)
-            .addLabeledComponent(remotePathLabel, remotePathField)
+            .addComponent(AdaptiveRowPanel.labeled(targetServerLabel, serverWithTerminalPanel, JBUI.scale(160)))
+            .addComponent(AdaptiveRowPanel.labeled(localFileLabel, localPathField))
+            .addComponent(AdaptiveRowPanel.labeled(remotePathLabel, remotePathField))
             .panel.apply {
                 border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.serverAndPaths"))
             }
@@ -327,14 +329,14 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         backupIndentedPanel = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.emptyLeft(12)
             val inner = FormBuilder.createFormBuilder()
-                .addLabeledComponent(backupDirLabel, backupDirField)
+                .addComponent(AdaptiveRowPanel.labeled(backupDirLabel, backupDirField))
                 .panel
             add(inner, BorderLayout.CENTER)
         }
         unzipIndentedPanel = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.emptyLeft(12)
             val inner = FormBuilder.createFormBuilder()
-                .addLabeledComponent(unzipDirLabel, unzipDestField)
+                .addComponent(AdaptiveRowPanel.labeled(unzipDirLabel, unzipDestField))
                 .panel
             add(inner, BorderLayout.CENTER)
         }
@@ -349,8 +351,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // 分组 3：执行命令
         hooksPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent(preCommandLabel, preCommandField)
-            .addLabeledComponent(postCommandLabel, postCommandField)
+            .addComponent(AdaptiveRowPanel.labeled(preCommandLabel, preCommandField, JBUI.scale(160)))
+            .addComponent(AdaptiveRowPanel.labeled(postCommandLabel, postCommandField, JBUI.scale(160)))
             .panel.apply {
                 border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.hooks"))
             }

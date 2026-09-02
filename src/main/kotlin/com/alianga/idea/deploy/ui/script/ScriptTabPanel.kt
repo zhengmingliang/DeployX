@@ -4,7 +4,9 @@ import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ScriptConfig
 import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.service.ScriptManager
+import com.alianga.idea.deploy.ui.AdaptiveRowPanel
 import com.alianga.idea.deploy.ui.ScriptEditorFactory
+import com.alianga.idea.deploy.ui.WrapLayout
 import com.alianga.idea.deploy.ui.dialog.ScriptPickerDialog
 import com.alianga.idea.deploy.ui.dialog.ScriptRunDialog
 import com.alianga.idea.deploy.ui.settings.ScriptEditDialog
@@ -43,7 +45,7 @@ import javax.swing.table.AbstractTableModel
 /**
  * 工具窗口中的脚本库面板。
  */
-class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) {
+class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.scale(8), JBUI.scale(8))) {
 
     private val scriptManager = ScriptManager.getInstance()
     private val searchField = JBTextField()
@@ -94,10 +96,11 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
         setupTable()
         setupPreviewArea()
 
-        val topPanel = JPanel(BorderLayout(8, 0)).apply {
-            add(createFilterPanel(), BorderLayout.CENTER)
-            add(createToolbar(), BorderLayout.EAST)
-        }
+        val topPanel = AdaptiveRowPanel(
+            main = createFilterPanel(),
+            side = createToolbar(),
+            minMainWidth = JBUI.scale(180)
+        )
         val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, createTablePanel(), createPreviewPanel()).apply {
             dividerLocation = 360
             resizeWeight = 0.74
@@ -120,22 +123,26 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
     }
 
     private fun createFilterPanel(): JComponent {
-        return JPanel(BorderLayout(6, 0)).apply {
-            add(searchField, BorderLayout.CENTER)
-            add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
-                add(groupCombo)
-                add(tagCombo)
-                add(refreshFilterButton.apply {
-                    isFocusable = false
-                    addActionListener { refreshAll() }
-                })
-                add(countLabel)
-            }, BorderLayout.EAST)
+        val filters = JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(6), JBUI.scale(4))).apply {
+            isOpaque = false
+            add(groupCombo)
+            add(tagCombo)
+            add(refreshFilterButton.apply {
+                isFocusable = false
+                addActionListener { refreshAll() }
+            })
+            add(countLabel)
         }
+        return AdaptiveRowPanel(
+            main = searchField,
+            side = filters,
+            minMainWidth = JBUI.scale(120)
+        )
     }
 
     private fun createToolbar(): JComponent {
-        return JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
+        return JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(6), JBUI.scale(4))).apply {
+            isOpaque = false
             add(runButton.apply { addActionListener { onRun() } })
             add(previewButton.apply { addActionListener { onDryRun() } })
             add(moreButton.apply { addActionListener { showMoreMenu(this) } })
@@ -170,12 +177,14 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(8, 8)) 
     }
 
     private fun createPreviewPanel(): JComponent {
-        val header = JPanel(BorderLayout()).apply {
+        val header = AdaptiveRowPanel(
+            main = previewTitle,
+            side = copyTemplateButton.apply { addActionListener { onCopy() } },
+            minMainWidth = JBUI.scale(80)
+        ).apply {
             border = JBUI.Borders.emptyBottom(4)
-            add(previewTitle, BorderLayout.WEST)
-            add(copyTemplateButton.apply { addActionListener { onCopy() } }, BorderLayout.EAST)
         }
-        return JPanel(BorderLayout(4, 4)).apply {
+        return JPanel(BorderLayout(JBUI.scale(4), JBUI.scale(4))).apply {
             border = JBUI.Borders.emptyTop(8)
             add(header, BorderLayout.NORTH)
             add(previewArea, BorderLayout.CENTER)
