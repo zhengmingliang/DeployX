@@ -11,9 +11,14 @@ import com.intellij.openapi.fileTypes.PlainTextFileType
 import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory
 import com.intellij.openapi.project.Project
 import com.intellij.ui.EditorTextField
+import java.awt.Point
 import java.awt.event.KeyEvent
+import java.awt.event.MouseWheelEvent
+import java.awt.event.MouseWheelListener
 import javax.swing.JComponent
+import javax.swing.JScrollPane
 import javax.swing.KeyStroke
+import javax.swing.SwingUtilities
 
 /**
  * 脚本编辑器工厂。
@@ -68,6 +73,10 @@ object ScriptEditorFactory {
  * WHEN_FOCUSED 级别注册按键拦截，手动执行换行/缩进并消费事件，阻止冒泡。
  * 另外强制 [setOneLineMode][EditorEx.setOneLineMode]`(false)` 确保多行模式，
  * 避免粘贴多行文本时换行符被吞掉。
+ *
+ * 滚轮：内层编辑器默认会消费鼠标滚轮。挂在滚动表单（如 MappingEditDialog /
+ * ScriptEditDialog）里时，只有编辑器内容超出视口且该方向还能继续滚时才自己消化，
+ * 其余滚轮转发给外层 [JScrollPane]。
  */
 private class ScriptEditorField(
     document: Document,
@@ -93,6 +102,7 @@ private class ScriptEditorField(
             if (!isViewer) {
                 preventKeystrokesFromTriggeringDialogActions()
             }
+            forwardUnusedWheelToEnclosingScrollPane()
         }
     }
 
@@ -101,6 +111,63 @@ private class ScriptEditorField(
         if (project != null) return
         val syntaxHighlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(scriptFileType, null, null) ?: return
         highlighter = LexerEditorHighlighter(syntaxHighlighter, colorsScheme)
+    }
+
+    /**
+     * 将编辑器不需要的滚轮事件转发给外层 [JScrollPane]。
+     * 仅当内容超出视口且滚轮方向上尚未顶到边界时，才由编辑器内部滚动。
+     */
+    private fun EditorEx.forwardUnusedWheelToEnclosingScrollPane() {
+        val host: JComponent = this@ScriptEditorField
+        val listener = MouseWheelListener { e ->
+            if (e.isConsumed) return@MouseWheelListener
+            if (canConsumeWheel(e)) return@MouseWheelListener
+            val outer = SwingUtilities.getAncestorOfClass(JScrollPane::class.java, host) as JScrollPane?
+                ?: return@MouseWheelListener
+            e.consume()
+            val p: Point = SwingUtilities.convertPoint(e.component, e.point, outer)
+            outer.dispatchEvent(
+                MouseWheelEvent(
+                    outer,
+                    e.id,
+                    e.`when`,
+                    e.modifiersEx,
+                    p.x,
+                    p.y,
+                    e.xOnScreen,
+                    e.yOnScreen,
+                    e.clickCount,
+                    e.isPopupTrigger,
+                    e.scrollType,
+                    e.scrollAmount,
+                    e.wheelRotation,
+                    e.preciseWheelRotation
+                )
+            )
+        }
+        contentComponent.addMouseWheelListener(listener)
+        gutterComponentEx.addMouseWheelListener(listener)
+    }
+
+    /** 内容高于/宽于视口，且滚轮方向上还能继续滚动时，由编辑器自己消化滚轮。 */
+    private fun EditorEx.canConsumeWheel(e: MouseWheelEvent): Boolean {
+        val visible = scrollingModel.visibleArea
+        val content = contentSize
+        val delta = if (e.preciseWheelRotation != 0.0) e.preciseWheelRotation else e.wheelRotation.toDouble()
+        if (delta == 0.0) return false
+        return if (e.isShiftDown) {
+            when {
+                content.width <= visible.width -> false
+                delta < 0 -> visible.x > 0
+                else -> visible.x + visible.width < content.width
+            }
+        } else {
+            when {
+                content.height <= visible.height -> false
+                delta < 0 -> visible.y > 0
+                else -> visible.y + visible.height < content.height
+            }
+        }
     }
 
     /**
