@@ -1,5 +1,6 @@
 package com.alianga.idea.deploy.service
 
+import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.config.ConfigManager
 import com.alianga.idea.deploy.model.MappingConfig
 import com.intellij.openapi.application.ApplicationManager
@@ -23,6 +24,55 @@ class MappingManager {
 
         fun getInstance(): MappingManager =
             ApplicationManager.getApplication().getService(MappingManager::class.java)
+
+        /**
+         * 1.0.8 新增：在同一服务器的多个候选解析项中挑选**最终使用**的映射。
+         *
+         * 优先级：
+         * 1. [preferredMappingId] 非空且能在候选中按 `effectiveId` 找到 —— 用户在对话框中手动选择的映射优先
+         * 2. 否则按 `localDir` 长度倒序取最长前缀（最具体）—— 保持 1.0.8 起的默认行为
+         *
+         * 长度相同时保留候列表原顺序；没有该服务器的候选时返回 null。
+         *
+         * @param resolvedMappings [resolveMappingsByLocalPath] 的返回列表（可含多服务器映射）
+         * @param serverId 目标服务器 ID
+         * @param preferredMappingId 用户手动选择的映射 ID（null 表示自动选择最深层级）
+         */
+        fun pickResolvedByServer(
+            resolvedMappings: List<ResolvedMapping>,
+            serverId: String,
+            preferredMappingId: String? = null
+        ): ResolvedMapping? {
+            val forServer = resolvedMappings.filter { it.mapping.serverId == serverId }
+            if (forServer.isEmpty()) return null
+            if (!preferredMappingId.isNullOrBlank()) {
+                forServer.firstOrNull { it.mapping.effectiveId == preferredMappingId }?.let { return it }
+            }
+            return forServer.maxByOrNull { normalizeLocalDir(it.mapping.localDir).length }
+        }
+
+        /**
+         * 1.0.8 新增：按优先级（`localDir` 长度倒序，最具体/最深层级在前）排序候选映射，
+         * 供映射选择对话框展示；长度相同时保持原顺序（稳定排序）。
+         */
+        fun sortByPriority(resolvedMappings: List<ResolvedMapping>): List<ResolvedMapping> =
+            resolvedMappings.sortedByDescending { normalizeLocalDir(it.mapping.localDir).length }
+
+        /**
+         * 1.0.8 新增：映射候选项在列表中的展示格式。
+         *
+         * 例：`ireport-lib（/opt/.../target/lib → /app/.../WEB-INF/lib）`，
+         * [isDefault] 为 true 时追加「默认」标记（自动匹配的最深层级映射）。
+         */
+        fun formatMappingEntry(resolved: ResolvedMapping, isDefault: Boolean = false): String {
+            val name = resolved.mapping.name.ifBlank { resolved.mapping.localDir }
+            val suffix = if (isDefault) " " + DeployXBundle.message("dialog.mapping.select.entry.default") else ""
+            return "$name（${resolved.mapping.localDir} → ${resolved.resolvedRemoteDir}）$suffix"
+        }
+
+        /** 路径归一化：统一反斜杠、去掉尾部斜杠（与实例方法 normalizePath 语义一致） */
+        fun normalizeLocalDir(path: String): String =
+            path.replace("\\", "/").trimEnd('/')
     }
 
     data class ResolvedMapping(

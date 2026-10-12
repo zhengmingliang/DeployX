@@ -115,19 +115,59 @@ object ActionUtils {
      * 列表（外层、内层、共享同一 `serverId` 的多个映射都会进入），按 `firstOrNull { serverId == ... }`
      * 简单取第一个会选中**插入顺序中最先注册**的那一个（往往是外层、最宽的），导致内层映射永远走不到。
      *
-     * 改用本方法：先按 `serverId` 过滤，再按 `localDir` 长度倒序取最长前缀（最具体），
-     * 长度相同时保留解析结果中的原顺序。返回 `null` 表示该服务器没有任何匹配。
-     *
-     * @param resolvedMappings [MappingManager.resolveMappingsByLocalPath] 的返回列表
-     * @param serverId 目标服务器 ID
+     * 1.0.8 起改为委托 [MappingManager.pickResolvedByServer]，行为不变（等价于
+     * `preferredMappingId = null`），保留此方法供旧调用方使用。
      */
     fun pickMostSpecificByServer(
         resolvedMappings: List<MappingManager.ResolvedMapping>,
         serverId: String
-    ): MappingManager.ResolvedMapping? {
-        return resolvedMappings
-            .filter { it.mapping.serverId == serverId }
-            .maxByOrNull { it.mapping.localDir.length }
+    ): MappingManager.ResolvedMapping? =
+        MappingManager.pickResolvedByServer(resolvedMappings, serverId)
+
+    /**
+     * 1.0.8 新增：在同一服务器的多匹配中挑选最终使用的映射。
+     *
+     * - [preferredMappingId] 非空且命中：使用用户手动选择的映射（父目录/次优先级映射）
+     * - 否则：回退到最长 `localDir` 前缀（最具体/最深层级），与 1.0.8 默认行为一致
+     *
+     * @param resolvedMappings [MappingManager.resolveMappingsByLocalPath] 的返回列表
+     * @param serverId 目标服务器 ID
+     * @param preferredMappingId 用户在映射选择对话框中选中的映射 ID（null = 自动）
+     */
+    fun pickResolvedByServer(
+        resolvedMappings: List<MappingManager.ResolvedMapping>,
+        serverId: String,
+        preferredMappingId: String? = null
+    ): MappingManager.ResolvedMapping? =
+        MappingManager.pickResolvedByServer(resolvedMappings, serverId, preferredMappingId)
+
+    /**
+     * 1.0.8 新增：把「文件 -> 解析映射列表」按服务器归并为「服务器 -> 候选映射列表」。
+     *
+     * 同一映射可能因多个选中文件重复出现，按 `effectiveId` 去重（保持首次出现的顺序），
+     * 供服务器选择对话框展示每台服务器的映射候选。
+     */
+    fun buildResolvedByServerId(
+        resolvedByFile: Map<VirtualFile, List<MappingManager.ResolvedMapping>>
+    ): Map<String, List<MappingManager.ResolvedMapping>> {
+        val result = linkedMapOf<String, MutableList<MappingManager.ResolvedMapping>>()
+        resolvedByFile.values.forEach { resolvedList ->
+            resolvedList.forEach { resolved ->
+                val bucket = result.getOrPut(resolved.mapping.serverId) { mutableListOf() }
+                if (bucket.none { it.mapping.effectiveId == resolved.mapping.effectiveId }) {
+                    bucket.add(resolved)
+                }
+            }
+        }
+        return result
     }
+
+    /**
+     * 1.0.8 新增：是否存在「同一服务器多条映射竞争」的歧义（嵌套父子目录映射场景）。
+     *
+     * 返回 true 时，部署/同步流程应向用户提供映射选择入口（对话框内映射面板或独立映射选择对话框）。
+     */
+    fun hasMappingChoices(resolvedByServerId: Map<String, List<MappingManager.ResolvedMapping>>): Boolean =
+        resolvedByServerId.values.any { it.size > 1 }
 }
 

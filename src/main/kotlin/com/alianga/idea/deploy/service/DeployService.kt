@@ -919,12 +919,17 @@ class DeployService {
 
     /**
      * 快速推送
+     *
+     * @param preferredMappingId 1.0.8：用户手动选择的映射 ID（effectiveId）。
+     *   同一本地路径匹配到多条嵌套（父子目录）映射时优先使用；null 表示自动选择
+     *   最深层级（子目录）映射。
      */
     fun push(
         localPath: String,
         serverId: String? = null,
         includePreCommand: Boolean = false,
         includePostCommand: Boolean = false,
+        preferredMappingId: String? = null,
         logCallback: ((String) -> Unit)? = null,
         progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null,
         cancelToken: DeployCancelToken? = null
@@ -940,14 +945,12 @@ class DeployService {
             )
         }
 
-        val resolvedMapping = if (serverId != null) {
-            resolvedMappings.firstOrNull { it.mapping.serverId == serverId } ?: resolvedMappings.first()
-        } else {
-            resolvedMappings.first()
-        }
+        val targetServerId = serverId ?: resolvedMappings.first().mapping.serverId
+        // 1.0.8：优先使用用户手动选择的映射；未选择时按最长 localDir 前缀取最具体的映射
+        val resolvedMapping = MappingManager.pickResolvedByServer(resolvedMappings, targetServerId, preferredMappingId)
+            ?: resolvedMappings.first()
         val mapping = resolvedMapping.mapping
 
-        val targetServerId = serverId ?: mapping.serverId
         logCallback?.invoke(DeployXBundle.message("deploy.log.matchedMapping", mapping.name, targetServerId, resolvedMapping.resolvedRemoteDir))
 
         val request = DeployRequest(

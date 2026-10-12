@@ -28,8 +28,9 @@ class PullFromServerAction : AbstractDeployAction<DownloadItem>() {
         selection: ServerSelectionResult
     ): List<DownloadItem> {
         return resolvedByFile.mapNotNull { (file, resolvedMappings) ->
-            // 1.0.8：嵌套映射场景下，按最长 localDir 前缀选最具体的映射（与 DeployAction 保持一致）
-            val resolved = ActionUtils.pickMostSpecificByServer(resolvedMappings, targetServer.id)
+            // 1.0.8：嵌套映射场景下优先使用用户在对话框中手动选择的映射（selection.mappingId），
+            // 未选择时按最长 localDir 前缀选最具体的（最深层级）映射（与 DeployAction 保持一致）
+            val resolved = ActionUtils.pickResolvedByServer(resolvedMappings, targetServer.id, selection.mappingId)
                 ?: return@mapNotNull null
             val mapping = resolved.mapping
             DownloadItem(

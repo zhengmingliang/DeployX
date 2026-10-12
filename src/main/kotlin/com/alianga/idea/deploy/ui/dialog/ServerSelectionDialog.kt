@@ -2,6 +2,7 @@ package com.alianga.idea.deploy.ui.dialog
 
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
+import com.alianga.idea.deploy.service.MappingManager
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.CollectionListModel
 import com.intellij.ui.components.JBCheckBox
@@ -11,12 +12,14 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
+import java.awt.BorderLayout
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.JComponent
+import javax.swing.JPanel
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
 import javax.swing.text.JTextComponent
@@ -30,13 +33,22 @@ import javax.swing.event.DocumentListener
  * - 支持实时搜索过滤（按 id / 名称 / 主机 / 用户名 匹配）
  * - 适配较多服务器场景，列表尺寸加大
  * - 对话框打开后，键盘输入字母/数字会自动聚焦到搜索框并输入（无需先点击搜索框）
+ * - 1.0.8：同一服务器匹配到多条嵌套（父子目录）映射时，展示映射选择面板，
+ *   允许用户手动改选次优先级（父目录）映射；默认仍为最深层级（子目录）映射
  */
 class ServerSelectionDialog(
     private val servers: List<ServerConfig>,
     private val titleText: String = DeployXBundle.message("dialog.server.select.title"),
     private val messageText: String = DeployXBundle.message("dialog.server.select.message"),
     private val showCommandOptions: Boolean = false,
-    private val commandAvailabilityByServerId: Map<String, CommandAvailability> = emptyMap()
+    private val commandAvailabilityByServerId: Map<String, CommandAvailability> = emptyMap(),
+    /**
+     * 1.0.8：每台服务器的映射候选（同一路径匹配到多条嵌套映射时非空）。
+     *
+     * key = serverId，value = 该服务器上选中文件匹配到的全部映射（含父子嵌套）。
+     * 为空 Map 时（如 SSH 终端选择）不展示映射面板，行为与旧版一致。
+     */
+    private val resolvedByServerId: Map<String, List<MappingManager.ResolvedMapping>> = emptyMap()
 ) : DialogWrapper(null) {
 
     data class CommandAvailability(
@@ -50,6 +62,45 @@ class ServerSelectionDialog(
     private val executePreCommandCheck = JBCheckBox(DeployXBundle.message("dialog.server.select.executePreCommand"), false)
     private val executePostCommandCheck = JBCheckBox(DeployXBundle.message("dialog.server.select.executePostCommand"), false)
 
+    /**
+     * 1.0.8：服务器列表滚动容器（提升为字段，首选高度随映射面板可见性动态调整，
+     * 避免映射面板把弹窗撑得过高，兼顾小屏）。
+     */
+    private val serverScrollPane = JBScrollPane(serverList).apply {
+        preferredSize = JBUI.size(
+            JBUI.scale(LIST_WIDTH),
+            JBUI.scale(SERVER_LIST_HEIGHT_NORMAL)
+        )
+    }
+
+    // 1.0.8：映射选择面板（同一服务器匹配到多条嵌套父子映射时展示）
+    private val mappingLabel = JBLabel(DeployXBundle.message("dialog.server.select.label.mapping"))
+    private val mappingHintLabel = JBLabel(DeployXBundle.message("dialog.server.select.mapping.hint")).apply {
+        // 提示文案较长，启用自动换行，避免把对话框撑宽
+        setAllowAutoWrapping(true)
+    }
+    private val mappingListModel = CollectionListModel<MappingManager.ResolvedMapping>(emptyList())
+    private val mappingList = JBList(mappingListModel).apply {
+        // 1.0.8：长路径条目中间省略 + tooltip 展示全文，避免文本被裁切
+        cellRenderer = MappingListCellRenderer()
+    }
+    /** 1.0.8：映射列表滚动容器（首选高度按候选行数动态设置） */
+    private val mappingScrollPane = JBScrollPane(mappingList)
+    private val mappingSectionPanel = JPanel(BorderLayout(0, JBUI.scale(4))).apply {
+        add(mappingLabel, BorderLayout.NORTH)
+        add(mappingScrollPane, BorderLayout.CENTER)
+        add(mappingHintLabel, BorderLayout.SOUTH)
+    }
+
+    /** 1.0.8：每台服务器上用户手动选择的映射 ID（effectiveId），切换服务器选择时保留 */
+    private val mappingChoiceByServerId = mutableMapOf<String, String>()
+
+    /** 1.0.8：当前映射面板展示的候选（按优先级排序，最深层级在前） */
+    private var currentMappingCandidates: List<MappingManager.ResolvedMapping> = emptyList()
+
+    /** 1.0.8：上一次加载映射面板的服务器 ID（切换选择前用于保存其映射选择） */
+    private var lastMappingLeadServerId: String? = null
+
     /** 当前过滤后展示的服务器列表（搜索框为空时等于 servers） */
     private var filteredServers: List<ServerConfig> = servers
 
@@ -61,6 +112,17 @@ class ServerSelectionDialog(
 
     /** 多选模式：选中的服务器列表（单选时只有一个元素） */
     var selectedServers: List<ServerConfig> = emptyList()
+        private set
+
+    /**
+     * 1.0.8：每台服务器最终使用的映射 ID（serverId -> mapping effectiveId）。
+     * 嵌套映射歧义时值为用户选择（或默认的最深层级映射）；单候选服务器为其唯一映射。
+     */
+    var selectedMappingIdsByServerId: Map<String, String> = emptyMap()
+        private set
+
+    /** 1.0.8：单选场景下选中的映射 ID（多选取第一台服务器的选择），无歧义时为 null */
+    var selectedMappingId: String? = null
         private set
 
     var executePreCommand: Boolean = false
@@ -76,12 +138,24 @@ class ServerSelectionDialog(
             serverList.selectedIndex = 0
         }
         serverList.addListSelectionListener {
-            if (!it.valueIsAdjusting) updateCommandOptions()
+            if (!it.valueIsAdjusting) {
+                updateCommandOptions()
+                updateMappingPanel()
+            }
         }
         // 双击列表项直接确认选择（与 RemotePathChooserDialog 行为一致）
         serverList.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount >= 2 && filteredServers.isNotEmpty()) {
+                    doOKAction()
+                }
+            }
+        })
+        mappingList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        // 双击映射项直接确认选择（与服务器列表行为一致）
+        mappingList.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount >= 2 && currentMappingCandidates.isNotEmpty()) {
                     doOKAction()
                 }
             }
@@ -110,16 +184,15 @@ class ServerSelectionDialog(
     }
 
     override fun createCenterPanel(): JComponent {
-        val scrollPane = JBScrollPane(serverList).apply {
-            preferredSize = JBUI.size(480, 280)
-        }
-
         val builder = FormBuilder.createFormBuilder()
             .addComponent(JBLabel(messageText))
             .addVerticalGap(JBUI.scale(6))
             .addComponent(searchField)
             .addVerticalGap(JBUI.scale(4))
-            .addComponent(scrollPane)
+            .addComponent(serverScrollPane)
+            .addVerticalGap(JBUI.scale(8))
+            // 1.0.8：映射选择面板（无歧义时不可见，GridBagLayout 不为其占位）
+            .addComponent(mappingSectionPanel)
 
         if (showCommandOptions) {
             builder
@@ -128,11 +201,18 @@ class ServerSelectionDialog(
                 .addComponent(executePostCommandCheck)
         }
 
+        // 1.0.8 布局修复：不再写死 (520, 400/500) 的首选尺寸。
+        // 该固定高度小于「服务器列表 + 映射面板」的自然高度，GridBagLayout 为塞进该尺寸
+        // 会压缩可收缩的映射面板，导致映射列表只剩一行、候选映射看不到、条目文本被裁切。
+        // 现由两个滚动面板各自的首选尺寸自然决定弹窗大小：无歧义时约 350px 高；
+        // 有歧义时按映射候选行数（2~5 行）增长，不同界面语言/字体/屏幕尺寸下均完整展示。
         val panel = builder.panel
-        panel.preferredSize = JBUI.size(520, if (showCommandOptions) 460 else 400)
 
         // 注册键盘事件路由：对话框可见时，按字母/数字键自动把焦点转到搜索框
         registerKeyRouting()
+
+        // 1.0.8：按默认选中的服务器初始化映射面板可见性、候选列表与各列表尺寸
+        updateMappingPanel()
 
         // 默认让搜索框获得焦点，方便直接输入
         SwingUtilities.invokeLater { searchField.requestFocusInWindow() }
@@ -184,6 +264,9 @@ class ServerSelectionDialog(
     }
 
     override fun doOKAction() {
+        // 1.0.8：保存当前 lead 服务器上用户已做出的映射选择
+        saveCurrentMappingChoice()
+
         // 多选模式：收集所有选中的服务器
         val selectedIndices = serverList.selectedIndices
         selectedServers = selectedIndices.filter { it >= 0 && it < filteredServers.size }
@@ -192,6 +275,26 @@ class ServerSelectionDialog(
         selectedServer = selectedServers.firstOrNull()
         executePreCommand = showCommandOptions && executePreCommandCheck.isEnabled && executePreCommandCheck.isSelected
         executePostCommand = showCommandOptions && executePostCommandCheck.isEnabled && executePostCommandCheck.isSelected
+
+        // 1.0.8：汇总每台服务器最终使用的映射 ID
+        // - 单候选服务器：直接使用其唯一映射
+        // - 多候选服务器：使用用户选择；未选择则回退最深层级（自动匹配项）
+        selectedMappingIdsByServerId = selectedServers.mapNotNull { server ->
+            val candidates = resolvedByServerId[server.id].orEmpty()
+            when {
+                candidates.isEmpty() -> null
+                candidates.size == 1 -> server.id to candidates.first().mapping.effectiveId
+                else -> {
+                    val remembered = mappingChoiceByServerId[server.id]
+                    val chosen = remembered
+                        ?.let { id -> candidates.firstOrNull { it.mapping.effectiveId == id } }
+                        ?: MappingManager.sortByPriority(candidates).first()
+                    server.id to chosen.mapping.effectiveId
+                }
+            }
+        }.toMap()
+        selectedMappingId = selectedMappingIdsByServerId.values.firstOrNull()
+
         super.doOKAction()
     }
 
@@ -205,6 +308,69 @@ class ServerSelectionDialog(
         executePostCommandCheck.isEnabled = availability.hasPostCommand
         if (!availability.hasPreCommand) executePreCommandCheck.isSelected = false
         if (!availability.hasPostCommand) executePostCommandCheck.isSelected = false
+    }
+
+    /**
+     * 1.0.8：刷新映射选择面板——展示当前选中（lead）服务器的映射候选。
+     *
+     * 仅当该服务器有 >=2 条候选映射（嵌套父子目录映射竞争）时展示面板；
+     * 切换服务器选择前会先保存上一台服务器上用户已做出的映射选择。
+     *
+     * 布局：映射面板可见时按候选行数（2~5 行）设置映射列表高度，并适当压缩服务器列表，
+     * 保证候选映射完整可见的同时控制弹窗总高度（小屏适配）。
+     */
+    private fun updateMappingPanel() {
+        // 保存上一台服务器上用户已做出的映射选择
+        // （此时 serverList.selectedIndex 已变为新服务器，必须用 lastMappingLeadServerId 归属）
+        saveCurrentMappingChoice()
+
+        val server = filteredServers.getOrNull(serverList.selectedIndex)
+        val candidates = server?.let { resolvedByServerId[it.id] }.orEmpty()
+        currentMappingCandidates = MappingManager.sortByPriority(candidates)
+
+        val hasChoices = currentMappingCandidates.size > 1
+        mappingSectionPanel.isVisible = hasChoices
+        // 映射面板可见时压缩服务器列表高度，隐藏时恢复，避免弹窗过高
+        serverScrollPane.preferredSize = JBUI.size(
+            JBUI.scale(LIST_WIDTH),
+            JBUI.scale(if (hasChoices) SERVER_LIST_HEIGHT_WITH_MAPPING else SERVER_LIST_HEIGHT_NORMAL)
+        )
+        if (!hasChoices) {
+            mappingListModel.replaceAll(emptyList())
+            lastMappingLeadServerId = null
+            mappingSectionPanel.revalidate()
+            mappingSectionPanel.repaint()
+            return
+        }
+
+        // 1.0.8：按候选行数动态设置映射列表高度（至少 2 行，父子两条映射同时可见）
+        val rows = currentMappingCandidates.size.coerceIn(MAPPING_MIN_ROWS, MAPPING_MAX_ROWS)
+        mappingListModel.replaceAll(currentMappingCandidates)
+        mappingList.visibleRowCount = rows
+        mappingScrollPane.preferredSize = JBUI.size(
+            JBUI.scale(LIST_WIDTH),
+            JBUI.scale(MAPPING_ROW_HEIGHT) * rows + JBUI.scale(8)
+        )
+        // 恢复该服务器此前选过的映射；否则默认选中最深层级（自动匹配项，索引 0）
+        val rememberedId = server?.let { mappingChoiceByServerId[it.id] }
+        val restoreIndex = rememberedId?.let { id ->
+            currentMappingCandidates.indexOfFirst { it.mapping.effectiveId == id }
+        } ?: -1
+        mappingList.selectedIndex = if (restoreIndex >= 0) restoreIndex else 0
+
+        lastMappingLeadServerId = server?.id
+        mappingSectionPanel.revalidate()
+        mappingSectionPanel.repaint()
+    }
+
+    /**
+     * 1.0.8：把当前映射面板中的选择记入 [mappingChoiceByServerId]（归属上一台 lead 服务器）。
+     * 面板无候选或未做选择时为 no-op。
+     */
+    private fun saveCurrentMappingChoice() {
+        val previousId = lastMappingLeadServerId ?: return
+        val chosen = currentMappingCandidates.getOrNull(mappingList.selectedIndex) ?: return
+        mappingChoiceByServerId[previousId] = chosen.mapping.effectiveId
     }
 
     /**
@@ -238,8 +404,20 @@ class ServerSelectionDialog(
         serverList.selectedIndex = if (restoreIndex >= 0) restoreIndex else 0
 
         updateCommandOptions()
+        updateMappingPanel()
     }
 
     private fun formatServer(server: ServerConfig): String =
         "${server.id} - ${server.name} (${server.displayAddress})"
+
+    companion object {
+        /** 两个列表的首选宽度（px，缩放前） */
+        private const val LIST_WIDTH = 520
+
+        /** 服务器列表首选高度：无映射歧义时 */
+        private const val SERVER_LIST_HEIGHT_NORMAL = 280
+
+        /** 服务器列表首选高度：映射面板可见时适当压缩，避免弹窗过高（小屏适配） */
+        private const val SERVER_LIST_HEIGHT_WITH_MAPPING = 200
+    }
 }

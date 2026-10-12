@@ -19,6 +19,7 @@ DeployX 是一个 JetBrains IntelliJ IDEA 插件，用于在 IDE 内完成本地
   - 支持复制映射配置，便于快速新增相似配置
   - 兼容旧版本无 ID 的历史映射数据
   - 映射列表表格支持实时搜索过滤（按名称 / 本地目录 / 服务器 / 远程目录）
+  - **嵌套映射手动选择**（v1.0.8）：同一服务器配置父子目录关系的多条映射时，选中子目录路径默认自动匹配最深层级（子目录）映射；部署 / 同步 / 快速推送 / 拉取时可在服务器选择对话框的「目录映射」列表中手动改选次优先级（父目录）映射，预览同步和工具窗口的快速推送 / 拉取则会弹出独立的映射选择对话框
 
 - **文件同步与部署**
   - 支持 `AUTO` / `RSYNC_ONLY` / `SFTP_ONLY` 三种传输模式
@@ -162,7 +163,7 @@ DeployX/
 生成的插件包位于：
 
 ```text
-build/distributions/DeployX-1.0.4.zip
+build/distributions/DeployX-1.0.8.zip
 ```
 
 ### 在沙箱 IDE 中运行
@@ -187,7 +188,7 @@ build/distributions/DeployX-1.0.4.zip
 4. 选择：
 
 ```text
-build/distributions/DeployX-1.0.4.zip
+build/distributions/DeployX-1.0.8.zip
 ```
 
 5. 重启 IDE
@@ -352,6 +353,17 @@ IDE 持久化设置会写入 IntelliJ 配置目录中的 `FileSyncTool.xml`。
 6. 旧版本升级后，`servers.json` 中的明文密码会在首次启动时自动迁移到 PasswordSafe，原明文会被清空。
 
 ## 更新日志
+
+### v1.0.8
+
+- **嵌套映射手动选择（次优先级父目录映射）**：同一服务器配置父子目录关系的多条路径映射时（如本地 `.../collection-server/target/lib` → 服务端 `.../WEB-INF/lib/`，本地 `.../collection-server/target` → 服务端 `/app/cdb/collection`），选中子目录路径默认仍自动匹配最深层级（子目录）映射，现在允许用户手动改选次优先级（父目录）映射
+  - 服务器选择对话框（Deploy / Sync to Server / Quick Push / Pull from Server）新增「目录映射」列表，按优先级（最深层级在前）展示候选并标注「默认」；多选服务器时每台服务器各自记忆选择
+  - 预览同步（Preview Sync）、工具窗口「快速推送」「拉取」在存在映射歧义时弹出独立的映射选择对话框，取消即中止本次操作
+  - 选用映射后，上传 / 拉取 / 备份 / 解压 / 上传前后置命令均按所选映射的配置执行
+- **手动快速推送映射一致性修复**：工具窗口「快速推送」原先按注册顺序取第一条匹配映射（非最具体），现统一为「优先用户选择，否则最深层级」
+- 同版本还包含：拉取 / 预览拉取、操作按钮重排与自动切日志页、按服务器分组日志独立复制、本地文件选择支持目录、嵌套映射最长前缀匹配修复等（见 CHANGELOG.md）
+
+> 完整更新日志见 [CHANGELOG.md](CHANGELOG.md)。
 
 ### v1.0.4
 

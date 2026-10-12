@@ -3,6 +3,8 @@ package com.alianga.idea.deploy.action
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.UploadItem
 import com.alianga.idea.deploy.service.MappingManager
+import com.alianga.idea.deploy.service.ServerManager
+import com.alianga.idea.deploy.ui.dialog.MappingSelectionDialog
 import com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowPanel
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -26,9 +28,40 @@ class PreviewSyncAction : AnAction() {
         if (files.isEmpty()) return
 
         val mappingManager = MappingManager.getInstance()
-        val previewItems = files.mapNotNull { file ->
-            val resolved = mappingManager.resolveMappingByLocalPath(file.path, file.isDirectory)
-                ?: return@mapNotNull null
+        val allResolvedByFile: Map<VirtualFile, List<MappingManager.ResolvedMapping>> =
+            files.associateWith { file ->
+                mappingManager.resolveMappingsByLocalPath(file.path, file.isDirectory)
+            }.filterValues { it.isNotEmpty() }
+
+        if (allResolvedByFile.isEmpty()) {
+            showNotification(project, DeployXBundle.message("notification.noMappingFound"), NotificationType.WARNING)
+            return
+        }
+
+        // 1.0.8：同一服务器匹配到多条嵌套（父子目录）映射时，逐台弹映射选择对话框，
+        // 允许用户手动改选次优先级（父目录）映射；未选择则保持默认（最深层级）映射。
+        // 按服务器归并候选，每台有歧义的服务器最多弹一次（避免多文件重复弹窗）。
+        val chosenMappingIdByServerId = mutableMapOf<String, String>()
+        ActionUtils.buildResolvedByServerId(allResolvedByFile).forEach { (serverId, candidates) ->
+            if (candidates.size <= 1) return@forEach
+            val server = ServerManager.getInstance().getServer(serverId)
+            val dialog = MappingSelectionDialog(
+                candidates = candidates,
+                serverDisplayName = server?.name ?: serverId
+            )
+            if (dialog.showAndGet()) {
+                dialog.selectedMapping?.let { chosenMappingIdByServerId[serverId] = it.effectiveId }
+            }
+        }
+
+        val previewItems = allResolvedByFile.mapNotNull { (file, allResolved) ->
+            // 默认仍取最具体（最深层级）的映射；若用户在其所属服务器上做过选择则优先采用
+            val autoPicked = allResolved.maxByOrNull { it.mapping.localDir.length } ?: return@mapNotNull null
+            val resolved = ActionUtils.pickResolvedByServer(
+                allResolved,
+                autoPicked.mapping.serverId,
+                chosenMappingIdByServerId[autoPicked.mapping.serverId]
+            ) ?: return@mapNotNull null
             val mapping = resolved.mapping
             UploadItem(
                 localPath = file.path,

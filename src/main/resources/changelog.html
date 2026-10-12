@@ -1,6 +1,6 @@
 <!--LANG:EN-->
 <h2> Changelog</h2>
-<h3>v1.0.8 - Pull, Preview Pull & Log-per-server Copy</h3>
+<h3>v1.0.8 - Pull, Preview Pull, Log-per-server Copy & Nested Mapping Selection</h3>
 <ul>
     <li><b>📥 Pull / Preview Pull:</b> New <b>Pull</b> and <b>Preview Pull</b> buttons in the operation panel download files from the server to the local path. Reuses the existing <code>DeployService.downloadBatch</code> path (rsync / SFTP / local copy); <code>SyncService.previewPull</code> mirrors <code>previewSync</code> with reversed argument order. The <b>Pull</b> button resolves the mapping via the new longest-prefix matcher and builds a <code>DownloadItem</code>. <b>Preview Pull</b> writes an <code>UpdateReport(operationType=PULL)</code> so the toolbar <b>Copy Report</b> button can also copy the preview result</li>
     <li><b>🔀 Operation Buttons Reordered + Abort Moved to Log Panel + Auto-switch to Log Tab:</b> Buttons are now <b>Preview | Preview Pull | Deploy | Pull | Quick Push | Save as Mapping</b>. 1.0.6 had to disable the auto-switch to the log tab to keep the abort button visible. 1.0.8 moves the abort button into a top toolbar inside the log panel, so it stays visible alongside the running logs - and the <b>auto-switch to log tab on every operation (preview/deploy/pull/quick push/etc.) is restored</b>. The progress panel is simplified to just the progress bar and status label</li>
@@ -11,6 +11,10 @@
     <li><b>🛠 executeDownloadBatch Delegates to executePullBatch:</b> Renamed for clarity; old name kept as a thin alias for compatibility</li>
     <li><b>🛠 buildLogTabContent / setupLocalPathBrowser / copyLogText Extracted:</b> Reduce duplication between the <b>All</b> tab and per-server tabs, and shorten <code>setupActions</code></li>
     <li><b>✅ MappingManagerLongestPrefixTest:</b> Covers nested-mapping multi-match, longest-prefix win, ties, empty list, and path normalization (forward/back slashes + trailing slash)</li>
+    <li><b>🎯 Nested Mapping Manual Selection (lower-priority parent mapping):</b> When the same server has multiple parent/child path mappings (e.g. local <code>.../collection-server/target/lib</code> -&gt; remote <code>.../WEB-INF/lib/</code> and local <code>.../collection-server/target</code> -&gt; <code>/app/cdb/collection</code>), selecting a path under the child directory still auto-matches the deepest (child) mapping by default - but you can now manually switch to the lower-priority (parent) mapping for flexible deployment. The server selection dialog (Deploy / Sync to Server / Quick Push / Pull from Server) gains a <b>Directory Mapping</b> list showing all candidates sorted by priority (deepest first, auto-pick marked as default); with multi-server selection each server remembers its own choice. Entries without the server dialog (Preview Sync, and the tool window's Quick Push / Pull) use the new standalone <b>Mapping Selection</b> dialog; cancelling it aborts the operation. Upload / pull / backup / unzip / pre-post commands all follow the chosen mapping</li>
+    <li><b>🐛 Manual Quick Push Mapping Consistency:</b> The tool window's Quick Push previously took the first registered matching mapping instead of the most specific one, inconsistent with the right-click Quick Push (longest-prefix). Now both prefer the user's choice and otherwise the deepest mapping</li>
+    <li><b>🛠 MappingManager Companion Helpers:</b> New pure functions <code>pickResolvedByServer</code> (user choice first, longest-prefix fallback), <code>sortByPriority</code>, <code>formatMappingEntry</code>; <code>ActionUtils</code> gains <code>pickResolvedByServer</code> / <code>buildResolvedByServerId</code> / <code>hasMappingChoices</code></li>
+    <li><b>✅ MappingChoiceTest:</b> Covers default deepest pick, manual parent override, unknown/blank preferred-id fallback, cross-server preferred id ignored, empty candidates, priority sort (with tie stability), and entry formatting</li>
 </ul>
 
 <h3>v1.0.7 - Mapping Project View & Remote Browser Speedup</h3>
@@ -174,6 +178,23 @@
 
 <!--LANG:ZH-->
 <h2> 更新日志</h2>
+<h3>v1.0.8 - 拉取、预览拉取、按服务器日志复制与嵌套映射选择</h3>
+<ul>
+    <li><b>📥 拉取 / 预览拉取：</b>操作面板新增「拉取」「预览拉取」两个按钮，从服务器拉取文件到本地。复用现有 <code>DeployService.downloadBatch</code> 路径（rsync / SFTP / 本地拷贝）；<code>SyncService.previewPull</code> 镜像 <code>previewSync</code>，参数方向相反便于阅读。「拉取」按最长前缀匹配解析映射并构造 <code>DownloadItem</code>；「预览拉取」写入 <code>UpdateReport(operationType=PULL)</code>，顶部「复制报告」按钮可一键复制预览结果</li>
+    <li><b>🔀 操作按钮重排 + 终止按钮迁移 + 自动切日志页：</b>操作面板按钮重排为「预览 | 预览拉取 | 部署 | 拉取 | 快速推送 | 保存为映射」。1.0.6 修复"执行中不可见终止按钮"时把"自动跳日志页"禁用了；1.0.8 把终止按钮迁到日志面板顶部工具栏最右侧，使其与日志就近、始终可见，从而<b>恢复</b>预览/部署/拉取等动作执行后<b>自动切到日志页</b>的体验。进度面板简化为「进度条 + 状态」</li>
+    <li><b>📋 按服务器分组日志独立复制：</b>每个服务器分组 Tab 内部顶部新增「复制日志」按钮。此前切换到不同服务器分组 Tab 后点击顶部「复制报告」，复制的是 <code>lastUpdateReportText</code>（最后一次合并报告）而非当前 Tab 的日志；现在每个 Tab 各自持有 <code>JBTextArea</code>，「复制日志」直接读自己 area 的文本。「全部」Tab 同样提供「复制全部日志」按钮</li>
+    <li><b>📂 本地文件选择支持目录：</b>操作面板「本地文件」由 <code>JBTextField</code> 改为 <code>TextFieldWithBrowseButton</code>，支持选择目录（<code>createSingleFileOrFolderDescriptor</code>）——选目录与选文件同样顺畅，适合整体部署某个文件夹</li>
+    <li><b>🐛 最长前缀映射匹配：</b>同一项目配置嵌套映射（如 <code>/opt/.../report_ui_mdc</code> 与 <code>/opt/.../report_ui_mdc/public/webExcel</code>）时，选中 webExcel 下的文件原先会被错误归到外层（更宽）映射。<code>MappingManager.findMappingByLocalPath</code> 与 <code>resolveMappingByLocalPath</code> 现改用新增的 <code>pickMostSpecific</code> 助手，取 <code>localDir</code> 前缀最长（最具体）的映射；长度相同时保留插入顺序</li>
+    <li><b>🐛 映射对话框「目标服务器」下拉关闭态截断：</b>修复 <code>MappingEditDialog</code> 的 <code>serverCombo</code>（<code>ComboBoxWithWidePopup</code>）关闭态文本被 <code>FormBuilder</code> 分配列宽截断的问题。现按最长项的字体宽度（<code>fontMetrics.stringWidth</code>）+ 48px padding 显式设置 <code>preferredSize</code>，关闭态完整显示服务器名；弹层宽度仍由 <code>prototypeDisplayValue</code> + <code>setMinLength</code> 控制</li>
+    <li><b>🛠 executeDownloadBatch 委派给 executePullBatch：</b>为语义清晰改名，旧名保留为兼容委派</li>
+    <li><b>🛠 抽取 buildLogTabContent / setupLocalPathBrowser / copyLogText：</b>消除「全部」Tab 与按服务器 Tab 的重复代码，缩短 <code>setupActions</code></li>
+    <li><b>✅ MappingManagerLongestPrefixTest：</b>覆盖嵌套映射多匹配、最长前缀胜出、平局、空列表与路径归一化（正反斜杠 + 尾斜杠）</li>
+    <li><b>🎯 嵌套映射手动选择（次优先级父目录映射）：</b>同一服务器配置了父子目录关系的多条路径映射时（如本地 <code>.../collection-server/target/lib</code> -&gt; 服务端 <code>.../WEB-INF/lib/</code>，本地 <code>.../collection-server/target</code> -&gt; <code>/app/cdb/collection</code>），选中子目录路径默认仍自动匹配最深层级（子目录）映射，现在可手动改选次优先级（父目录）映射，支持不同场景下的灵活部署需求。服务器选择对话框（部署 / 同步到服务器 / 快速推送 / 从服务器拉取）新增「目录映射」列表，按优先级（最深层级在前）展示全部候选并标注「默认」；多选服务器时每台服务器各自记忆选择。无服务器选择对话框的入口（预览同步、工具窗口操作面板「快速推送」「拉取」）改用新增的独立映射选择对话框，取消即中止本次操作。选用映射后，上传 / 拉取 / 备份 / 解压 / 上传前后置命令均按所选映射的配置执行</li>
+    <li><b>🐛 手动快速推送映射一致性：</b>工具窗口「快速推送」原先按映射注册顺序取第一条匹配（非最具体），与右键「快速推送」的最长前缀行为不一致；现统一为「优先用户选择，否则最深层级」</li>
+    <li><b>🛠 MappingManager 伴生工具函数：</b>新增纯函数 <code>pickResolvedByServer</code>（手动选择优先，回退最长前缀）、<code>sortByPriority</code>、<code>formatMappingEntry</code>；<code>ActionUtils</code> 新增 <code>pickResolvedByServer</code> / <code>buildResolvedByServerId</code> / <code>hasMappingChoices</code></li>
+    <li><b>✅ MappingChoiceTest：</b>覆盖默认取最深层级、手动选父目录胜出、未知/空白首选 ID 回退、跨服务器首选 ID 忽略、无候选返回 null、优先级排序（含平局稳定性）、映射条目格式化</li>
+</ul>
+
 <h3>v1.0.7 - 映射项目视图与远程浏览器提速</h3>
 <ul>
     <li><b>🗂️ 映射项目视图：</b>映射设置新增「项目 / 全部」切换。<b>项目视图（默认）</b>只展示属于任一已打开项目的映射（映射的本地目录等于或位于某项目 basePath 之下即视为属于该项目）；「全部」展示所有映射--即 1.0.7 之前的行为。映射很多时不再杂乱</li>

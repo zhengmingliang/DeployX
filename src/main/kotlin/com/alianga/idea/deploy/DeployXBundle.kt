@@ -46,11 +46,16 @@ object DeployXBundle {
      * - "system"：跟随 JVM 默认 Locale（中文系统→中文，其他→英文）
      * - "en"：英文
      * - "zh_CN"：简体中文
+     *
+     * 兜底用 [Throwable] 而非 [Exception]：无 IntelliJ 应用容器的环境（如普通 JVM
+     * 单元测试）中 [FileSyncSettings.getInstance] 的类加载可能抛 Error
+     * （NoClassDefFoundError / UnsupportedClassVersionError 等），此时按 "system"
+     * 处理，bundle 仍可从 classpath 正常加载。
      */
     fun currentLanguageTag(): String {
         val language = try {
             FileSyncSettings.getInstance().language
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             "system"
         }
         return when (language) {

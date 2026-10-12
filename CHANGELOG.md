@@ -25,6 +25,15 @@
   - 选目录后表单会直接写入目录路径，部署/快速推送等后端已按字符串路径工作，传目录会自然走目录部署路径，无需改后端
   - 新增 `toolwindow.button.browseLocal` 文案（EN + zh_CN）
 
+- **嵌套映射手动选择（次优先级父目录映射）**：同一远程服务器配置了包含父子目录关系的多条路径映射时（如本地 `.../collection-server/target/lib` → 服务端 `.../WEB-INF/lib/`，同时本地 `.../collection-server/target` → 服务端 `/app/cdb/collection`），选中子目录路径默认仍自动匹配最深层级（子目录）映射，现在允许用户手动改选次优先级（父目录）映射，支持不同场景下的灵活部署需求
+  - **服务器选择对话框内嵌映射面板**：Deploy / Sync to Server / Quick Push / Pull from Server 的服务器选择对话框中，当所选服务器存在多条候选映射时新增「目录映射」列表，按优先级（最深层级在前）展示 `名称（本地目录 → 远程目录）`，默认选中自动匹配项并标注「默认」；多选服务器时每台服务器的选择互相独立、各自记忆
+  - **独立映射选择对话框**：新增 `MappingSelectionDialog`，供无服务器选择对话框的入口使用——预览同步（Preview Sync）、工具窗口操作面板的「快速推送」「拉取」；同一路径匹配到多条嵌套映射时弹出，取消即中止本次操作
+  - **Quick Push 跳过逻辑收紧**：单服务器且无命令时原本直接执行不弹对话框；现在若存在映射歧义也会弹对话框，保证父目录映射可被选到
+  - 选用映射后，上传/拉取/备份/解压/前后置命令等全部按所选映射的配置执行（`sourceBaseDir`/`remoteBaseDir`/`relativePath` 均按所选映射重新计算）
+  - 新增 `dialog.mapping.select.*` / `dialog.server.select.label.mapping` / `dialog.server.select.mapping.hint` 文案（EN + zh_CN）
+
+- **手动快速推送映射选择一致性修复**：工具窗口「快速推送」此前按映射注册顺序取第一条匹配（非最具体），与右键 Quick Push 的最长前缀行为不一致；现统一为「优先用户选择，否则最深层级」
+
 
 ### 🐛 Bug 修复
 - **多嵌套映射匹配错位**：修复同一项目下配置嵌套映射（如 `/opt/.../report_ui_mdc` 和 `/opt/.../report_ui_mdc/public/webExcel`）时，选中内层文件被错误归到外层映射的问题
@@ -43,10 +52,14 @@
 - **`buildLogTabContent` 抽取**：把"复制按钮 + 滚动文本区"的日志 Tab 容器从 `getOrCreateServerLogArea` 与"全部" Tab 构造处抽出共享
 - **`setupLocalPathBrowser` 抽取**：本地路径浏览逻辑独立方法，避免 `setupActions` 过长
 - **`copyLogText` 抽取**：复制文本到剪贴板并提示，公共方法
+- **`MappingManager` 新增伴生纯函数**：`pickResolvedByServer(resolvedMappings, serverId, preferredMappingId)`（手动选择优先，回退最长前缀）、`sortByPriority`（按 `localDir` 长度倒序稳定排序）、`formatMappingEntry`（候选项展示格式）、`normalizeLocalDir`；`ActionUtils.pickMostSpecificByServer` 改为委托，行为不变
+- **`ActionUtils` 新增** `pickResolvedByServer` / `buildResolvedByServerId`（按服务器归并去重候选）/ `hasMappingChoices`（歧义检测）
+- **`ServerSelectionResult` / `MultiServerSelectionResult`** 新增 `mappingId` / `mappingIdsByServerId` 字段（默认值向后兼容）
 
 
 ### ✅ 测试
 - **`MappingManagerLongestPrefixTest`**：覆盖嵌套映射多匹配、最长前缀胜出、平局取先插入、空列表、路径归一化（正反斜杠 + 尾斜杠）
+- **`MappingChoiceTest`**：覆盖默认取最深层级、手动选父目录映射胜出、未知/空白首选 ID 回退、跨服务器首选 ID 忽略、无候选返回 null、优先级排序（含平局稳定性）、映射条目格式化
 
 
 ---

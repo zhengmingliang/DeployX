@@ -20,7 +20,7 @@ import com.intellij.openapi.wm.ToolWindowManager
  * 1. 获取选中的文件/目录
  * 2. 解析每个文件对应的映射
  * 3. 收集可用服务器
- * 4. 弹出服务器选择对话框
+ * 4. 弹出服务器选择对话框（1.0.8：同一服务器多条嵌套映射竞争时可手动选择映射）
  * 5. 显示工具窗口
  * 6. 子类构造执行项并调用工具窗口执行批处理
  *
@@ -32,20 +32,28 @@ abstract class AbstractDeployAction<T> : AnAction() {
 
     /**
      * 服务器选择结果
+     *
+     * @param mappingId 1.0.8：用户在该服务器上手动选择的映射 ID（effectiveId）；
+     *   null 表示自动选择最深层级（子目录）映射
      */
     data class ServerSelectionResult(
         val server: ServerConfig,
         val executePreCommand: Boolean,
-        val executePostCommand: Boolean
+        val executePostCommand: Boolean,
+        val mappingId: String? = null
     )
 
     /**
      * 多服务器选择结果（支持并行部署）
+     *
+     * @param mappingIdsByServerId 1.0.8：每台服务器最终使用的映射 ID
+     *   （serverId -> mapping effectiveId），无歧义的服务器也在其中（值为其唯一/默认映射）
      */
     data class MultiServerSelectionResult(
         val servers: List<ServerConfig>,
         val executePreCommand: Boolean,
-        val executePostCommand: Boolean
+        val executePostCommand: Boolean,
+        val mappingIdsByServerId: Map<String, String> = emptyMap()
     )
 
     final override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
@@ -84,7 +92,9 @@ abstract class AbstractDeployAction<T> : AnAction() {
             buildItems(resolvedByFile, targetServer, ServerSelectionResult(
                 server = targetServer,
                 executePreCommand = multiSelection.executePreCommand,
-                executePostCommand = multiSelection.executePostCommand
+                executePostCommand = multiSelection.executePostCommand,
+                // 1.0.8：传入用户在该服务器上手动选择的映射（null = 自动最深层级）
+                mappingId = multiSelection.mappingIdsByServerId[targetServer.id]
             ))
         }
         val skipped = files.size - items.size
@@ -122,11 +132,18 @@ abstract class AbstractDeployAction<T> : AnAction() {
             dialogTitle(),
             dialogMessage(fileCount),
             showCommandOptions = showCommandOptions(),
-            commandAvailabilityByServerId = commandAvailability
+            commandAvailabilityByServerId = commandAvailability,
+            // 1.0.8：嵌套映射歧义时在对话框内提供映射选择
+            resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile)
         )
         if (!dialog.showAndGet()) return null
         val server = dialog.selectedServer ?: return null
-        return ServerSelectionResult(server, dialog.executePreCommand, dialog.executePostCommand)
+        return ServerSelectionResult(
+            server = server,
+            executePreCommand = dialog.executePreCommand,
+            executePostCommand = dialog.executePostCommand,
+            mappingId = dialog.selectedMappingId
+        )
     }
 
     /**
@@ -146,12 +163,19 @@ abstract class AbstractDeployAction<T> : AnAction() {
             dialogTitle(),
             dialogMessage(fileCount),
             showCommandOptions = showCommandOptions(),
-            commandAvailabilityByServerId = commandAvailability
+            commandAvailabilityByServerId = commandAvailability,
+            // 1.0.8：嵌套映射歧义时在对话框内提供映射选择
+            resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile)
         )
         if (!dialog.showAndGet()) return null
         val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }
         if (selected.isEmpty()) return null
-        return MultiServerSelectionResult(selected, dialog.executePreCommand, dialog.executePostCommand)
+        return MultiServerSelectionResult(
+            selected,
+            dialog.executePreCommand,
+            dialog.executePostCommand,
+            mappingIdsByServerId = dialog.selectedMappingIdsByServerId
+        )
     }
 
     /**

@@ -26,6 +26,7 @@ import com.alianga.idea.deploy.ui.AdaptiveRowPanel
 import com.alianga.idea.deploy.ui.UiButtonFactory
 import com.alianga.idea.deploy.ui.WrapLayout
 import com.alianga.idea.deploy.ui.dialog.HistoryDetailDialog
+import com.alianga.idea.deploy.ui.dialog.MappingSelectionDialog
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
 import com.alianga.idea.deploy.ui.dialog.RollbackDialog
 import com.alianga.idea.deploy.ui.dialog.RollbackProgressDialog
@@ -104,7 +105,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     // 操作 tab 组件
     private val serverCombo = JComboBox<String>()
     // 1.0.8：本地路径改为 TextFieldWithBrowseButton，支持选目录（与选文件并存）
-    // 1.0.9：传入 JBTextField 以便使用 emptyText 占位提示
+    // 1.0.8：传入 JBTextField 以便使用 emptyText 占位提示
     private val localPathField = TextFieldWithBrowseButton(JBTextField(), null)
     private val remotePathField = TextFieldWithBrowseButton(JBTextField(), null)
     private val backupCheck = JBCheckBox(DeployXBundle.message("toolwindow.checkbox.backupBeforeDeploy"))
@@ -137,7 +138,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val openTerminalButton = UiButtonFactory.createIconButton(DeployXBundle.message("toolwindow.button.openTerminal"), AllIcons.Nodes.Console) { openTerminal() }
     private val browseRemoteButton = UiButtonFactory.createIconButton(DeployXBundle.message("toolwindow.button.browseRemote"), AllIcons.Nodes.Folder) { browseRemote() }
     /**
-     * 1.0.9 重构：「预览 ▾」split 按钮。默认点 = 预览同步；下拉箭头弹出"预览同步 / 预览拉取"两项。
+     * 1.0.8 重构：「预览 ▾」split 按钮。默认点 = 预览同步；下拉箭头弹出"预览同步 / 预览拉取"两项。
      * 文本走 AbstractAction.NAME，relocalize() 通过 putValue 刷新。
      */
     private val previewDefaultAction = object : AbstractAction(
@@ -157,7 +158,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         addSeparator = true
     }
     /**
-     * 1.0.9 重构：主按钮「部署」。用 JBOptionButton(action, emptyArray()) 拿到 IDE 默认按钮
+     * 1.0.8 重构：主按钮「部署」。用 JBOptionButton(action, emptyArray()) 拿到 IDE 默认按钮
      * accent 填充样式，区别于次要按钮（拉取/快速推送）和 split 按钮（预览）。
      */
     private val deployDefaultAction = object : AbstractAction(
@@ -556,7 +557,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         quickPushButton.text = DeployXBundle.message("toolwindow.button.quickPush")
         pullButton.toolTipText = DeployXBundle.message("toolwindow.button.pull.tooltip")
         quickPushButton.toolTipText = DeployXBundle.message("toolwindow.button.quickPush.tooltip")
-        // 保存为映射：1.0.9 改为小图标按钮，只刷 tooltip
+        // 保存为映射：1.0.8 改为小图标按钮，只刷 tooltip
         saveAsMappingButton.toolTipText = DeployXBundle.message("toolwindow.button.saveAsMapping.tooltip")
         abortButton.text = DeployXBundle.message("toolwindow.button.abort")
         abortButton.toolTipText = DeployXBundle.message("toolwindow.button.abort.tooltip")
@@ -564,7 +565,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         browseRemoteButton.toolTipText = DeployXBundle.message("toolwindow.button.browseRemote")
         remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
 
-        // 1.0.9：5 个路径输入框的 emptyText 占位提示跟随语言切换
+        // 1.0.8：5 个路径输入框的 emptyText 占位提示跟随语言切换
         applyPathPlaceholders()
         // 同步 backup/unzip 子字段的 enabled 状态（虽然 listener 已经处理，刷新语言时再保险一次）
         updateBackupEnabled()
@@ -1597,9 +1598,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // 尝试用映射解析 localBaseDir / remoteBaseDir，失败时退化用表单值
         val isDirectory = java.io.File(localPath).isDirectory
-        val resolved = MappingManager.getInstance().resolveMappingByLocalPath(localPath, isDirectory)
+        // 1.0.8：同一服务器匹配到多条嵌套（父子目录）映射时，允许用户手动选择映射（含父目录映射）
+        val mappingChoice = choosePreferredMapping(localPath, serverId)
+        if (mappingChoice.cancelled) return
+        val resolved = MappingManager.pickResolvedByServer(
+            MappingManager.getInstance().resolveMappingsByLocalPath(localPath, isDirectory),
+            serverId,
+            mappingChoice.mappingId
+        )
+        // remoteBaseDir 用映射的远程根目录（而非 resolvedRemoteDir）：relativePath 是相对
+        // mapping.localDir 的完整相对路径，与 DownloadItem.fullRemotePath 的
+        // remoteBaseDir + relativePath 约定对齐（与右键 PullFromServerAction 一致）；
+        // 若用 resolvedRemoteDir（已含 relativePath 的父级部分），多级相对路径会重复计数。
         val (localBaseDir, remoteBaseDir, relativePath) = if (resolved != null) {
-            Triple(resolved.mapping.localDir, resolved.resolvedRemoteDir, resolved.relativePath)
+            Triple(resolved.mapping.localDir, resolved.mapping.remoteDir, resolved.relativePath)
         } else {
             // 无映射时以 localPath/remotePath 自身为基础（relativePath = ""）
             Triple(localPath, remotePath, "")
@@ -1678,6 +1690,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             return
         }
 
+        // 1.0.8：同一服务器匹配到多条嵌套（父子目录）映射时，允许用户手动选择映射（含父目录映射）
+        val mappingChoice = choosePreferredMapping(localPath, serverId)
+        if (mappingChoice.cancelled) return
+
         appendLog(DeployXBundle.message("toolwindow.log.quickPush"))
         progressBar.value = 0
         progressLabel.text = DeployXBundle.message("toolwindow.progress.pushing")
@@ -1698,6 +1714,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 deployService.push(
                     localPath,
                     serverId,
+                    preferredMappingId = mappingChoice.mappingId,
                     logCallback = { line -> appendLog(serverId, line) },
                     progressCallback = { progress ->
                         SwingUtilities.invokeLater {
@@ -1710,6 +1727,33 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             }
         )
     }
+
+    /**
+     * 1.0.8 新增：手动操作流程（快速推送/拉取）中的映射选择。
+     *
+     * 本地路径在当前服务器上匹配到多条嵌套（父子目录）映射时，弹出映射选择对话框
+     * 让用户手动选择（默认仍为最深层级映射）；无歧义时不弹窗。
+     * 用户在对话框中取消时 `cancelled = true`，调用方应中止本次操作。
+     *
+     * @param localPath 操作面板中的本地路径
+     * @param serverId 操作面板中选中的服务器 ID（null 时不做选择）
+     */
+    private fun choosePreferredMapping(localPath: String, serverId: String?): MappingChoice {
+        if (serverId == null) return MappingChoice(cancelled = false, mappingId = null)
+        val candidates = MappingManager.getInstance().resolveMappingsByLocalPath(localPath)
+            .filter { it.mapping.serverId == serverId }
+        if (candidates.size <= 1) return MappingChoice(cancelled = false, mappingId = null)
+        val server = serverManager.getServer(serverId)
+        val dialog = MappingSelectionDialog(
+            candidates = candidates,
+            serverDisplayName = server?.name ?: serverId
+        )
+        if (!dialog.showAndGet()) return MappingChoice(cancelled = true, mappingId = null)
+        return MappingChoice(cancelled = false, mappingId = dialog.selectedMapping?.effectiveId)
+    }
+
+    /** 1.0.8：手动流程映射选择结果（cancelled 表示用户在对话框中取消，应中止操作） */
+    private data class MappingChoice(val cancelled: Boolean, val mappingId: String?)
 
     /**
      * 打开远程文件浏览器，浏览当前选中服务器的文件结构

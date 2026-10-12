@@ -25,9 +25,12 @@ class QuickPushAction : AbstractDeployAction<UploadItem>() {
         if (servers.isEmpty()) return null
         val commandAvailability = ActionUtils.buildCommandAvailability(resolvedByFile.values.flatten())
         val hasAnyCommand = commandAvailability.values.any { it.hasPreCommand || it.hasPostCommand }
+        val resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile)
+        // 1.0.8：存在嵌套父子映射歧义时必须弹对话框，让用户手动选择使用哪条映射
+        val hasMappingChoices = ActionUtils.hasMappingChoices(resolvedByServerId)
 
-        // 单服务器且无任何命令：直接执行，不弹对话框
-        if (servers.size == 1 && !hasAnyCommand) {
+        // 单服务器且无任何命令、无映射歧义：直接执行，不弹对话框
+        if (servers.size == 1 && !hasAnyCommand && !hasMappingChoices) {
             return MultiServerSelectionResult(
                 servers = listOf(servers.first()),
                 executePreCommand = false,
@@ -40,12 +43,18 @@ class QuickPushAction : AbstractDeployAction<UploadItem>() {
             dialogTitle(),
             dialogMessage(fileCount),
             showCommandOptions = hasAnyCommand,
-            commandAvailabilityByServerId = commandAvailability
+            commandAvailabilityByServerId = commandAvailability,
+            resolvedByServerId = resolvedByServerId
         )
         if (!dialog.showAndGet()) return null
         val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }
         if (selected.isEmpty()) return null
-        return MultiServerSelectionResult(selected, dialog.executePreCommand, dialog.executePostCommand)
+        return MultiServerSelectionResult(
+            selected,
+            dialog.executePreCommand,
+            dialog.executePostCommand,
+            mappingIdsByServerId = dialog.selectedMappingIdsByServerId
+        )
     }
 
     override fun dialogTitle(): String =
@@ -60,8 +69,9 @@ class QuickPushAction : AbstractDeployAction<UploadItem>() {
         selection: ServerSelectionResult
     ): List<UploadItem> {
         return resolvedByFile.mapNotNull { (file, resolvedMappings) ->
-            // 1.0.8：嵌套映射场景下，按最长 localDir 前缀选最具体的映射
-            val resolved = ActionUtils.pickMostSpecificByServer(resolvedMappings, targetServer.id)
+            // 1.0.8：嵌套映射场景下优先使用用户在对话框中手动选择的映射（selection.mappingId），
+            // 未选择时按最长 localDir 前缀选最具体的（最深层级）映射
+            val resolved = ActionUtils.pickResolvedByServer(resolvedMappings, targetServer.id, selection.mappingId)
                 ?: return@mapNotNull null
             val mapping = resolved.mapping
             UploadItem(
