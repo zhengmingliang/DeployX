@@ -44,7 +44,9 @@ class CommandFieldWithScriptButton(
     multiline: Boolean = false,
     preferredScrollSize: Dimension? = null,
     showLineNumbers: Boolean = true,
-    private val fullscreenTitle: String? = null
+    private val fullscreenTitle: String? = null,
+    /** 1.1.0：true 时不显示含义不明的「+」图标，改为文本域下方右对齐的「插入脚本…」链接 */
+    scriptLinkStyle: Boolean = false
 ) : JPanel(BorderLayout(JBUI.scale(4), 0)) {
 
     /** 多行模式：基于 IDEA 编辑器的 EditorTextField；单行模式：JBTextField */
@@ -58,6 +60,11 @@ class CommandFieldWithScriptButton(
         toolTipText = DeployXBundle.message("command.field.script.picker.tooltip")
         isFocusable = false
         addActionListener { openScriptPicker() }
+    }
+
+    /** 「插入脚本…」链接（scriptLinkStyle 模式） */
+    private val scriptLink = com.intellij.ui.components.ActionLink(DeployXBundle.message("command.field.insertScript")) { openScriptPicker() }.apply {
+        toolTipText = DeployXBundle.message("command.field.script.picker.tooltip")
     }
 
     /** 全屏按钮，仅当 fullscreenTitle 非空时创建 */
@@ -84,7 +91,13 @@ class CommandFieldWithScriptButton(
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
         }
-        buttonPanel.add(scriptButton)
+        if (scriptLinkStyle) {
+            val linkRow = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.TRAILING, 0, JBUI.scale(2))).apply { isOpaque = false }
+            linkRow.add(scriptLink)
+            add(linkRow, BorderLayout.SOUTH)
+        } else {
+            buttonPanel.add(scriptButton)
+        }
         if (fullscreenButton != null) {
             buttonPanel.add(fullscreenButton)
         }
@@ -118,6 +131,7 @@ class CommandFieldWithScriptButton(
             it.isEditable = enabled
         }
         scriptButton.isEnabled = enabled
+        scriptLink.isEnabled = enabled
         fullscreenButton?.isEnabled = enabled
     }
 
@@ -127,6 +141,7 @@ class CommandFieldWithScriptButton(
     /** 刷新脚本按钮的 tooltip（语言切换时调用） */
     fun updateTooltip() {
         scriptButton.toolTipText = DeployXBundle.message("command.field.script.picker.tooltip")
+        scriptLink.text = DeployXBundle.message("command.field.insertScript")
         fullscreenButton?.toolTipText = DeployXBundle.message("command.field.fullscreen.expand.tooltip")
     }
 

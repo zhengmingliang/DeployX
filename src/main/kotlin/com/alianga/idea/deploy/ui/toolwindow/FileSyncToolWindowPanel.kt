@@ -106,8 +106,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val serverCombo = JComboBox<String>()
     // 1.0.8：本地路径改为 TextFieldWithBrowseButton，支持选目录（与选文件并存）
     // 1.0.8：传入 JBTextField 以便使用 emptyText 占位提示
-    private val localPathField = TextFieldWithBrowseButton(JBTextField(), null)
-    private val remotePathField = TextFieldWithBrowseButton(JBTextField(), null)
+    // 1.1.0：改为内置浏览按钮（Built-in button，Shift+Enter），本地用文件夹图标、远程用服务器图标
+    private val localPathField = com.alianga.idea.deploy.ui.PathField(AllIcons.General.OpenDisk, DeployXBundle.message("toolwindow.button.browseLocal"))
+    private val remotePathField = com.alianga.idea.deploy.ui.PathField(AllIcons.Nodes.Deploy, DeployXBundle.message("toolwindow.tooltip.remotePathBrowse"))
     private val backupCheck = JBCheckBox(DeployXBundle.message("toolwindow.checkbox.backupBeforeDeploy"))
     private val backupDirField = JBTextField()
     private val unzipCheck = JBCheckBox(DeployXBundle.message("toolwindow.checkbox.unzipAfterUpload"))
@@ -116,13 +117,19 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         project = project,
         contextProvider = { buildScriptRunContext() },
         multiline = true,
-        preferredScrollSize = Dimension(600, 72)
+        preferredScrollSize = Dimension(600, 48),
+        // 1.1.0：命令框去掉行号 gutter（单行时是噪音），「+」改为下方「插入脚本…」链接
+        showLineNumbers = false,
+        scriptLinkStyle = true
     )
     private val postCommandField = CommandFieldWithScriptButton(
         project = project,
         contextProvider = { buildScriptRunContext() },
         multiline = true,
-        preferredScrollSize = Dimension(600, 72)
+        preferredScrollSize = Dimension(600, 48),
+        // 1.1.0：命令框去掉行号 gutter（单行时是噪音），「+」改为下方「插入脚本…」链接
+        showLineNumbers = false,
+        scriptLinkStyle = true
     )
 
     // 操作面板标签（保留引用以便语言切换时刷新文案）
@@ -238,6 +245,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private lateinit var serverPathPanel: JPanel
     private lateinit var deployOptionsPanel: JPanel
     private lateinit var hooksPanel: JPanel
+    private lateinit var serverPathGroup: com.alianga.idea.deploy.ui.GroupHeader
+    private lateinit var deployFlowGroup: com.alianga.idea.deploy.ui.GroupHeader
     // 部署选项下两个缩进的子 panel（备份目录/解压目录）
     private lateinit var backupIndentedPanel: JPanel
     private lateinit var unzipIndentedPanel: JPanel
@@ -261,6 +270,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
 
     init {
+        serverCombo.renderer = com.alianga.idea.deploy.ui.ServerComboRenderer { _, value ->
+            value?.toString()?.let { serverManager.getServer(it) }
+        }
         panelByProject[project.hashCode().toString()] = this
         setupUI()
         setupActions()
@@ -321,9 +333,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             .addComponent(AdaptiveRowPanel.labeled(targetServerLabel, serverWithTerminalPanel, JBUI.scale(160)))
             .addComponent(AdaptiveRowPanel.labeled(localFileLabel, localPathField))
             .addComponent(AdaptiveRowPanel.labeled(remotePathLabel, remotePathField))
-            .panel.apply {
-                border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.serverAndPaths"))
-            }
+            .panel
+        serverPathGroup = com.alianga.idea.deploy.ui.GroupHeader(DeployXBundle.message("toolwindow.group.serverAndPaths"), serverPathPanel)
 
         // 分组 2：部署选项（备份/解压，未勾选时缩进子字段灰显）
         // 缩进由子 Panel 的 EmptyBorder left=12 实现
@@ -346,17 +357,23 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             .addComponent(backupIndentedPanel)
             .addComponent(unzipCheck)
             .addComponent(unzipIndentedPanel)
-            .panel.apply {
-                border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.deployOptions"))
-            }
+            .panel
 
         // 分组 3：执行命令
         hooksPanel = FormBuilder.createFormBuilder()
             .addComponent(AdaptiveRowPanel.labeled(preCommandLabel, preCommandField, JBUI.scale(160)))
             .addComponent(AdaptiveRowPanel.labeled(postCommandLabel, postCommandField, JBUI.scale(160)))
-            .panel.apply {
-                border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.hooks"))
-            }
+            .panel
+        // 1.1.0：「部署选项」「执行命令」合并为一个「部署流程」分组（标题 + 分隔线）
+        val flowContent = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            deployOptionsPanel.alignmentX = Component.LEFT_ALIGNMENT
+            hooksPanel.alignmentX = Component.LEFT_ALIGNMENT
+            add(deployOptionsPanel)
+            add(hooksPanel)
+        }
+        deployFlowGroup = com.alianga.idea.deploy.ui.GroupHeader(DeployXBundle.message("toolwindow.group.deployOptions"), flowContent)
 
         // 底部动作区：WrapLayout 自动换行，按钮始终可见。
         // 对齐策略：宽度足够单行放下时整体居中（面板中部）；不足时靠左并换行。
@@ -395,13 +412,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             override fun getScrollableTracksViewportHeight(): Boolean = false
         }
         operationPanel.layout = BoxLayout(operationPanel, BoxLayout.Y_AXIS)
-        operationPanel.border = JBUI.Borders.empty(8)
-        operationPanel.add(serverPathPanel)
-        operationPanel.add(Box.createVerticalStrut(8))
-        operationPanel.add(deployOptionsPanel)
-        operationPanel.add(Box.createVerticalStrut(8))
-        operationPanel.add(hooksPanel)
-        operationPanel.add(Box.createVerticalStrut(8))
+        operationPanel.border = JBUI.Borders.empty(12) // 规范：工具窗口内容内边距 12
+        operationPanel.add(serverPathGroup)
+        operationPanel.add(Box.createVerticalStrut(JBUI.scale(12)))
+        operationPanel.add(deployFlowGroup)
+        operationPanel.add(Box.createVerticalStrut(JBUI.scale(12)))
         operationPanel.add(buttonPanel)
         operationPanel.add(Box.createVerticalStrut(8))
         operationPanel.add(progressPanel)
@@ -539,9 +554,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // 1.0.9 重构：3 个 TitledBorder 分组标题刷新
         if (::serverPathPanel.isInitialized) {
-            serverPathPanel.border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.serverAndPaths"))
-            deployOptionsPanel.border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.deployOptions"))
-            hooksPanel.border = BorderFactory.createTitledBorder(DeployXBundle.message("toolwindow.group.hooks"))
+            serverPathGroup.title = DeployXBundle.message("toolwindow.group.serverAndPaths")
+            deployFlowGroup.title = DeployXBundle.message("toolwindow.group.deployOptions")
         }
 
         // 1.0.9 重构：JBOptionButton 文本走 AbstractAction.NAME，刷新后 repaint
@@ -563,7 +577,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         abortButton.toolTipText = DeployXBundle.message("toolwindow.button.abort.tooltip")
         openTerminalButton.toolTipText = DeployXBundle.message("toolwindow.button.openTerminal")
         browseRemoteButton.toolTipText = DeployXBundle.message("toolwindow.button.browseRemote")
-        remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
+        localPathField.updateBrowseTooltip(AllIcons.General.OpenDisk, DeployXBundle.message("toolwindow.button.browseLocal"))
+        remotePathField.updateBrowseTooltip(AllIcons.Nodes.Deploy, DeployXBundle.message("toolwindow.tooltip.remotePathBrowse"))
 
         // 1.0.8：5 个路径输入框的 emptyText 占位提示跟随语言切换
         applyPathPlaceholders()
@@ -631,10 +646,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         setupLocalPathBrowser()
 
         // 设置远程路径浏览按钮
-        remotePathField.addActionListener {
-            val selectedServerStr = serverCombo.selectedItem?.toString() ?: return@addActionListener
-            val serverId = selectedServerStr.substringBefore(" - ")
-            val server = serverManager.getServer(serverId) ?: return@addActionListener
+        remotePathField.onBrowse = onBrowse@{
+            val serverId = getSelectedServerId() ?: return@onBrowse
+            val server = serverManager.getServer(serverId) ?: return@onBrowse
 
             val currentPath = remotePathField.text.trim().ifBlank { "/" }
             val dialog = RemotePathChooserDialog(server, currentPath)
@@ -642,29 +656,27 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 remotePathField.text = dialog.getSelectedPath()
             }
         }
-        remotePathField.toolTipText = DeployXBundle.message("toolwindow.tooltip.remotePathBrowse")
     }
 
     /** 1.0.9 重构：根据 backupCheck 状态切换缩进子字段的 enabled（包含 label）。 */
     private fun updateBackupEnabled() {
-        val enabled = backupCheck.isSelected
-        backupDirField.isEnabled = enabled
-        backupDirLabel.isEnabled = enabled
+        // 1.1.0：渐进披露——未勾选时整行隐藏，不再置灰常驻（现状问题 #6）
+        if (::backupIndentedPanel.isInitialized) backupIndentedPanel.isVisible = backupCheck.isSelected
+        revalidate()
     }
 
     /** 1.0.9 重构：根据 unzipCheck 状态切换缩进子字段的 enabled（包含 label）。 */
     private fun updateUnzipEnabled() {
-        val enabled = unzipCheck.isSelected
-        unzipDestField.isEnabled = enabled
-        unzipDirLabel.isEnabled = enabled
+        if (::unzipIndentedPanel.isInitialized) unzipIndentedPanel.isVisible = unzipCheck.isSelected
+        revalidate()
     }
 
     /** 1.0.9 重构：5 个路径输入框的 emptyText 占位提示。relocalize 也会再调一次以响应语言切换。 */
     private fun applyPathPlaceholders() {
         // TextFieldWithBrowseButton.getTextField() 静态返回类型是 JTextField，但构造时传入
         // 了 JBTextField，所以这里做类型转换以调用 JBTextField.getEmptyText()
-        (localPathField.textField as? JBTextField)?.emptyText?.text = DeployXBundle.message("toolwindow.placeholder.localPath")
-        (remotePathField.textField as? JBTextField)?.emptyText?.text = DeployXBundle.message("toolwindow.placeholder.remotePath")
+        localPathField.emptyText.text = DeployXBundle.message("toolwindow.placeholder.localPath")
+        remotePathField.emptyText.text = DeployXBundle.message("toolwindow.placeholder.remotePath")
         backupDirField.emptyText?.text = DeployXBundle.message("toolwindow.placeholder.backupDir")
         unzipDestField.emptyText?.text = DeployXBundle.message("toolwindow.placeholder.unzipDest")
     }
@@ -675,7 +687,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      * 自定义 descriptor，关闭文件过滤、显示隐藏文件选项、允许选目录。
      */
     private fun setupLocalPathBrowser() {
-        localPathField.addActionListener {
+        localPathField.onBrowse = {
             val descriptor = FileChooserDescriptorFactory.createSingleFileOrFolderDescriptor()
                 .withTitle(DeployXBundle.message("toolwindow.button.browseLocal"))
                 .withDescription(DeployXBundle.message("toolwindow.button.browseLocal"))
@@ -700,7 +712,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 localPathField.text = chosen.first().path
             }
         }
-        localPathField.toolTipText = DeployXBundle.message("toolwindow.button.browseLocal")
     }
 
     /** 日志面板顶部复制按钮工具栏（"复制全部日志"）。1.0.8 新增。 */
@@ -826,9 +837,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         serverCombo.removeAllItems()
         val servers = serverManager.getServers()
         for (server in servers) {
-            // LOCAL 服务器追加 [本地] 标记便于识别
-            val typeMark = if (server.isLocal) " [${DeployXBundle.message("dialog.server.type.local")}]" else ""
-            serverCombo.addItem("${server.id} - ${server.name}$typeMark")
+            // 1.1.0：条目值只存 id，显示交给 ServerComboRenderer（去掉「164 - 164」重复）
+            serverCombo.addItem(server.id)
         }
         val defaultServer = serverManager.getDefaultServer()
         if (defaultServer != null) {
@@ -995,8 +1005,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     private fun getSelectedServerId(): String? {
-        val selected = serverCombo.selectedItem?.toString() ?: return null
-        return selected.substringBefore(" - ")
+        return serverCombo.selectedItem?.toString()
     }
 
     fun selectScriptTab() {

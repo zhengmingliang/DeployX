@@ -39,6 +39,12 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // 单测只覆盖纯逻辑，不需要 IDE 运行时；gradle-intellij-plugin 1.x 解析本地 IDE 的
+    // vmoptions（$IDE_HOME 变量）会抛 IndexOutOfBounds，导致 test 任务无法执行，这里移除其 JVM 参数注入。
+    doFirst {
+        jvmArgumentProviders.clear()
+        systemProperties.remove("java.system.class.loader")
+    }
 }
 
 intellij {
