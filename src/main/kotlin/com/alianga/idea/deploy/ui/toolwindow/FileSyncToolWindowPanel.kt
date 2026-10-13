@@ -651,7 +651,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         tabBar.addPage(titles[0], opsPage, opsToolbar)
         tabBar.addPage(titles[1], logPanel, logToolbar)
         tabBar.addPage(titles[2], historyPanel, historyToolbarInstance)
-        tabBar.addPage(titles[3], scriptTabPanel, null)
+        tabBar.addPage(titles[3], scriptTabPanel, scriptTabPanel.createTabToolbar())
         setContent(tabBar)
     }
 
