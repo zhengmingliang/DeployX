@@ -46,7 +46,8 @@ class QuickPushAction : AbstractDeployAction<UploadItem>() {
             commandAvailabilityByServerId = commandAvailability,
             resolvedByServerId = resolvedByServerId,
             okText = okText(),
-            hiddenServerCount = hiddenServerCount
+            hiddenServerCount = hiddenServerCount,
+            selectedPaths = selectedPaths
         )
         if (!dialog.showAndGet()) return null
         val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }

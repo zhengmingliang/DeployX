@@ -62,6 +62,17 @@ abstract class AbstractDeployAction<T> : AnAction() {
     /** 1.1.0：对话框确认按钮的具体动词（不再用通用「OK」） */
     protected open fun okText(): String = DeployXBundle.message("dialog.server.select.ok.deploy")
 
+    /** 1.1.1：本次选中的本地路径（对话框副标题 / 空状态） */
+    protected var selectedPaths: List<String> = emptyList()
+
+    /** 1.1.1：部署模式在对话框底部显示流程说明；只有部署动作为 true */
+    protected open fun deployMode(): Boolean = okText() == DeployXBundle.message("dialog.server.select.ok.deploy")
+
+    private fun showEmptyDialog(reason: String) {
+        ServerSelectionDialog(emptyList(), dialogTitle(), dialogMessage(selectedPaths.size), okText = okText(),
+            selectedPaths = selectedPaths, deployMode = deployMode(), emptyReason = reason).show()
+    }
+
     final override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     final override fun actionPerformed(e: AnActionEvent) {
@@ -75,8 +86,10 @@ abstract class AbstractDeployAction<T> : AnAction() {
                 mappingManager.resolveMappingsByLocalPath(file.path, file.isDirectory)
             }.filterValues { it.isNotEmpty() }
 
+        selectedPaths = files.map { it.path }
+        // 1.1.1：无可用服务器时在对话框内显示空状态（说明 + 路径 +「添加目录映射…」），不再弹通知
         if (resolvedByFile.isEmpty()) {
-            ActionUtils.showNoMappingNotification(project, DeployXBundle.message("notification.noMappingFound"))
+            showEmptyDialog(DeployXBundle.message("notification.noMappingFound"))
             return
         }
 
@@ -88,7 +101,7 @@ abstract class AbstractDeployAction<T> : AnAction() {
         val availableServers = coveringIds.mapNotNull { ServerManager.getInstance().getServer(it) }
         hiddenServerCount = (ServerManager.getInstance().getServers().size - availableServers.size).coerceAtLeast(0)
         if (availableServers.isEmpty()) {
-            ActionUtils.showNoMappingNotification(project, DeployXBundle.message("notification.noCommonMapping"))
+            showEmptyDialog(DeployXBundle.message("notification.noCommonMapping"))
             return
         }
 
@@ -145,7 +158,9 @@ abstract class AbstractDeployAction<T> : AnAction() {
             // 1.0.8：嵌套映射歧义时在对话框内提供映射选择
             resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile),
             okText = okText(),
-            hiddenServerCount = hiddenServerCount
+            hiddenServerCount = hiddenServerCount,
+            selectedPaths = selectedPaths,
+            deployMode = deployMode()
         )
         if (!dialog.showAndGet()) return null
         val server = dialog.selectedServer ?: return null
@@ -178,7 +193,9 @@ abstract class AbstractDeployAction<T> : AnAction() {
             // 1.0.8：嵌套映射歧义时在对话框内提供映射选择
             resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile),
             okText = okText(),
-            hiddenServerCount = hiddenServerCount
+            hiddenServerCount = hiddenServerCount,
+            selectedPaths = selectedPaths,
+            deployMode = deployMode()
         )
         if (!dialog.showAndGet()) return null
         val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }
