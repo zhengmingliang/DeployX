@@ -241,6 +241,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val serverLogAreas = linkedMapOf<String, JBTextArea>()
 
     // 历史 tab
+    /** 1.1.0：历史搜索框与过滤胶囊 */
+    private val historySearchField = com.intellij.ui.SearchTextField(false)
+    private var historyFilterKind = com.alianga.idea.deploy.ui.HistoryFilter.Kind.ALL
+    private val historyChips = linkedMapOf<com.alianga.idea.deploy.ui.HistoryFilter.Kind, JToggleButton>()
     private val historyListModel = DefaultListModel<String>()
     private val historyList = JBList(historyListModel)
     private var historyRecords = listOf<HistoryRecord>()
@@ -507,14 +511,27 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 cellHasFocus: Boolean
             ): java.awt.Component {
                 val component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-                if (index >= 0 && index < historyRecords.size) {
-                    val record = historyRecords[index]
-                    if (record.canRollback && record.backupFilePath.isNotBlank()) {
-                        // 使用与回滚按钮相同的 AllIcons.Actions.Rollback 图标
-                        icon = AllIcons.Actions.Rollback
-                    } else {
-                        icon = null
+                if (index >= 0 && index < historyRecords.size && component is JLabel) {
+                    // 1.1.0：两行记录——状态文字 + 动作 + 服务器 + 可回滚标签 / 时间；第二行等宽路径。
+                    // 成功 / 失败同时用文字表达，不只靠颜色
+                    val r = historyRecords[index]
+                    fun esc(t: String) = com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(t)
+                    fun hex(c: java.awt.Color) = "#" + com.intellij.ui.ColorUtil.toHex(c)
+                    val (statusText, color) = when (r.status) {
+                        HistoryRecord.OperationStatus.SUCCESS -> DeployXBundle.message("toolwindow.history.status.success") to DeployXColors.success
+                        HistoryRecord.OperationStatus.FAILED -> DeployXBundle.message("toolwindow.history.status.failed") to DeployXColors.error
+                        HistoryRecord.OperationStatus.CANCELLED -> DeployXBundle.message("toolwindow.history.status.cancelled") to DeployXColors.warning
                     }
+                    val day = DeployXBundle.message("toolwindow.history.day." + com.alianga.idea.deploy.ui.HistoryFilter.day(r.timestamp).name.lowercase())
+                    val tag = if (com.alianga.idea.deploy.ui.HistoryFilter.rollbackable(r))
+                        " <font color='${hex(DeployXColors.link)}'>[" + esc(DeployXBundle.message("toolwindow.history.filter.rollbackable")) + "]</font>" else ""
+                    val path = if (r.type == HistoryRecord.OperationType.PULL) "${r.targetPath} → ${r.sourcePath}" else "${r.sourcePath} → ${r.targetPath}"
+                    val server = ServerDisplay.title(r.serverId, r.serverName)
+                    component.text = "<html><font color='${hex(color)}'>● ${esc(statusText)}</font> <b>${esc(r.type.value)}</b> ${esc(server)}$tag" +
+                        " <font color='${hex(DeployXColors.secondary)}'>· ${esc(day)} ${esc(r.formattedTime)}</font>" +
+                        "<br><code>${esc(path)}</code></html>"
+                    component.icon = if (com.alianga.idea.deploy.ui.HistoryFilter.rollbackable(r)) AllIcons.Actions.Rollback else null
+                    component.border = JBUI.Borders.empty(4, 6)
                 }
                 return component
             }
@@ -549,8 +566,27 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val historyToolbarInstance = ActionManager.getInstance().createActionToolbar("FileSyncHistoryToolbar", historyActionGroup, true)
         historyToolbarInstance.targetComponent = this
         historyToolbar = historyToolbarInstance
+        // 1.1.0：过滤栏——搜索（动作 / 服务器 / 路径）+ 胶囊过滤：全部 / 成功 / 失败 / 可回滚，各带计数
+        historySearchField.addDocumentListener(object : com.intellij.ui.DocumentAdapter() {
+            override fun textChanged(e: javax.swing.event.DocumentEvent) = refreshHistory()
+        })
+        val chipGroup = ButtonGroup()
+        val chipBar = JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(4), JBUI.scale(2)))
+        com.alianga.idea.deploy.ui.HistoryFilter.Kind.entries.forEach { kind ->
+            val chip = JToggleButton().apply {
+                isSelected = kind == historyFilterKind
+                putClientProperty("JButton.buttonType", "roundRect")
+                addActionListener { historyFilterKind = kind; refreshHistory() }
+            }
+            chipGroup.add(chip); chipBar.add(chip); historyChips[kind] = chip
+        }
         val historyButtonPanel = JPanel(BorderLayout()).apply {
-            add(historyToolbarInstance.component, BorderLayout.CENTER)
+            add(historyToolbarInstance.component, BorderLayout.NORTH)
+            add(JPanel(BorderLayout()).apply {
+                border = JBUI.Borders.empty(0, 8, 4, 8)
+                add(historySearchField, BorderLayout.NORTH)
+                add(chipBar, BorderLayout.CENTER)
+            }, BorderLayout.CENTER)
         }
         historyCardPanel = JPanel(historyCardLayout).apply {
             add(JBScrollPane(historyList), "list")
@@ -1038,7 +1074,14 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     private fun refreshHistory() {
-        historyRecords = historyManager.getRecords()
+        val all = historyManager.getRecords()
+        val query = historySearchField.text.orEmpty()
+        // historyRecords 保存「过滤后」的列表，与列表索引一一对应，原有按索引取记录的动作无需改动
+        historyRecords = com.alianga.idea.deploy.ui.HistoryFilter.apply(all, historyFilterKind, query)
+        val counts = com.alianga.idea.deploy.ui.HistoryFilter.counts(all, query)
+        historyChips.forEach { (k, chip) ->
+            chip.text = DeployXBundle.message("toolwindow.history.filter." + k.name.lowercase()) + " " + (counts[k] ?: 0)
+        }
         historyListModel.clear()
         for (record in historyRecords) {
             historyListModel.addElement(record.summary)
@@ -1121,9 +1164,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             val record = historyRecords[idx]
 
             // 检查是否可回滚
-            if (!record.canRollback || record.backupFilePath.isBlank()) {
+            // 1.1.0：写明不可回滚的具体原因（非部署记录 / 失败的部署 / 未启用备份）
+            val blockReason = com.alianga.idea.deploy.ui.HistoryFilter.rollbackBlockReason(record)
+            if (blockReason != null) {
                 Messages.showWarningDialog(
-                    DeployXBundle.message("toolwindow.log.rollbackNotAvailable"),
+                    DeployXBundle.message("toolwindow.history.rollbackBlocked." + blockReason.name.lowercase()),
                     DeployXBundle.message("toolwindow.log.rollbackTitle")
                 )
                 return
@@ -1190,6 +1235,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     private fun clearHistory() {
+        // 1.1.0：清空不可恢复，先确认（默认焦点在「否」）
+        val ok = Messages.showYesNoDialog(
+            project, DeployXBundle.message("toolwindow.history.clear.confirm"), DeployXBundle.message("toolwindow.history.clear"),
+            Messages.getYesButton(), Messages.getNoButton(), Messages.getWarningIcon()
+        ) == Messages.YES
+        if (!ok) return
         historyManager.clearHistory()
         refreshHistory()
     }
@@ -1644,6 +1695,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     private fun configureLogArea(area: JBTextArea) {
+        // 1.1.0：日志空状态文案
+        area.emptyText.text = DeployXBundle.message("toolwindow.log.empty")
         area.isEditable = false
         applyLogFont(area)
         area.lineWrap = true
