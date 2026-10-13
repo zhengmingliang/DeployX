@@ -53,8 +53,8 @@ class RollbackDialog(
     }
 
     init {
-        title = DeployXBundle.message("rollback.dialog.title")
-        setOKButtonText(DeployXBundle.message("rollback.dialog.okButton"))
+        title = DeployXBundle.message("rollback.v2.title")
+        setOKButtonText(DeployXBundle.message("rollback.v2.ok"))
         setCancelButtonText(DeployXBundle.message("rollback.dialog.cancelButton"))
         init()
     }
@@ -66,6 +66,8 @@ class RollbackDialog(
     override fun createActions(): Array<javax.swing.Action> {
         okAction.putValue(DEFAULT_ACTION, null)
         okAction.putValue("JComponent.outline", "error")
+        // 1.1.1：危险按钮带回滚图标
+        okAction.putValue(javax.swing.Action.SMALL_ICON, com.intellij.icons.AllIcons.Actions.Rollback)
         cancelAction.putValue(DEFAULT_ACTION, true)
         return arrayOf(cancelAction, okAction)
     }
@@ -76,9 +78,13 @@ class RollbackDialog(
         val panel = JPanel(BorderLayout(JBUI.scale(10), JBUI.scale(10)))
         panel.border = JBUI.Borders.empty(10)
 
-        // 警告信息
-        val warningPanel = createWarningPanel()
-        panel.add(warningPanel, BorderLayout.NORTH)
+        // 1.1.1：副标题 + 警告信息
+        val subtitle = JBLabel(DeployXBundle.message("rollback.v2.subtitle",
+            record.serverName.ifBlank { record.serverId })).apply { border = JBUI.Borders.emptyBottom(6) }
+        panel.add(JPanel(BorderLayout()).apply {
+            add(subtitle, BorderLayout.NORTH)
+            add(createWarningPanel(), BorderLayout.CENTER)
+        }, BorderLayout.NORTH)
 
         // 详情信息
         val detailsPanel = createDetailsPanel()
@@ -163,26 +169,18 @@ class RollbackDialog(
             insets = Insets(JBUI.scale(5), JBUI.scale(5), JBUI.scale(5), JBUI.scale(5))
         }
 
-        // 服务器
+        // 1.1.1：字段为 服务器 / 部署时间 / 备份文件 / 还原到；不再显示「待确认」的文件数
         addLabelValueRow(panel, DeployXBundle.message("rollback.dialog.server"),
             "${record.serverName} (${record.serverAddress})", gridy++)
-
-        // 目标路径
-        addLabelValueRow(panel, DeployXBundle.message("rollback.dialog.targetPath"),
-            record.targetPath, gridy++)
-
-        // 备份文件
+        addLabelValueRow(panel, DeployXBundle.message("rollback.v2.deployTime"),
+            record.formattedDate, gridy++)
         addLabelValueRow(panel, DeployXBundle.message("rollback.dialog.backupFile"),
             record.backupFilePath, gridy++)
-
-        // 文件数量
-        addLabelValueRow(panel, DeployXBundle.message("rollback.dialog.fileCount"),
-            if (fileList.isNotEmpty()) fileList.size.toString() else DeployXBundle.message("rollback.dialog.fileCount.notListed"),
-            gridy++)
-
-        // 原始部署时间
-        addLabelValueRow(panel, DeployXBundle.message("rollback.dialog.deployTime"),
-            record.formattedDate, gridy++)
+        addLabelValueRow(panel, DeployXBundle.message("rollback.v2.restoreTo"),
+            record.targetPath, gridy++)
+        if (fileList.isNotEmpty()) {
+            addLabelValueRow(panel, DeployXBundle.message("rollback.dialog.fileCount"), fileList.size.toString(), gridy++)
+        }
 
         return panel
     }

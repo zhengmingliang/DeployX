@@ -304,8 +304,13 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
         servers.forEach { runOnCombo.addItem(ServerDisplay.title(it.id, it.name)) }
         runOnCombo.selectedIndex = servers.indexOfFirst { it.id == s.serverId } + 1
         suppressRunOn = false
-        lastRunLabel.text = if (s.lastRunAt > 0) sdf.format(Date(s.lastRunAt)) + " · " + statusText(s).first
-            else DeployXBundle.message("script.tab2.neverRun")
+        // 1.1.1：「时间 · 服务器 · 状态」，服务器取该脚本最近一条运行历史
+        lastRunLabel.text = if (s.lastRunAt > 0) {
+            val server = com.alianga.idea.deploy.service.HistoryManager.getInstance().getRecords()
+                .filter { it.type == com.alianga.idea.deploy.model.HistoryRecord.OperationType.SCRIPT && it.sourcePath == s.name }
+                .maxByOrNull { it.timestamp }?.let { ServerDisplay.title(it.serverId, it.serverName) }
+            listOfNotNull(sdf.format(Date(s.lastRunAt)), server, statusText(s).first).joinToString(" · ")
+        } else DeployXBundle.message("script.tab2.neverRun")
         tagsLabel.text = s.tags.joinToString(" ").ifBlank { "—" }
         buildParams(s)
         previewing = false
