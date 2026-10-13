@@ -37,6 +37,17 @@ object HistoryDetail {
     enum class Step { PRE, BACKUP, UPLOAD, UNZIP, POST, ROLLBACK_BACKUP, RESTORE }
     enum class Mark(val symbol: String) { OK("✔"), FAIL("✖"), SKIP("–") }
 
+    /** 部署 / 推送的步骤链（按实际执行顺序） */
+    val DEPLOY_STEPS = listOf(Step.PRE, Step.BACKUP, Step.UPLOAD, Step.UNZIP, Step.POST)
+
+    /** 旧记录没有保存步骤结果，步骤链是按配置推断的 */
+    fun stepsInferred(r: HistoryRecord): Boolean =
+        r.type != HistoryRecord.OperationType.ROLLBACK && r.stepResults.isEmpty()
+
+    /** 映射名：新记录直接用保存的名称，旧记录回退到 [lookup]（按本地路径查找） */
+    fun mappingText(r: HistoryRecord, lookup: () -> String?): String =
+        r.mappingName.ifBlank { lookup() ?: "" }.ifBlank { "—" }
+
     /**
      * 步骤链：未配置的步骤标「–」；成功记录已配置的步骤全「✔」；
      * 失败 / 取消的记录不知道断在哪一步，已配置步骤标「–」、上传标「✖」——不编造中间状态。
@@ -50,6 +61,12 @@ object HistoryDetail {
                 Step.POST to if (r.postCommand.isNotBlank() && ok) Mark.OK else Mark.SKIP
             )
         }
+        // 1.1.1：新记录用保存的真实结果（未执行到的步骤为 –）
+        if (r.stepResults.isNotEmpty()) {
+            return DEPLOY_STEPS.map { s ->
+                s to when (r.stepResults[s.name.lowercase()]) { "ok" -> Mark.OK; "fail" -> Mark.FAIL; else -> Mark.SKIP }
+            }
+        }
         val configured = mapOf(
             Step.PRE to r.preCommand.isNotBlank(),
             Step.BACKUP to (r.backupDir.isNotBlank() || r.backupFilePath.isNotBlank()),
@@ -58,7 +75,7 @@ object HistoryDetail {
             Step.POST to r.postCommand.isNotBlank()
         )
         val ok = r.status == HistoryRecord.OperationStatus.SUCCESS
-        return Step.entries.map { s ->
+        return DEPLOY_STEPS.map { s ->
             s to when {
                 configured[s] != true -> Mark.SKIP
                 ok -> Mark.OK

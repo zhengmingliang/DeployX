@@ -75,7 +75,14 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
     private val tagCombo = JComboBox<String>()
     private val countLabel = JBLabel()
     private val listModel = DefaultListModel<ScriptConfig>()
-    private val list = JBList(listModel)
+    // 第 6 轮：列表宽度始终等于视口宽度（卡片内容在可见宽度内截断），窄宽度下不再出现横向滚动条
+    private val list = object : JBList<ScriptConfig>(listModel) {
+        override fun getScrollableTracksViewportWidth() = true
+    }
+
+    /** 详情区「分组 / 运行于 / 上次运行 / 标签」与参数行共用的标签列 */
+    private val kvLabels = mutableListOf<JBLabel>()
+    private val paramLabels = mutableListOf<JBLabel>()
     private val sdf = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
 
     // ===== 详情 =====
@@ -151,12 +158,18 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
         })
         groupCombo.addActionListener { refreshList() }
         tagCombo.addActionListener { refreshList() }
-        val filters = JPanel(BorderLayout(JBUI.scale(6), 0)).apply {
-            add(searchField, BorderLayout.CENTER)
-            add(JPanel(FlowLayout(FlowLayout.LEADING, JBUI.scale(4), 0)).apply {
+        // 第 6 轮：与「操作」页同一窄档阈值（FORM_ROOT / FORM_NARROW_THRESHOLD）：
+        // 窄时分组 / 标签筛选换到搜索框下方，搜索框始终占满一行，不再被挤没
+        putClientProperty(com.alianga.idea.deploy.ui.AdaptiveRowPanel.FORM_ROOT, true)
+        val filters = com.alianga.idea.deploy.ui.AdaptiveRowPanel(
+            main = searchField,
+            side = JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(4), 0)).apply {
                 add(groupCombo); add(tagCombo); add(countLabel)
-            }, BorderLayout.EAST)
-        }
+            },
+            minMainWidth = JBUI.scale(120),
+            keepSideLeadingWhenStacked = false,
+            sharedThreshold = com.alianga.idea.deploy.ui.AdaptiveRowPanel.FORM_NARROW_THRESHOLD
+        )
 
         list.selectionMode = ListSelectionModel.SINGLE_SELECTION
         list.cellRenderer = javax.swing.ListCellRenderer<ScriptConfig> { l, s, _, sel, _ -> renderCard(l, s, sel) }
@@ -178,7 +191,8 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
 
         detailPanel = buildDetail()
         val split = com.intellij.ui.OnePixelSplitter(true, "DeployX.script.split", 0.45f).apply {
-            firstComponent = JBScrollPane(list)
+            firstComponent = JBScrollPane(list, javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER)
             // 1.1.1：详情区宽度跟随视口（只纵向滚动），右侧「运行于」下拉与参数提示不再被裁切
             secondComponent = JBScrollPane(com.alianga.idea.deploy.ui.ViewportWidthPanel(BorderLayout()).apply { add(detailPanel, BorderLayout.CENTER) },
                 javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER).apply { border = JBUI.Borders.empty() }
@@ -242,10 +256,10 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
             add(JPanel(BorderLayout()).apply { add(nameLabel, BorderLayout.NORTH); add(nameField, BorderLayout.SOUTH) }, BorderLayout.CENTER)
             add(editToggle, BorderLayout.EAST)
         }
-        fun kv(key: String, comp: JComponent) = JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
-            add(JBLabel(DeployXBundle.message(key)).apply { foreground = DeployXColors.secondary; preferredSize = JBUI.size(64, preferredSize.height) }, BorderLayout.WEST)
-            add(comp, BorderLayout.CENTER)
-        }
+        // 第 6 轮：标签 + 值行改用 AdaptiveRowPanel.labeled（窄于统一阈值时标签移到值上方）
+        fun kv(key: String, comp: JComponent) = com.alianga.idea.deploy.ui.AdaptiveRowPanel.labeled(
+            JBLabel(DeployXBundle.message(key)).apply { foreground = DeployXColors.secondary; kvLabels.add(this) }, comp,
+            minFieldWidth = JBUI.scale(80))
         val groupHolder = JPanel(BorderLayout()).apply { add(groupLabel, BorderLayout.NORTH); add(groupField, BorderLayout.SOUTH) }
         val cmdHead = JPanel(BorderLayout()).apply { add(commandHeading, BorderLayout.CENTER); add(previewToggle, BorderLayout.EAST) }
         val cmdScroll = JBScrollPane(commandArea).apply { setRowHeaderView(lineGutter) }
@@ -309,7 +323,9 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
         // 1.1.1：「时间 · 服务器 · 状态」，服务器取该脚本最近一条运行历史
         lastRunLabel.text = if (s.lastRunAt > 0) {
             val server = com.alianga.idea.deploy.service.HistoryManager.getInstance().getRecords()
-                .filter { it.type == com.alianga.idea.deploy.model.HistoryRecord.OperationType.SCRIPT && it.sourcePath == s.name }
+                .filter { it.type == com.alianga.idea.deploy.model.HistoryRecord.OperationType.SCRIPT &&
+                    // 新记录按脚本 id；旧记录没有 id，回退按脚本名
+                    (if (it.scriptId.isNotBlank()) it.scriptId == s.id else it.sourcePath == s.name) }
                 .maxByOrNull { it.timestamp }?.let { ServerDisplay.title(it.serverId, it.serverName) }
             listOfNotNull(sdf.format(Date(s.lastRunAt)), server, statusText(s).first).joinToString(" · ")
         } else DeployXBundle.message("script.tab2.neverRun")
@@ -323,7 +339,7 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
     }
 
     private fun buildParams(s: ScriptConfig) {
-        paramsPanel.removeAll(); paramInputs.clear()
+        paramsPanel.removeAll(); paramInputs.clear(); paramLabels.clear()
         if (s.params.isNotEmpty()) {
             s.params.forEach { p ->
                 val comp: JComponent = when (p.type) {
@@ -341,11 +357,10 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
                     is JBCheckBox -> comp.addItemListener { refreshPreviewIfOn() }
                     is JComboBox<*> -> comp.addActionListener { refreshPreviewIfOn() }
                 }
-                paramsPanel.add(JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
-                    add(JBLabel(p.displayLabel + if (p.required) " *" else ""), BorderLayout.WEST)
-                    add(comp, BorderLayout.CENTER)
-                    alignmentX = LEFT_ALIGNMENT
-                })
+                // 第 6 轮：参数行与上方「分组 / 运行于」共用标签列，字段左边缘对齐
+                paramsPanel.add(com.alianga.idea.deploy.ui.AdaptiveRowPanel.labeled(
+                    JBLabel(p.displayLabel + if (p.required) " *" else "").also { paramLabels.add(it) }, comp,
+                    minFieldWidth = JBUI.scale(80)).apply { alignmentX = LEFT_ALIGNMENT })
             }
             // 1.1.1：提示按可见宽度换行（标签不换行会被裁切）
             paramsPanel.add(object : JBTextArea(DeployXBundle.message("script.tab2.paramHint", "\${" + DeployXBundle.message("script.tab2.paramName") + "}")) {
@@ -358,6 +373,16 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
             })
         }
         paramsPanel.isVisible = s.params.isNotEmpty()
+        alignLabelColumn()
+    }
+
+
+    /** 标签列宽 = 所有标签自然宽度的最大值（上限 140），值 / 参数字段的左边缘因此对齐 */
+    private fun alignLabelColumn() {
+        val all = kvLabels + paramLabels
+        all.forEach { it.preferredSize = null }
+        val w = (all.maxOfOrNull { it.preferredSize.width } ?: 0).coerceIn(JBUI.scale(64), JBUI.scale(140))
+        all.forEach { it.preferredSize = java.awt.Dimension(w, it.preferredSize.height) }
     }
 
     private fun collectParams(): Map<String, String> = paramInputs.mapValues { (_, c) ->

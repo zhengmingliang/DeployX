@@ -88,7 +88,24 @@ data class HistoryRecord(
      * 空 = 旧记录，按 relativePaths 推断。重新执行据此走与原操作相同的代码路径。
      */
     @SerializedName("origin")
-    val origin: String = ""
+    val origin: String = "",
+
+    /**
+     * 1.1.1：各步骤真实结果，key 为 pre / backup / upload / unzip / post，值为 ok / fail / skip。
+     * 空 = 旧记录，详情区按配置推断步骤链（并标注「推断」）。
+     */
+    @SerializedName("step_results")
+    val stepResults: Map<String, String> = emptyMap(),
+
+    /** 1.1.1：记录所用映射（旧记录为空，详情区回退到按本地路径查找） */
+    @SerializedName("mapping_id")
+    val mappingId: String = "",
+    @SerializedName("mapping_name")
+    val mappingName: String = "",
+
+    /** 1.1.1：脚本记录的脚本 id（旧记录为空，回退按脚本名匹配） */
+    @SerializedName("script_id")
+    val scriptId: String = ""
 ) {
     enum class OperationType(val value: String) {
         @SerializedName("sync")

@@ -63,4 +63,12 @@ class OldJsonCompatTest {
         val r = gson.fromJson("""{"id":"1","status":"success"}""", RollbackRecord::class.java)
         assertEquals("", r.remoteTargetPath); assertTrue(r.rolledBackFiles.isEmpty())
     }
+
+    @Test fun historyNewFieldsDefaultForOldJson() {
+        val r = gson.fromJson("""{"id":"1","type":"deploy","step_results":null}""", HistoryRecord::class.java)
+        assertEquals(emptyMap<String, String>(), r.stepResults)
+        assertEquals("", r.mappingId); assertEquals("", r.mappingName); assertEquals("", r.scriptId)
+        val n = gson.fromJson("""{"id":"2","step_results":{"pre":"ok","upload":"fail"},"mapping_name":"api","script_id":"s1"}""", HistoryRecord::class.java)
+        assertEquals("fail", n.stepResults["upload"]); assertEquals("api", n.mappingName); assertEquals("s1", n.scriptId)
+    }
 }

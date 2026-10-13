@@ -92,6 +92,13 @@ class RollbackDialog(
 
         // 1.1.1：将在服务器上执行的命令原文 + 两个选项 + 文件列表
         runPostCheck.isVisible = record.postCommand.isNotBlank()
+        if (runPostCheck.isVisible) {
+            // 1.1.1：直接显示将执行的命令（过长截断，tooltip 显示全文）
+            val cmd = record.postCommand.trim().replace(Regex("\\s+"), " ")
+            val short = if (cmd.length > 40) cmd.take(40) + "…" else cmd
+            runPostCheck.text = DeployXBundle.message("rollback.dialog.runPostWithCmd", short)
+            runPostCheck.toolTipText = record.postCommand
+        }
         backupFirstCheck.addItemListener { refreshCommandPreview() }
         runPostCheck.addItemListener { refreshCommandPreview() }
         refreshCommandPreview()

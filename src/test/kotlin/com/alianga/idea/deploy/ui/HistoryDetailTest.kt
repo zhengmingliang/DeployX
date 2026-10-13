@@ -40,4 +40,28 @@ class HistoryDetailTest {
         val bad = HistoryDetail.steps(deploy.copy(status = OperationStatus.FAILED)).toMap()
         assertEquals(Mark.FAIL, bad[Step.UPLOAD]); assertEquals(Mark.SKIP, bad[Step.PRE])
     }
+
+    @Test fun stepsFromRecordedResults() {
+        val r = deploy.copy(status = OperationStatus.FAILED,
+            stepResults = mapOf("pre" to "ok", "backup" to "ok", "upload" to "fail"))
+        val m = HistoryDetail.steps(r)
+        assertEquals(HistoryDetail.DEPLOY_STEPS, m.map { it.first })
+        val map = m.toMap()
+        assertEquals(Mark.OK, map[Step.PRE]); assertEquals(Mark.OK, map[Step.BACKUP])
+        assertEquals(Mark.FAIL, map[Step.UPLOAD]); assertEquals(Mark.SKIP, map[Step.UNZIP]); assertEquals(Mark.SKIP, map[Step.POST])
+        assertEquals(false, HistoryDetail.stepsInferred(r))
+    }
+
+    @Test fun oldRecordsAreInferred() {
+        assertEquals(true, HistoryDetail.stepsInferred(deploy))
+        assertEquals(false, HistoryDetail.stepsInferred(deploy.copy(type = OperationType.ROLLBACK)))
+        // 推断链只含部署步骤，不混入回滚步骤
+        assertEquals(HistoryDetail.DEPLOY_STEPS, HistoryDetail.steps(deploy).map { it.first })
+    }
+
+    @Test fun mappingTextPrefersSavedName() {
+        assertEquals("api", HistoryDetail.mappingText(deploy.copy(mappingName = "api")) { "lookup" })
+        assertEquals("lookup", HistoryDetail.mappingText(deploy) { "lookup" })
+        assertEquals("—", HistoryDetail.mappingText(deploy) { null })
+    }
 }

@@ -61,14 +61,25 @@ class FileSyncSettingsConfigurable : Configurable {
                 })
             }
             // 1.1.1：设置页外层是平台的滚动面板；宽度跟随视口，说明文字才能真正换行、不出横向滚动条
-            mainPanel = com.alianga.idea.deploy.ui.ViewportWidthPanel(BorderLayout()).apply {
+            // 1.1.1（第 6 轮）：真正决定宽度的是首选宽度——平台把 createComponent 的结果放进自己的
+            // 滚动视口，ViewportLayout 取 max(视口宽, 首选宽)。原来固定 900 的首选宽度（以及 WRAP 布局的
+            // 页签条）让视图永远比视口宽，于是出现横向滚动条、说明文字不换行。
+            // 现在首选宽度给一个小值，视图被拉伸到视口宽度；页签改为滚动布局，不再撑宽。
+            tabbedPane?.tabLayoutPolicy = javax.swing.JTabbedPane.SCROLL_TAB_LAYOUT
+            mainPanel = object : com.alianga.idea.deploy.ui.ViewportWidthPanel(BorderLayout()) {
+                override fun getPreferredSize(): java.awt.Dimension {
+                    val d = super.getPreferredSize()
+                    return java.awt.Dimension(com.intellij.util.ui.JBUI.scale(360), maxOf(d.height, com.intellij.util.ui.JBUI.scale(640)))
+                }
+                override fun getMinimumSize(): java.awt.Dimension =
+                    java.awt.Dimension(com.intellij.util.ui.JBUI.scale(320), com.intellij.util.ui.JBUI.scale(420))
+            }.apply {
                 add(buttonPanel, BorderLayout.NORTH)
                 add(tabbedPane, BorderLayout.CENTER)
-                // 1.1.1：给设置页合理的首选 / 最小尺寸，避免打开时被裁剪、最大化后塌成标题栏
-                preferredSize = com.intellij.util.ui.JBUI.size(900, 640)
-                minimumSize = com.intellij.util.ui.JBUI.size(640, 420)
             }
         }
+        // 1.1.1：从工具窗口「管理服务器…」打开时直接定位到「服务器管理」页签
+        applyRequestedTab()
         return mainPanel!!
     }
 
@@ -259,6 +270,7 @@ class FileSyncSettingsConfigurable : Configurable {
     }
 
     override fun reset() {
+        applyRequestedTab()
         generalPanel.reset()
         serverPanel.reset()
         mappingPanel.reset()
@@ -271,5 +283,31 @@ class FileSyncSettingsConfigurable : Configurable {
         langListenerRemover = null
         mainPanel = null
         tabbedPane = null
+    }
+
+    /** 一次性的页签请求（由 [open] 通过平台的 additionalConfiguration 回调写入） */
+    private var requestedTab: Int = -1
+
+    fun selectTab(tab: Int) {
+        requestedTab = tab
+        applyRequestedTab()
+    }
+
+    private fun applyRequestedTab() {
+        val tp = tabbedPane ?: return
+        if (requestedTab in 0 until tp.tabCount) {
+            tp.selectedIndex = requestedTab
+            requestedTab = -1
+        }
+    }
+
+    companion object {
+        const val TAB_SERVERS = 1
+
+        /** 打开 DeployX 设置并定位到指定页签 */
+        fun open(project: com.intellij.openapi.project.Project?, tab: Int) {
+            com.intellij.openapi.options.ShowSettingsUtil.getInstance()
+                .showSettingsDialog(project, FileSyncSettingsConfigurable::class.java) { it.selectTab(tab) }
+        }
     }
 }

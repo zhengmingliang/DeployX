@@ -124,7 +124,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val historyManager = HistoryManager.getInstance()
 
     // 操作 tab 组件
-    private val serverCombo = JComboBox<String>()
+    // 第 6 轮：平台的 ComboBoxWithWidePopup——弹出列表宽度按最长项展开（下拉框本身宽度不变），服务器名 / 主机不再被截断
+    private val serverCombo = com.intellij.openapi.ui.ComboBoxWithWidePopup(javax.swing.DefaultComboBoxModel<String>())
     private var lastServerIndex = -1
     // 1.0.8：本地路径改为 TextFieldWithBrowseButton，支持选目录（与选文件并存）
     // 1.0.8：传入 JBTextField 以便使用 emptyText 占位提示
@@ -294,11 +295,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     // 间距由平台统一控制，紧凑且一致；按钮以图标显示，文案与说明通过 tooltip/description 呈现。
     // 回滚按钮图标与历史列表中“可回滚”记录的图标一致（均为 AllIcons.Actions.Rollback）。
     private val historyRefreshAction = UiButtonFactory.createLocalizedAction("toolwindow.history.refresh", AllIcons.Actions.Refresh, "toolwindow.history.refresh.tooltip") { refreshHistory() }
-    private val historyRedeployAction = UiButtonFactory.createLocalizedAction("toolwindow.history.redeploy", AllIcons.Actions.Execute, "toolwindow.history.redeploy.tooltip") { redeployFromHistory() }
     private val historyFillConfigAction = UiButtonFactory.createLocalizedAction("toolwindow.history.fillConfig", AllIcons.Actions.Edit, "toolwindow.history.fillConfig.tooltip") { fillFromHistory() }
-    private val historyCopyReportAction = UiButtonFactory.createLocalizedAction("toolwindow.history.copyReport", AllIcons.Actions.Copy, "toolwindow.history.copyReport.tooltip") { copyReportFromHistory() }
-    private val historyExportReportAction = UiButtonFactory.createLocalizedAction("toolwindow.history.exportReport", AllIcons.Actions.Download, "toolwindow.history.exportReport.tooltip") { exportReportFromHistory() }
-    private val historyRollbackAction = UiButtonFactory.createLocalizedAction("toolwindow.history.rollback", AllIcons.Actions.Rollback, "toolwindow.history.rollback.tooltip") { rollbackFromHistory() }
     private val historyViewDetailAction = UiButtonFactory.createLocalizedAction("toolwindow.history.viewDetail", AllIcons.Actions.Preview, "toolwindow.history.viewDetail.tooltip") { viewHistoryDetail() }
     private val historyClearAction = UiButtonFactory.createLocalizedAction("toolwindow.history.clear", AllIcons.Actions.GC, "toolwindow.history.clear.tooltip") { clearHistory() }
     /** 历史工具栏（与顶部工具栏同机制，间距由平台统一控制） */
@@ -380,12 +377,28 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
         serverCombo.renderer = javax.swing.ListCellRenderer<String> { list, value, index, sel, focus ->
             if (value == MANAGE_SERVERS_ITEM) {
-                JBLabel(DeployXBundle.message("toolwindow.server.manage"), AllIcons.General.Settings, SwingConstants.LEADING).apply {
+                val label = JBLabel(DeployXBundle.message("toolwindow.server.manage"), AllIcons.General.Settings, SwingConstants.LEADING).apply {
                     isOpaque = true
                     background = if (sel && index >= 0) list.selectionBackground else list.background
                     foreground = if (sel && index >= 0) list.selectionForeground else DeployXColors.link
-                    border = if (index >= 0) JBUI.Borders.compound(JBUI.Borders.customLineTop(DeployXColors.border), JBUI.Borders.empty(3, 6))
-                        else JBUI.Borders.empty(0, 6)
+                    border = JBUI.Borders.empty(3, 6)
+                }
+                if (index < 0) label
+                else JPanel(BorderLayout()).apply {
+                    // 第 6 轮：平台 combo UI 会覆盖渲染组件的 border，上一版用 border 画的分隔线被吞掉；
+                    // 改为独立的 1px 子组件，确保分隔线真正画出来
+                    isOpaque = true
+                    background = list.background
+                    add(JPanel().apply {
+                        isOpaque = false
+                        border = JBUI.Borders.empty(3, 0)
+                        layout = BorderLayout()
+                        add(object : JPanel() {
+                            init { isOpaque = true; background = com.intellij.ui.JBColor(java.awt.Color(0xC9CCD6), java.awt.Color(0x5A5D63)) }
+                            override fun getPreferredSize() = java.awt.Dimension(1, JBUI.scale(1).coerceAtLeast(1))
+                        }, BorderLayout.CENTER)
+                    }, BorderLayout.NORTH)
+                    add(label, BorderLayout.CENTER)
                 }
             } else serverRenderer.getListCellRendererComponent(list, value, index, sel, focus)
         }
@@ -984,6 +997,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     ) {
         val cancelToken = DeployCancelToken()
         currentCancelToken = cancelToken
+        updateRerunEnabled()  // 1.1.1：任务运行中禁用历史「重新执行」
         abortButton.isEnabled = true
         taskStartedAt = System.currentTimeMillis()
         transferNotified = false
@@ -1027,6 +1041,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 SwingUtilities.invokeLater {
                     abortButton.isEnabled = false
                     currentCancelToken = null
+                    updateRerunEnabled()
                     onProgressDone(cancelToken, result as T)
                     tabBar.setBadge(1, null)
                     onTaskFinished(title, cancelToken, com.alianga.idea.deploy.ui.TaskOutcome.failed(result))
@@ -1112,7 +1127,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 // 恢复原选中项后再打开设置，不触发映射带入
                 suppressMappingEvents = true
                 try { serverCombo.selectedIndex = lastServerIndex.coerceIn(-1, serverCombo.itemCount - 2) } finally { suppressMappingEvents = false }
-                SwingUtilities.invokeLater { ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX") }
+                SwingUtilities.invokeLater {
+                    com.alianga.idea.deploy.ui.settings.FileSyncSettingsConfigurable.open(project, com.alianga.idea.deploy.ui.settings.FileSyncSettingsConfigurable.TAB_SERVERS)
+                }
                 return@addActionListener
             }
             lastServerIndex = serverCombo.selectedIndex
@@ -1446,7 +1463,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         hdHeader.text = "<html><b>${esc(typeLabel(r))}</b> <font color='${hex(color)}'>${esc(statusText)}</font>" +
             " · ${esc(r.formattedDuration)} · <font color='${hex(DeployXColors.secondary)}'>${esc(note)}</font></html>"
         val backup = com.alianga.idea.deploy.ui.HistoryDetail.backupText(r, DeployXBundle.message("history.detail.backupDisabled"))
-        val mapping = MappingManager.getInstance().resolveMappingByLocalPath(r.sourcePath)?.mapping?.let { it.name.ifBlank { it.id } } ?: "—"
+        val mapping = com.alianga.idea.deploy.ui.HistoryDetail.mappingText(r) {
+            MappingManager.getInstance().resolveMappingByLocalPath(r.sourcePath)?.mapping?.let { it.name.ifBlank { it.id } }
+        }
         val rows = listOf(
             "history.detail.k.server" to "${ServerDisplay.title(r.serverId, r.serverName)} ${r.serverAddress}".trim(),
             "history.detail.k.mapping" to mapping,
@@ -1460,6 +1479,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         hdSteps.text = com.alianga.idea.deploy.ui.HistoryDetail.steps(r).joinToString("  →  ") { (step, mark) ->
             mark.symbol + " " + DeployXBundle.message("history.detail.step." + step.name.lowercase())
         }
+        // 1.1.1：旧记录的步骤链是推断的，tooltip 说明
+        hdSteps.toolTipText = if (com.alianga.idea.deploy.ui.HistoryDetail.stepsInferred(r)) DeployXBundle.message("history.detail.steps.inferred") else null
         val files = com.alianga.idea.deploy.ui.HistoryDetail.files(r)
         hdFiles.text = if (files.isEmpty()) DeployXBundle.message("toolwindow.history.detail.noFiles")
             else DeployXBundle.message("toolwindow.history.detail.updatedFilesTitle", files.size) + "\n" + files.joinToString("\n")
@@ -1472,12 +1493,26 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         hdRollbackReason.isVisible = reason != null
         val rerun = com.alianga.idea.deploy.ui.HistoryDetail.rerun(r)
         hdRerunBtn.text = DeployXBundle.message(com.alianga.idea.deploy.ui.HistoryDetail.rerunLabelKey(r))
-        hdRerunBtn.isEnabled = rerun != com.alianga.idea.deploy.ui.HistoryDetail.Rerun.NONE
-        hdRerunBtn.toolTipText = if (hdRerunBtn.isEnabled) null else DeployXBundle.message("history.detail.rerun.noneTip")
+        updateRerunEnabled()
     }
 
     /** 重新执行：按记录类型调用对应动作（部署 / 推送 / 拉取），失败记录为「重试」 */
+    /** 1.1.1：重新执行——记录类型不支持或有任务在运行时禁用，tooltip 写明原因 */
+    private fun updateRerunEnabled() {
+        val r = selectedHistoryRecord()
+        val supported = r != null && com.alianga.idea.deploy.ui.HistoryDetail.rerun(r) != com.alianga.idea.deploy.ui.HistoryDetail.Rerun.NONE
+        val busy = currentCancelToken != null
+        hdRerunBtn.isEnabled = supported && !busy
+        hdRerunBtn.toolTipText = when {
+            r == null -> null
+            !supported -> DeployXBundle.message("history.detail.rerun.noneTip")
+            busy -> DeployXBundle.message("history.detail.rerun.busyTip")
+            else -> null
+        }
+    }
+
     private fun rerunFromHistory() {
+        if (currentCancelToken != null) return
         val r = selectedHistoryRecord() ?: return
         if (!java.io.File(r.sourcePath).exists()) {
             Messages.showWarningDialog(DeployXBundle.message("toolwindow.log.localFileNotFound", r.sourcePath), DeployXBundle.message("toolwindow.log.redeployTitle"))

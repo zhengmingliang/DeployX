@@ -444,6 +444,7 @@ class ScriptManager {
             HistoryRecord(
                 type = HistoryRecord.OperationType.SCRIPT,
                 sourcePath = script.name,
+                scriptId = script.id,
                 serverId = server.id,
                 targetPath = script.workingDir.ifBlank { result.serverId },
                 fileCount = 0,

@@ -1,107 +1,76 @@
 package com.alianga.idea.deploy.action
 
 import com.alianga.idea.deploy.DeployXBundle
+import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.model.UploadItem
 import com.alianga.idea.deploy.service.MappingManager
-import com.alianga.idea.deploy.service.ServerManager
-import com.alianga.idea.deploy.ui.dialog.MappingSelectionDialog
+import com.alianga.idea.deploy.ui.dialog.ServerSelectionDialog
 import com.alianga.idea.deploy.ui.toolwindow.FileSyncToolWindowPanel
-import com.intellij.notification.NotificationGroupManager
-import com.intellij.notification.NotificationType
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
-import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.wm.ToolWindowManager
 
 /**
  * 预览同步 Action - 使用与实际 upload-only 相同的 --files-from dry-run 逻辑
+ *
+ * 1.1.1：与部署 / 推送统一走 [ServerSelectionDialog]（无可用服务器时对话框内显示空状态，
+ * 不再弹通知；嵌套映射歧义在对话框内改选，替代旧的 MappingSelectionDialog）。
+ * 单服务器且无映射歧义时跳过对话框直接预览（与旧行为一致）。预览不执行任何命令。
  */
-class PreviewSyncAction : AnAction() {
+class PreviewSyncAction : AbstractDeployAction<UploadItem>() {
 
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
-
-    override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-        val files = getSelectedFiles(e)
-        if (files.isEmpty()) return
-
-        val mappingManager = MappingManager.getInstance()
-        val allResolvedByFile: Map<VirtualFile, List<MappingManager.ResolvedMapping>> =
-            files.associateWith { file ->
-                mappingManager.resolveMappingsByLocalPath(file.path, file.isDirectory)
-            }.filterValues { it.isNotEmpty() }
-
-        if (allResolvedByFile.isEmpty()) {
-            showNotification(project, DeployXBundle.message("notification.noMappingFound"), NotificationType.WARNING)
-            return
+    override fun selectServers(
+        servers: List<ServerConfig>,
+        resolvedByFile: Map<VirtualFile, List<MappingManager.ResolvedMapping>>,
+        fileCount: Int
+    ): MultiServerSelectionResult? {
+        if (servers.isEmpty()) return null
+        val resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile)
+        if (servers.size == 1 && !ActionUtils.hasMappingChoices(resolvedByServerId)) {
+            return MultiServerSelectionResult(listOf(servers.first()), executePreCommand = false, executePostCommand = false)
         }
-
-        // 1.0.8：同一服务器匹配到多条嵌套（父子目录）映射时，逐台弹映射选择对话框，
-        // 允许用户手动改选次优先级（父目录）映射；未选择则保持默认（最深层级）映射。
-        // 按服务器归并候选，每台有歧义的服务器最多弹一次（避免多文件重复弹窗）。
-        val chosenMappingIdByServerId = mutableMapOf<String, String>()
-        ActionUtils.buildResolvedByServerId(allResolvedByFile).forEach { (serverId, candidates) ->
-            if (candidates.size <= 1) return@forEach
-            val server = ServerManager.getInstance().getServer(serverId)
-            val dialog = MappingSelectionDialog(
-                candidates = candidates,
-                serverDisplayName = server?.name ?: serverId
-            )
-            if (dialog.showAndGet()) {
-                dialog.selectedMapping?.let { chosenMappingIdByServerId[serverId] = it.effectiveId }
-            }
-        }
-
-        val previewItems = allResolvedByFile.mapNotNull { (file, allResolved) ->
-            // 默认仍取最具体（最深层级）的映射；若用户在其所属服务器上做过选择则优先采用
-            val autoPicked = allResolved.maxByOrNull { it.mapping.localDir.length } ?: return@mapNotNull null
-            val resolved = ActionUtils.pickResolvedByServer(
-                allResolved,
-                autoPicked.mapping.serverId,
-                chosenMappingIdByServerId[autoPicked.mapping.serverId]
-            ) ?: return@mapNotNull null
-            val mapping = resolved.mapping
-            UploadItem(
-                localPath = file.path,
-                isDirectory = file.isDirectory,
-                serverId = mapping.serverId,
-                mappingId = mapping.effectiveId,
-                sourceBaseDir = mapping.localDir,
-                remoteBaseDir = mapping.remoteDir,
-                relativePath = resolved.relativePath,
-                excludePatterns = mapping.exclude
-            )
-        }
-
-        if (previewItems.isEmpty()) {
-            showNotification(project, DeployXBundle.message("notification.noMappingFound"), NotificationType.WARNING)
-            return
-        }
-
-        ToolWindowManager.getInstance(project).getToolWindow("DeployX")?.show()
-
-        val panel = FileSyncToolWindowPanel.getPanel(project)
-        if (panel != null) {
-            if (previewItems.size < files.size) panel.appendLog(DeployXBundle.message("toolwindow.log.someFilesNotMapped", files.size - previewItems.size))
-            panel.executePreviewBatch(previewItems)
-        } else {
-            showNotification(project, DeployXBundle.message("notification.toolWindowNotOpen"), NotificationType.WARNING)
-        }
+        val dialog = ServerSelectionDialog(
+            servers,
+            dialogTitle(),
+            dialogMessage(fileCount),
+            showCommandOptions = false,
+            resolvedByServerId = resolvedByServerId,
+            okText = okText(),
+            hiddenServerCount = hiddenServerCount,
+            selectedPaths = selectedPaths
+        )
+        if (!dialog.showAndGet()) return null
+        val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }
+        if (selected.isEmpty()) return null
+        return MultiServerSelectionResult(selected, false, false, mappingIdsByServerId = dialog.selectedMappingIdsByServerId)
     }
 
-    override fun update(e: AnActionEvent) {
-        e.presentation.text = DeployXBundle.message("action.previewSync.text")
-        e.presentation.description = DeployXBundle.message("action.previewSync.description")
-        e.presentation.isEnabledAndVisible = getSelectedFiles(e).isNotEmpty()
+    override fun okText(): String = DeployXBundle.message("dialog.server.select.ok.preview")
+    override fun dialogTitle(): String = DeployXBundle.message("dialog.server.select.title")
+    override fun dialogMessage(fileCount: Int): String = DeployXBundle.message("dialog.server.select.messageWithCount", fileCount)
+
+    override fun buildItems(
+        resolvedByFile: Map<VirtualFile, List<MappingManager.ResolvedMapping>>,
+        targetServer: ServerConfig,
+        selection: ServerSelectionResult
+    ): List<UploadItem> = resolvedByFile.mapNotNull { (file, resolvedMappings) ->
+        val resolved = ActionUtils.pickResolvedByServer(resolvedMappings, targetServer.id, selection.mappingId)
+            ?: return@mapNotNull null
+        val mapping = resolved.mapping
+        UploadItem(
+            localPath = file.path,
+            isDirectory = file.isDirectory,
+            serverId = targetServer.id,
+            mappingId = mapping.effectiveId,
+            sourceBaseDir = mapping.localDir,
+            remoteBaseDir = mapping.remoteDir,
+            relativePath = resolved.relativePath,
+            excludePatterns = mapping.exclude
+        )
     }
 
-    private fun getSelectedFiles(e: AnActionEvent): Array<VirtualFile> {
-        return e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY) ?: emptyArray()
+    override fun executeBatch(panel: FileSyncToolWindowPanel, items: List<UploadItem>) {
+        panel.executePreviewBatch(items)
     }
 
-    private fun showNotification(project: com.intellij.openapi.project.Project, content: String, type: NotificationType) {
-        NotificationGroupManager.getInstance().getNotificationGroup("DeployX").createNotification(content, type).notify(project)
-    }
+    override fun actionText(): String = DeployXBundle.message("action.previewSync.text")
+    override fun actionDescription(): String = DeployXBundle.message("action.previewSync.description")
 }

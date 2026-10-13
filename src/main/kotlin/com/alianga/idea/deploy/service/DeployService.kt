@@ -148,6 +148,8 @@ class DeployService {
             SshConnection(server)
         } else null
 
+        // 1.1.1：记录各步骤真实结果
+        val steps = linkedMapOf<String, String>()
         try {
             if (sshConnection != null) {
                 groupLog(DeployXBundle.message("deploy.log.connectingServerForCommand", server.displayAddress))
@@ -171,6 +173,7 @@ class DeployService {
                 groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                 val conn = sshConnection ?: return
                 val preResult = conn.executeCommand(resolvedPreCommand)
+                steps["pre"] = if (preResult.success) "ok" else "fail"
                 if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                 if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandFailedBatch", preResult.exitCode, preResult.error))
             } else if (isLocal && !dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
@@ -208,13 +211,7 @@ class DeployService {
                 )
             )
             results.add(resultWithReport)
-
-            // 仅在实际同步/推送（非 dry-run 预览）成功/失败后记录历史；预览不写历史
-            if (!dryRun) {
-                val duration = System.currentTimeMillis() - startTime
-                val status = if (resultWithReport.success) HistoryRecord.OperationStatus.SUCCESS else HistoryRecord.OperationStatus.FAILED
-                saveUploadGroupHistory(key, groupItems, resultWithReport, duration, status)
-            }
+            steps["upload"] = if (resultWithReport.success) "ok" else "fail"
 
             if (!isLocal && !dryRun && !key.postCommand.isNullOrBlank()) {
                 cancelToken?.throwIfCancelled()
@@ -222,8 +219,17 @@ class DeployService {
                 groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                 val conn = sshConnection ?: return
                 val postResult = conn.executeCommand(resolvedPostCommand)
+                steps["post"] = if (postResult.success) "ok" else "fail"
                 if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                 if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandFailedBatch", postResult.exitCode, postResult.error))
+            }
+
+            // 仅在实际同步/推送（非 dry-run 预览）成功/失败后记录历史；预览不写历史
+            // 1.1.1：移到后置命令之后，步骤链能记录后置命令的真实结果
+            if (!dryRun) {
+                val duration = System.currentTimeMillis() - startTime
+                val status = if (resultWithReport.success) HistoryRecord.OperationStatus.SUCCESS else HistoryRecord.OperationStatus.FAILED
+                saveUploadGroupHistory(key, groupItems, resultWithReport, duration, status, steps)
             }
         } catch (e: DeployCancelledException) {
             groupLog(DeployXBundle.message("toolwindow.log.aborted"))
@@ -438,6 +444,8 @@ class DeployService {
                 conn
             } else null
 
+            // 1.1.1：记录各步骤真实结果
+            val steps = linkedMapOf<String, String>()
             try {
                 // 步骤 1: 上传前命令（在备份和上传之前执行）
                 if (!isLocal && !key.preCommand.isNullOrBlank()) {
@@ -446,6 +454,7 @@ class DeployService {
                     groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                     val conn = sshConnection ?: return@forEach
                     val preResult = conn.executeCommand(resolvedPreCommand)
+                    steps["pre"] = if (preResult.success) "ok" else "fail"
                     if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                     if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandExecuteFailed", preResult.exitCode, preResult.error))
                     else groupLog(DeployXBundle.message("deploy.log.preCommandSuccess"))
@@ -463,6 +472,7 @@ class DeployService {
                         groupLog(DeployXBundle.message("deploy.log.backupSelectedFiles", if (needsSshConnection) 4 else 2, backupDir))
                         BackupService.doBackupSelected(sshConnection, key.remoteBaseDir, groupItems.map { it.relativePath }, backupDir, groupLog)
                     }
+                    steps["backup"] = when { !backupResult.success -> "fail"; backupResult.path != null -> "ok"; else -> "skip" }
                     if (!backupResult.success) {
                         val result = DeployResult(
                             false,
@@ -495,6 +505,7 @@ class DeployService {
                     progressCallback = progressCallback,
                     cancelToken = cancelToken
                 )
+                steps["upload"] = if (syncResult.success) "ok" else "fail"
                 if (!syncResult.success) {
                     val result = DeployResult(
                         false,
@@ -534,7 +545,7 @@ class DeployService {
                         reportGroup = reportGroup
                     )
                     results.add(result)
-                    saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS)
+                    saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS, steps = steps)
                     return@forEach
                 }
 
@@ -549,6 +560,7 @@ class DeployService {
                             groupLog(DeployXBundle.message("deploy.log.unzipRemoteFile", remoteZip, key.unzipDest))
                             val conn = sshConnection ?: return@forEach
                             val unzipResult = BackupService.doUnzip(conn, remoteZip, key.unzipDest)
+                            steps["unzip"] = if (unzipResult.success) "ok" else "fail"
                             if (!unzipResult.success) {
                                 val result = DeployResult(
                                     false,
@@ -591,6 +603,7 @@ class DeployService {
                     groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                     val conn = sshConnection ?: return@forEach
                     val postResult = conn.executeCommand(resolvedPostCommand)
+                    steps["post"] = if (postResult.success) "ok" else "fail"
                     if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                     if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandExecuteFailed", postResult.exitCode, postResult.error))
                     else groupLog(DeployXBundle.message("deploy.log.postCommandSuccess"))
@@ -621,7 +634,7 @@ class DeployService {
                     reportGroup = reportGroup
                 )
                 results.add(result)
-                saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS, backupPath)
+                saveGroupHistory(key, groupItems, syncResult, duration, HistoryRecord.OperationStatus.SUCCESS, backupPath, steps)
             } catch (e: DeployCancelledException) {
                 groupLog(DeployXBundle.message("toolwindow.log.aborted"))
                 val result = DeployResult(
@@ -682,6 +695,7 @@ class DeployService {
         val isLocal = server.isLocal
         // 1.1.1：单路径部署的源 / 目标语义，部署与重新执行同一规则（避免 lib/lib 嵌套）
         val syncContents = SingleDeployPaths.syncContents(request.localPath, File(request.localPath).isDirectory, request.remotePath)
+        val steps = linkedMapOf<String, String>()  // 1.1.1：各步骤真实结果
         // LOCAL 服务器跳过所有 SSH 步骤；SSH 服务器按需建立连接
         val needsSshConnection = !isLocal && (
             !request.preCommand.isNullOrBlank() ||
@@ -728,6 +742,7 @@ class DeployService {
                 logCallback?.invoke(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
                 val preResult = conn.executeCommand(resolvedPreCommand)
+                steps["pre"] = if (preResult.success) "ok" else "fail"
                 if (preResult.output.isNotBlank()) {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                 }
@@ -751,6 +766,7 @@ class DeployService {
                 val backupDir = requireNotNull(request.backupDir) { "backupDir should not be null at this point" }
                 logCallback?.invoke(DeployXBundle.message("deploy.log.backupSingle", if (needsSshConnection) 4 else 2, backupSource, backupDir))
                 val backupResult = BackupService.doBackup(sshConnection, backupSource, backupDir, logCallback)
+                steps["backup"] = when { !backupResult.success -> "fail"; backupResult.path != null -> "ok"; else -> "skip" }
                 if (backupResult.success) {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.backupSuccess", backupResult.path ?: ""))
                     backupPath = backupResult.path
@@ -784,9 +800,10 @@ class DeployService {
                 cancelToken
             )
 
+            steps["upload"] = if (syncResult.success) "ok" else "fail"
             if (!syncResult.success) {
                 logCallback?.invoke(DeployXBundle.message("deploy.log.uploadFailedErrorLog", syncResult.error ?: ""))
-                saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.FAILED)
+                saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.FAILED, null, steps)
                 return DeployResult(
                     success = false,
                     taskId = taskId,
@@ -802,7 +819,7 @@ class DeployService {
             if (!needsSshConnection) {
                 val duration = System.currentTimeMillis() - startTime
                 logCallback?.invoke(DeployXBundle.message("deploy.log.deployComplete", duration))
-                saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS, null)
+                saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS, null, steps)
                 val reportGroup = ReportBuilder.buildReportGroup(
                     server = server,
                     sourceBaseDir = request.localPath,
@@ -833,12 +850,13 @@ class DeployService {
                 val remoteFile = "${request.remotePath}/$filename"
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
                 val unzipResult = BackupService.doUnzip(conn, remoteFile, request.unzipDest)
+                steps["unzip"] = if (unzipResult.success) "ok" else "fail"
 
                 if (unzipResult.success) {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.unzipSuccess", request.unzipDest))
                 } else {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.unzipFailedErrorLog", unzipResult.error ?: ""))
-                    saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.FAILED, backupPath)
+                    saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.FAILED, backupPath, steps)
                     return DeployResult(
                         success = false,
                         taskId = taskId,
@@ -860,6 +878,7 @@ class DeployService {
                 logCallback?.invoke(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
                 val postResult = conn.executeCommand(resolvedPostCommand)
+                steps["post"] = if (postResult.success) "ok" else "fail"
                 if (postResult.output.isNotBlank()) {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                 }
@@ -872,7 +891,7 @@ class DeployService {
 
             val duration = System.currentTimeMillis() - startTime
             logCallback?.invoke(DeployXBundle.message("deploy.log.deployComplete", duration))
-            saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS, backupPath)
+            saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS, backupPath, steps)
 
             val reportGroup = ReportBuilder.buildReportGroup(
                 server = server,
@@ -1031,7 +1050,8 @@ class DeployService {
         syncResult: SyncResult,
         duration: Long,
         status: HistoryRecord.OperationStatus,
-        backupFilePath: String? = null
+        backupFilePath: String? = null,
+        steps: Map<String, String> = emptyMap()
     ) {
         val server = ServerManager.getInstance().getServer(key.serverId)
         val reportGroup = if (server != null) {
@@ -1046,7 +1066,7 @@ class DeployService {
                 totalSize = syncResult.totalSize,
                 output = syncResult.output,
                 transferredFileList = syncResult.transferredFileList,
-                backupPath = key.backupDir
+                backupPath = backupFilePath
             )
         } else null
         val reportText = reportGroup?.let {
@@ -1075,7 +1095,10 @@ class DeployService {
                 serverAddress = reportGroup?.serverAddress ?: "",
                 reportText = reportText,
                 canRollback = !backupFilePath.isNullOrBlank(),
-                backupFilePath = backupFilePath ?: ""
+                backupFilePath = backupFilePath ?: "",
+                stepResults = steps,
+                mappingId = key.mappingId,
+                mappingName = mappingNameOf(key.mappingId)
             )
         )
     }
@@ -1142,7 +1165,8 @@ class DeployService {
         items: List<UploadItem>,
         syncResult: SyncResult,
         duration: Long,
-        status: HistoryRecord.OperationStatus
+        status: HistoryRecord.OperationStatus,
+        steps: Map<String, String> = emptyMap()
     ) {
         val server = ServerManager.getInstance().getServer(key.serverId)
         val reportGroup = if (server != null) {
@@ -1181,7 +1205,10 @@ class DeployService {
                 transferredFiles = reportGroup?.transferredFiles ?: emptyList(),
                 serverName = reportGroup?.serverName ?: "",
                 serverAddress = reportGroup?.serverAddress ?: "",
-                reportText = reportText
+                reportText = reportText,
+                stepResults = steps,
+                mappingId = key.mappingId,
+                mappingName = mappingNameOf(key.mappingId)
             )
         )
     }
@@ -1194,9 +1221,13 @@ class DeployService {
         syncResult: com.alianga.idea.deploy.model.SyncResult,
         startTime: Long,
         status: com.alianga.idea.deploy.model.HistoryRecord.OperationStatus,
-        backupFilePath: String? = null
+        backupFilePath: String? = null,
+        steps: Map<String, String> = emptyMap()
     ) {
         val syncContents = SingleDeployPaths.syncContents(request.localPath, File(request.localPath).isDirectory, request.remotePath)
+        // 1.1.1：单路径部署所属映射（同服务器下最深层级）
+        val mapping = MappingManager.getInstance().resolveMappingsByLocalPath(request.localPath)
+            .map { it.mapping }.filter { it.serverId == request.serverId }.maxByOrNull { it.localDir.length }
         val server = ServerManager.getInstance().getServer(request.serverId)
         val reportGroup = if (server != null) {
             ReportBuilder.buildReportGroup(
@@ -1239,9 +1270,16 @@ class DeployService {
                 serverAddress = reportGroup?.serverAddress ?: "",
                 reportText = reportText,
                 canRollback = !backupFilePath.isNullOrBlank(),
-                backupFilePath = backupFilePath ?: ""
+                backupFilePath = backupFilePath ?: "",
+                stepResults = steps,
+                mappingId = mapping?.effectiveId.orEmpty(),
+                mappingName = mapping?.name.orEmpty()
             )
         )
     }
+
+    /** 1.1.1：映射 id → 名称（写入历史，映射之后被改名 / 删除也能看到当时的名称） */
+    private fun mappingNameOf(id: String): String =
+        MappingManager.getInstance().getMappingById(id)?.let { it.name.ifBlank { it.localDir } }.orEmpty()
 }
 

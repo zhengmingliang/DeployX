@@ -79,13 +79,15 @@ class HistoryDetailDialog(
             addRow(panel, DeployXBundle.message("toolwindow.history.detail.remoteDir", record.targetPath.ifBlank { "-" }), gridy++)
         }
         // 1.1.1：与历史页详情区一致，补「映射」与步骤链
-        val mapping = com.alianga.idea.deploy.service.MappingManager.getInstance().resolveMappingByLocalPath(record.sourcePath)
-            ?.mapping?.let { it.name.ifBlank { it.id } } ?: "—"
+        val mapping = com.alianga.idea.deploy.ui.HistoryDetail.mappingText(record) {
+            com.alianga.idea.deploy.service.MappingManager.getInstance().resolveMappingByLocalPath(record.sourcePath)
+                ?.mapping?.let { it.name.ifBlank { it.id } }
+        }
         addRow(panel, DeployXBundle.message("history.detail.dialog.mapping", mapping), gridy++)
         addRow(panel, DeployXBundle.message("history.detail.dialog.steps",
             com.alianga.idea.deploy.ui.HistoryDetail.steps(record).joinToString("  →  ") { (step, mark) ->
                 mark.symbol + " " + DeployXBundle.message("history.detail.step." + step.name.lowercase())
-            }), gridy++)
+            } + if (com.alianga.idea.deploy.ui.HistoryDetail.stepsInferred(record)) " " + DeployXBundle.message("history.detail.steps.inferredShort") else ""), gridy++)
         addRow(panel, DeployXBundle.message("toolwindow.history.detail.fileCount", record.fileCount), gridy++)
         addRow(panel, DeployXBundle.message("toolwindow.history.detail.duration", record.formattedDuration), gridy++)
         if (record.fileSize > 0) {

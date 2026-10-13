@@ -221,8 +221,10 @@ class ServerSelectionDialog(
         val root = JPanel(BorderLayout(0, JBUI.scale(6))).apply { minimumSize = JBUI.size(480, 200) }
         val head = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(JBLabel(messageText))
-            subtitle()?.let { add(JBLabel(it).apply { foreground = DeployXColors.secondary }) }
+            // 1.1.1：有副标题（已选择 N 个目录 · 路径）时不再重复显示旧的「已选择 N 个文件/目录，请选择…」
+            val sub = subtitle()
+            if (sub == null) add(JBLabel(messageText))
+            else add(JBLabel(sub).apply { foreground = DeployXColors.secondary })
             components.forEach { (it as JComponent).alignmentX = Component.LEFT_ALIGNMENT }
         }
         root.add(head, BorderLayout.NORTH)
@@ -277,6 +279,8 @@ class ServerSelectionDialog(
     private fun emptyState(): JComponent = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = JBUI.Borders.empty(16, 8)
+        add(JBLabel(DeployXBundle.message("dialog.server.select.emptyTitle")).apply { font = JBUI.Fonts.label().asBold().biggerOn(1f) })
+        add(javax.swing.Box.createVerticalStrut(JBUI.scale(4)))
         add(JBLabel(emptyReason ?: DeployXBundle.message("dialog.server.select.empty")).apply { setAllowAutoWrapping(true) })
         selectedPaths.take(3).forEach { add(JBLabel(it).apply { foreground = DeployXColors.secondary }) }
         add(javax.swing.Box.createVerticalStrut(JBUI.scale(8)))
