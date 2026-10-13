@@ -25,6 +25,11 @@ import com.alianga.idea.deploy.ui.CommandFieldWithScriptButton
 import com.alianga.idea.deploy.ui.AdaptiveRowPanel
 import com.alianga.idea.deploy.ui.UiButtonFactory
 import com.alianga.idea.deploy.ui.WrapLayout
+import com.alianga.idea.deploy.ui.DeployMode
+import com.alianga.idea.deploy.ui.DeployXColors
+import com.alianga.idea.deploy.ui.OperationSummary
+import com.alianga.idea.deploy.ui.ServerDisplay
+import com.alianga.idea.deploy.ui.StatusArea
 import com.alianga.idea.deploy.ui.dialog.HistoryDetailDialog
 import com.alianga.idea.deploy.ui.dialog.MappingSelectionDialog
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
@@ -76,7 +81,15 @@ import javax.swing.*
  * 文件同步工具窗口主面板
  * 通过 companion object 暴露实例引用，供右键菜单 Action 调用
  */
-class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPanel(true, true) {
+class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPanel(true, true), com.intellij.openapi.Disposable {
+
+    /** 1.1.0：随内容页签释放，注销语言 / 服务器监听，避免泄漏 */
+    override fun dispose() {
+        languageChangeUnsubscribe()
+        serverListUnsubscribe()
+        panelByProject.remove(project.hashCode().toString())
+    }
+
 
     companion object {
         /** 按 Project 存储面板实例，供 Action 调用 */
@@ -87,6 +100,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
          * 语义贴合且颜色随主题自适应，与工具栏其他 AllIcons 图标风格统一。
          */
         private val CLEAR_LOG_ICON: Icon = AllIcons.Actions.GC
+
+        private const val KEY_PUSH_MODE = "deployx.toolwindow.pushMode"
+        private const val KEY_PULL_MODE = "deployx.toolwindow.pullMode"
 
         fun getPanel(project: Project): FileSyncToolWindowPanel? {
             return panelByProject[project.hashCode().toString()]
@@ -202,6 +218,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     // 工具栏（保留引用以便语言切换后刷新 Action 显示文本）
     private var toolbar: com.intellij.openapi.actionSystem.ActionToolbar? = null
+    private var logToolbar: com.intellij.openapi.actionSystem.ActionToolbar? = null
+    /** 设置动作，由 Factory 放进工具窗口标题栏 gear 菜单 */
+    var settingsAction: AnAction? = null
+        private set
+
+    /** 1.1.0：四个页签作为 ToolWindow 内容页签（ContentManager）挂载，这里只保存页面组件 */
+    private val pages = mutableListOf<JComponent>()
+    /** 由 Factory 注入：切换到第 i 个内容页签 */
+    var tabSelector: ((Int) -> Unit)? = null
+    /** 由 Factory 注入：语言切换时刷新页签标题 */
+    var tabTitleUpdater: (() -> Unit)? = null
+    private var selectedPage = 0
 
     // 进度
     private val progressBar = JProgressBar(0, 100)
@@ -238,8 +266,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val historyCardLayout = CardLayout()
     private lateinit var historyCardPanel: JPanel
 
-    // Tab 面板
-    private val tabbedPane = JBTabbedPane()
 
     // 1.0.9 重构：操作面板的 3 个 TitledBorder 分组 panel 引用（保留以便 relocalize 时刷新标题）
     private lateinit var serverPathPanel: JPanel
@@ -268,6 +294,24 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         serverManager.addChangeListener {
             SwingUtilities.invokeLater { refreshServerCombo() }
         }
+
+    // 1.1.0：以下成员须在 init 之前声明（Kotlin 按文本顺序初始化）
+    private var taskStartedAt = 0L
+    /** 批量传输已经由 notifyTransferResult 发过通知时，结束时不再重复通知 */
+    private var transferNotified = false
+    private var pushMode = DeployMode.DEPLOY
+    private var pullMode = DeployMode.PULL
+    private val deploySplitButton = JBOptionButton(null, null).apply { addSeparator = true }
+    private val pullSplitButton = JBOptionButton(null, null).apply { addSeparator = true }
+    private val statusArea: StatusArea by lazy {
+        StatusArea(
+            progressBar, progressLabel,
+            DeployXBundle.message("toolwindow.button.abort"), { abortCurrentTask() },
+            DeployXBundle.message("toolwindow.status.viewLog"), { switchToLogTab() },
+            DeployXBundle.message("toolwindow.status.copyReport"), { copyLastReport() },
+            DeployXBundle.message("toolwindow.status.close")
+        )
+    }
 
     init {
         serverCombo.renderer = com.alianga.idea.deploy.ui.ServerComboRenderer { _, value ->
@@ -299,12 +343,15 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             logArea.text = ""
             serverLogAreas.values.forEach { it.text = "" }
         }
-        val actionGroup = DefaultActionGroup().apply {
-            listOf(settingsAction, refreshAction, copyReportAction, exportReportAction, clearLogAction).forEach { add(it) }
-        }
-        val toolbar = ActionManager.getInstance().createActionToolbar("FileSyncToolbar", actionGroup, true)
-        toolbar.targetComponent = this
-        this.toolbar = toolbar
+        // 1.1.0：不再有全局 5 图标工具栏（现状问题 #1）。设置进标题栏 gear 菜单（见 Factory），
+        // 其余动作按页签归属：操作页=刷新；日志页=复制报告/导出报告/清空。
+        this.settingsAction = settingsAction
+        val opsToolbar = ActionManager.getInstance().createActionToolbar("DeployX.Operation", DefaultActionGroup(refreshAction), true)
+        val logToolbar = ActionManager.getInstance().createActionToolbar(
+            "DeployX.Log", DefaultActionGroup(copyReportAction, exportReportAction, Separator.getInstance(), clearLogAction), true
+        )
+        this.toolbar = opsToolbar
+        this.logToolbar = logToolbar
 
         // ===== 操作面板 =====
         // 1.0.9 重构：3 个 TitledBorder 分组（服务器与路径 / 部署选项 / 执行命令），
@@ -384,23 +431,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 super.doLayout()
             }
         }.apply {
-            add(previewButton)
-            add(startDeployButton)
-            add(pullButton)
-            add(quickPushButton)
             alignmentX = Component.LEFT_ALIGNMENT
+        }
+        // 1.1.0：底部操作栏只有两组——左「拉取 ▾」，右主按钮「部署 ▾」（现状问题 #8）
+        applyDeployMode(DeployMode.parse(com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_PUSH_MODE), DeployMode.DEPLOY))
+        applyPullMode(DeployMode.parse(com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_PULL_MODE), DeployMode.PULL))
+        val actionBar = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.emptyTop(4)
+            add(pullSplitButton, BorderLayout.WEST)
+            add(deploySplitButton, BorderLayout.EAST)
         }
 
         // 进度面板：进度条整行、状态标签在下一行。进度文本含文件路径与速度，较长，
         // 放右侧在窄面板下会被截断，换行到下方后始终完整可见。1.0.9 加 8px 顶部内边距
-        val progressInfoPanel = JPanel(BorderLayout(0, JBUI.scale(2))).apply {
-            add(progressBar, BorderLayout.CENTER)
-            add(progressLabel, BorderLayout.SOUTH)
-        }
-        val progressPanel = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.empty(8, 0, 0, 0)
-            add(progressInfoPanel, BorderLayout.CENTER)
-        }
+        // 1.1.0：进度区改为固定位置的状态区（空闲摘要 / 运行中 / 完成），见 StatusArea
 
         // 操作面板实现 Scrollable 且宽度跟随视口：内容整体收缩换行，而不是出现
         // 横向滚动条把右侧按钮藏在可视区外（拉窄时由各子面板自行换行/收缩兜底）
@@ -417,9 +461,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         operationPanel.add(Box.createVerticalStrut(JBUI.scale(12)))
         operationPanel.add(deployFlowGroup)
         operationPanel.add(Box.createVerticalStrut(JBUI.scale(12)))
-        operationPanel.add(buttonPanel)
-        operationPanel.add(Box.createVerticalStrut(8))
-        operationPanel.add(progressPanel)
+        // 1.1.0：状态区 + 操作栏固定在底部，表单内容区单独滚动（窄档操作栏不被挤掉）
+        val bottomBar = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.compound(JBUI.Borders.customLineTop(DeployXColors.border), JBUI.Borders.empty(0, 12, 8, 12))
+            add(statusArea, BorderLayout.CENTER)
+            add(actionBar, BorderLayout.SOUTH)
+        }
+        val opsPage = JPanel(BorderLayout()).apply {
+            add(JBScrollPane(operationPanel).apply { border = JBUI.Borders.empty() }, BorderLayout.CENTER)
+            add(bottomBar, BorderLayout.SOUTH)
+            minimumSize = JBUI.size(320, 200)
+        }
+        installSummaryListeners()
 
         // ===== 日志面板 =====
         configureLogArea(logArea)
@@ -514,22 +567,36 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         scriptTabPanel.setCommandFiller { preCommand, command -> fillCommandFromScript(preCommand, command) }
 
         // ===== Tab 面板 =====
-        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.operation"), AllIcons.Actions.Execute, JBScrollPane(operationPanel))
-        // 1.0.8：日志 Tab 容器已包裹"终止按钮 + 复制按钮"工具栏，传 logPanel
-        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.log"), AllIcons.Nodes.LogFolder, logPanel)
-        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.history"), AllIcons.Vcs.History, historyPanel)
-        tabbedPane.addTab(DeployXBundle.message("toolwindow.tab.script"), AllIcons.FileTypes.Xml, scriptTabPanel)
-
-        setContent(tabbedPane)
-        setToolbar(toolbar.component)
-
-        // 切换到「历史」Tab 时重新加载，确保展示最新记录（避免工具窗口初次构建时
-        // HistoryManager 尚未就绪导致列表一直为空、显示空白的问题）
-        tabbedPane.addChangeListener {
-            if (tabbedPane.selectedComponent === historyPanel) {
-                refreshHistory()
-            }
+        // 1.1.0：每个页签是一个 SimpleToolWindowPanel，顶部是该页签自己的工具栏
+        fun page(content: JComponent, tb: ActionToolbar?): JComponent = SimpleToolWindowPanel(true, true).apply {
+            setContent(content)
+            if (tb != null) { tb.targetComponent = this; setToolbar(tb.component) }
         }
+        pages.clear()
+        pages += page(opsPage, opsToolbar)
+        pages += page(logPanel, logToolbar)
+        pages += historyPanel
+        pages += scriptTabPanel
+        // 面板本身不再直接显示，仅作为状态与动作的宿主
+        setContent(JPanel())
+    }
+
+    /** 页签标题（与 [pageComponents] 顺序一致） */
+    fun pageTitles(): List<String> = listOf("toolwindow.tab.operation", "toolwindow.tab.log", "toolwindow.tab.history", "toolwindow.tab.script")
+        .map { DeployXBundle.message(it) }
+
+    fun pageComponents(): List<JComponent> = pages
+
+    /** Factory 在内容页签切换时回调：进入「历史」页时重新加载，确保展示最新记录 */
+    fun onPageSelected(index: Int) {
+        selectedPage = index
+        if (index == 2) refreshHistory()
+    }
+
+    private fun selectTab(index: Int) {
+        selectedPage = index
+        tabSelector?.invoke(index)
+        if (index == 2) refreshHistory()
     }
 
     /**
@@ -602,13 +669,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         historyToolbar?.updateActionsImmediately()
         historyEmptyLabel.text = DeployXBundle.message("toolwindow.history.empty")
 
-        // Tab 标题（operation=0, log=1, history=2, script=3）
-        if (tabbedPane.tabCount >= 4) {
-            tabbedPane.setTitleAt(0, DeployXBundle.message("toolwindow.tab.operation"))
-            tabbedPane.setTitleAt(1, DeployXBundle.message("toolwindow.tab.log"))
-            tabbedPane.setTitleAt(2, DeployXBundle.message("toolwindow.tab.history"))
-            tabbedPane.setTitleAt(3, DeployXBundle.message("toolwindow.tab.script"))
-        }
+        // 内容页签标题由 Factory 刷新
+        tabTitleUpdater?.invoke()
+        logToolbar?.updateActionsImmediately()
+        relocalizeActionBar()
+        updateSummary()
         // 日志 tab 内的 "All" 子 tab
         if (logTabbedPane.tabCount >= 1) {
             logTabbedPane.setTitleAt(0, DeployXBundle.message("toolwindow.tab.all"))
@@ -795,6 +860,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val cancelToken = DeployCancelToken()
         currentCancelToken = cancelToken
         abortButton.isEnabled = true
+        taskStartedAt = System.currentTimeMillis()
+        transferNotified = false
+        statusArea.showRunning()
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, title, true) {
             private var result: T? = null
@@ -828,9 +896,131 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     abortButton.isEnabled = false
                     currentCancelToken = null
                     onProgressDone(cancelToken, result as T)
+                    onTaskFinished(title, cancelToken)
                 }
             }
         })
+    }
+
+    // ===================== 1.1.0：底部操作栏 + 状态区 =====================
+
+
+    private fun modeAction(mode: DeployMode): AbstractAction {
+        val (key, icon) = when (mode) {
+            DeployMode.DEPLOY -> "toolwindow.button.startDeploy" to AllIcons.Actions.Execute
+            DeployMode.QUICK_PUSH -> "toolwindow.button.quickPush" to AllIcons.Actions.Upload
+            DeployMode.PREVIEW_PUSH -> "toolwindow.button.previewSync.option" to AllIcons.Actions.Preview
+            DeployMode.PULL -> "toolwindow.button.pull" to AllIcons.Actions.Download
+            DeployMode.PREVIEW_PULL -> "toolwindow.button.previewPull.option" to AllIcons.Actions.Preview
+        }
+        val shortcut = when (mode) {
+            DeployMode.DEPLOY -> "DeployX.Deploy"
+            DeployMode.QUICK_PUSH -> "DeployX.QuickPush"
+            else -> null
+        }?.let { com.intellij.openapi.keymap.KeymapUtil.getFirstKeyboardShortcutText(it) }.orEmpty()
+        return object : AbstractAction(DeployXBundle.message(key), icon) {
+            init { if (shortcut.isNotEmpty()) putValue(Action.SHORT_DESCRIPTION, shortcut) }
+            override fun actionPerformed(e: ActionEvent) = runMode(mode)
+        }
+    }
+
+    private fun runMode(mode: DeployMode) {
+        // 拆分按钮主体记住上次选择的模式（与 IDE「运行」按钮一致）
+        val props = com.intellij.ide.util.PropertiesComponent.getInstance()
+        if (mode.push) { props.setValue(KEY_PUSH_MODE, mode.name); applyDeployMode(mode) }
+        else { props.setValue(KEY_PULL_MODE, mode.name); applyPullMode(mode) }
+        when (mode) {
+            DeployMode.DEPLOY -> startDeploy()
+            DeployMode.QUICK_PUSH -> quickPush()
+            DeployMode.PREVIEW_PUSH -> previewSync()
+            DeployMode.PULL -> pullFromServer()
+            DeployMode.PREVIEW_PULL -> previewPull()
+        }
+    }
+
+
+    private fun applyDeployMode(mode: DeployMode) {
+        pushMode = mode
+        deploySplitButton.action = modeAction(mode)
+        deploySplitButton.options = arrayOf(modeAction(DeployMode.DEPLOY), modeAction(DeployMode.QUICK_PUSH), modeAction(DeployMode.PREVIEW_PUSH))
+        // JBOptionButton 在平台 LAF 下即以默认按钮（accent）样式绘制，无需内部 API
+        deploySplitButton.toolTipText = DeployXBundle.message("toolwindow.button.startDeploy.tooltip")
+        updateSummary()
+    }
+
+    private fun applyPullMode(mode: DeployMode) {
+        pullMode = mode
+        pullSplitButton.action = modeAction(mode)
+        pullSplitButton.options = arrayOf(modeAction(DeployMode.PULL), modeAction(DeployMode.PREVIEW_PULL))
+        pullSplitButton.toolTipText = DeployXBundle.message("toolwindow.button.pull.tooltip")
+        updateSummary()
+    }
+
+    private fun relocalizeActionBar() {
+        applyDeployMode(pushMode)
+        applyPullMode(pullMode)
+        statusArea.cancelButton.text = DeployXBundle.message("toolwindow.button.abort")
+        statusArea.logLink.text = DeployXBundle.message("toolwindow.status.viewLog")
+        statusArea.reportLink.text = DeployXBundle.message("toolwindow.status.copyReport")
+        statusArea.closeLink.text = DeployXBundle.message("toolwindow.status.close")
+    }
+
+
+    private fun installSummaryListeners() {
+        val docListener = object : com.intellij.ui.DocumentAdapter() {
+            override fun textChanged(e: javax.swing.event.DocumentEvent) = updateSummary()
+        }
+        localPathField.document.addDocumentListener(docListener)
+        remotePathField.document.addDocumentListener(docListener)
+        serverCombo.addActionListener { updateSummary() }
+        backupCheck.addItemListener { updateSummary() }
+        unzipCheck.addItemListener { updateSummary() }
+        updateSummary()
+    }
+
+    /** 刷新空闲摘要；缺项时置灰两个拆分按钮并写明缺什么 */
+    private fun updateSummary() {
+        val serverId = serverCombo.selectedItem?.toString()
+        val server = serverId?.let { serverManager.getServer(it) }
+        val title = server?.let { ServerDisplay.title(it.id, it.name) }
+        val labels: (String) -> String = { DeployXBundle.message("toolwindow.summary.$it") }
+        val r = OperationSummary.build(
+            localPathField.text, title, remotePathField.text,
+            backupCheck.isSelected, unzipCheck.isSelected,
+            preCommandField.text, postCommandField.text, labels
+        )
+        if (r.ready) {
+            statusArea.headline.text = r.headline.replaceFirst(labels("deploy"), deploySplitButton.action?.getValue(Action.NAME)?.toString() ?: labels("deploy"))
+            statusArea.headline.foreground = com.intellij.util.ui.UIUtil.getLabelForeground()
+            statusArea.headline.icon = null
+            statusArea.flow.text = r.flow
+        } else {
+            val miss = r.missing.joinToString("、") { DeployXBundle.message("toolwindow.summary.missing.${it.name.lowercase()}") }
+            statusArea.headline.text = DeployXBundle.message("toolwindow.summary.missing", miss)
+            statusArea.headline.foreground = DeployXColors.error
+            statusArea.headline.icon = AllIcons.General.BalloonError
+            statusArea.flow.text = r.flow
+        }
+        deploySplitButton.isEnabled = r.ready
+        // 拉取同样需要服务器 + 本地 + 远程
+        pullSplitButton.isEnabled = r.ready
+    }
+
+    /** 任务结束：状态区显示结果行，并发一条带「查看日志」「复制报告」的平台通知 */
+    private fun onTaskFinished(title: String, token: DeployCancelToken) {
+        val text = progressLabel.text.orEmpty()
+        val failed = text.contains("失败") || text.contains("fail", ignoreCase = true) || text.contains("error", ignoreCase = true)
+        val kind = when { token.isCancelled() -> 2; failed -> 1; else -> 0 }
+        val seconds = (System.currentTimeMillis() - taskStartedAt) / 100 / 10.0
+        val line = DeployXBundle.message("toolwindow.status.result", text, seconds)
+        statusArea.showDone(line, kind)
+        if (!transferNotified && com.alianga.idea.deploy.config.FileSyncSettings.getInstance().systemNotification) {
+            com.intellij.notification.NotificationGroupManager.getInstance().getNotificationGroup("DeployX")
+                .createNotification(title, line, when (kind) { 0 -> NotificationType.INFORMATION; 1 -> NotificationType.ERROR; else -> NotificationType.WARNING })
+                .addAction(com.intellij.notification.NotificationAction.createSimple(DeployXBundle.message("toolwindow.status.viewLog")) { switchToLogTab() })
+                .addAction(com.intellij.notification.NotificationAction.createSimple(DeployXBundle.message("toolwindow.status.copyReport")) { copyLastReport() })
+                .notify(project)
+        }
     }
 
     private fun refreshServerCombo() {
@@ -995,7 +1185,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val idx2 = servers.indexOfFirst { it.id == record.serverId }
         if (idx2 >= 0) serverCombo.selectedIndex = idx2
 
-        tabbedPane.selectedIndex = 0 // 切换到操作 tab
+        selectTab(0) // 切换到操作 tab
         appendLog(DeployXBundle.message("toolwindow.log.configFilled"))
     }
 
@@ -1009,7 +1199,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     fun selectScriptTab() {
-        tabbedPane.selectedComponent = scriptTabPanel
+        selectTab(3)
         scriptTabPanel.refreshAll()
     }
 
@@ -1034,7 +1224,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         } else {
             target.text.trimEnd() + "\n" + command.trim()
         }
-        tabbedPane.selectedIndex = 0
+        selectTab(0)
     }
 
     /**
@@ -1375,6 +1565,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      * 批量传输完成后弹出系统通知。
      */
     private fun notifyTransferResult(successCount: Int, total: Int) {
+        transferNotified = true
         val failCount = total - successCount
         val (message, type) = when {
             failCount == 0 -> DeployXBundle.message("notification.transfer.allSuccess", successCount) to NotificationType.INFORMATION
@@ -1401,7 +1592,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val chooser = JFileChooser().apply {
             selectedFile = java.io.File("file-sync-report-${System.currentTimeMillis()}.md")
         }
-        val result = chooser.showSaveDialog(this)
+        val result = chooser.showSaveDialog(pages.firstOrNull() ?: this)
         if (result == JFileChooser.APPROVE_OPTION) {
             chooser.selectedFile.writeText(lastUpdateReportText)
             Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.exported", chooser.selectedFile.absolutePath), DeployXBundle.message("toolwindow.report.export.title"))
@@ -1445,7 +1636,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val chooser = JFileChooser().apply {
             selectedFile = java.io.File("deployx-report-${record.formattedDate.replace("[ :/]".toRegex(), "-")}.md")
         }
-        val result = chooser.showSaveDialog(this)
+        val result = chooser.showSaveDialog(pages.firstOrNull() ?: this)
         if (result == JFileChooser.APPROVE_OPTION) {
             chooser.selectedFile.writeText(reportText)
             Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.exported", chooser.selectedFile.absolutePath), DeployXBundle.message("toolwindow.report.export.title"))
@@ -1511,9 +1702,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      * 后立即看到实时日志和终止按钮）。
      */
     fun switchToLogTab() {
-        if (tabbedPane.selectedIndex != 1) {
-            tabbedPane.selectedIndex = 1
-        }
+        if (selectedPage != 1) selectTab(1)
     }
 
     private fun previewSync() {
