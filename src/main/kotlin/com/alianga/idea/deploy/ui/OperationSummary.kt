@@ -27,7 +27,8 @@ object OperationSummary {
         unzip: Boolean,
         preCommand: String,
         postCommand: String,
-        labels: (String) -> String
+        labels: (String) -> String,
+        mode: DeployMode = DeployMode.DEPLOY
     ): Result {
         val missing = buildList {
             if (serverTitle.isNullOrBlank()) add(Missing.SERVER)
@@ -36,14 +37,24 @@ object OperationSummary {
         }
         val name = shortName(localPath)
         val headline = "${labels("deploy")} $name → ${serverTitle.orEmpty()} ${remotePath.trim()}".replace(Regex(" +"), " ").trim()
-        return Result(headline, flowText(backup, unzip, preCommand, postCommand, labels), missing)
+        return Result(headline, flowText(backup, unzip, preCommand, postCommand, labels, mode), missing)
     }
 
-    /** 「流程：备份 → 上传 → 解压 → 后置命令」，未启用的步骤省略 */
-    fun flowText(backup: Boolean, unzip: Boolean, pre: String, post: String, labels: (String) -> String): String {
+    /**
+     * 「流程：备份 → 前置命令 → 上传 → 解压 → 后置命令」（原型顺序），未启用的步骤省略；
+     * 快速推送只写「上传」，预览写「预览（dry-run）」，拉取写「拉取」。
+     */
+    fun flowText(backup: Boolean, unzip: Boolean, pre: String, post: String, labels: (String) -> String,
+                 mode: DeployMode = DeployMode.DEPLOY): String {
+        when (mode) {
+            DeployMode.QUICK_PUSH -> return labels("flow") + labels("upload")
+            DeployMode.PREVIEW_PUSH, DeployMode.PREVIEW_PULL -> return labels("flow") + labels("preview")
+            DeployMode.PULL -> return labels("flow") + labels("pull")
+            DeployMode.DEPLOY -> {}
+        }
         val steps = buildList {
-            if (pre.isNotBlank()) add(labels("pre"))
             if (backup) add(labels("backup"))
+            if (pre.isNotBlank()) add(labels("pre"))
             add(labels("upload"))
             if (unzip) add(labels("unzip"))
             if (post.isNotBlank()) add(labels("post"))

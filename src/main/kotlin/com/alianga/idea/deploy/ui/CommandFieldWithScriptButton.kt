@@ -135,6 +135,16 @@ class CommandFieldWithScriptButton(
         fullscreenButton?.isEnabled = enabled
     }
 
+    /** 1.1.1：内容变化回调（摘要 / 流程实时刷新用） */
+    fun onTextChanged(callback: () -> Unit) {
+        editorField?.addDocumentListener(object : com.intellij.openapi.editor.event.DocumentListener {
+            override fun documentChanged(event: com.intellij.openapi.editor.event.DocumentEvent) = callback()
+        })
+        singleField?.document?.addDocumentListener(object : com.intellij.ui.DocumentAdapter() {
+            override fun textChanged(e: javax.swing.event.DocumentEvent) = callback()
+        })
+    }
+
     /** 获取内部文本组件内容并 trim */
     fun trimmedText(): String = text.trim()
 

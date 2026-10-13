@@ -26,6 +26,7 @@ import com.alianga.idea.deploy.ui.AdaptiveRowPanel
 import com.alianga.idea.deploy.ui.UiButtonFactory
 import com.alianga.idea.deploy.ui.WrapLayout
 import com.alianga.idea.deploy.ui.DeployMode
+import com.alianga.idea.deploy.ui.MappingAutoFill
 import com.alianga.idea.deploy.ui.DeployXColors
 import com.alianga.idea.deploy.ui.OperationSummary
 import com.alianga.idea.deploy.ui.ServerDisplay
@@ -133,7 +134,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         project = project,
         contextProvider = { buildScriptRunContext() },
         multiline = true,
-        preferredScrollSize = Dimension(600, 48),
+        // 1.1.1：只约束高度（2 行），宽度跟随容器，不再用未缩放的 600 抬高整页首选宽度
+        preferredScrollSize = JBUI.size(80, 48),
         // 1.1.0：命令框去掉行号 gutter（单行时是噪音），「+」改为下方「插入脚本…」链接
         showLineNumbers = false,
         scriptLinkStyle = true
@@ -142,11 +144,38 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         project = project,
         contextProvider = { buildScriptRunContext() },
         multiline = true,
-        preferredScrollSize = Dimension(600, 48),
+        // 1.1.1：只约束高度（2 行），宽度跟随容器，不再用未缩放的 600 抬高整页首选宽度
+        preferredScrollSize = JBUI.size(80, 48),
         // 1.1.0：命令框去掉行号 gutter（单行时是噪音），「+」改为下方「插入脚本…」链接
         showLineNumbers = false,
         scriptLinkStyle = true
     )
+
+    // ===== 1.1.1：操作页按原型补齐 =====
+    /** 目录映射下拉（原型「源与目标 › 目录映射」），取代手动流程里的 MappingSelectionDialog 弹框 */
+    private val mappingCombo = com.intellij.openapi.ui.ComboBox<MappingManager.ResolvedMapping>()
+    private val mappingLabel = JBLabel(DeployXBundle.message("toolwindow.label.mapping"))
+    private val mappingHint = JBLabel().apply { font = JBUI.Fonts.smallFont(); foreground = DeployXColors.secondary; setAllowAutoWrapping(true) }
+    /** 「已按映射「xxx」填充 · 重置」 */
+    private val filledLabel = JBLabel().apply { font = JBUI.Fonts.smallFont(); foreground = DeployXColors.secondary }
+    private val resetLink = com.intellij.ui.components.ActionLink(DeployXBundle.message("toolwindow.mapping.reset")) { reapplyCurrentMapping() }
+    private val filledRow = JPanel(FlowLayout(FlowLayout.LEADING, JBUI.scale(6), 0)).apply { isOpaque = false; add(filledLabel); add(resetLink); isVisible = false }
+    /** 上传前 / 后命令改为复选框开关，勾选后才展开命令框 */
+    private val preCheck = JBCheckBox(DeployXBundle.message("toolwindow.label.preUploadCommand"))
+    private val postCheck = JBCheckBox(DeployXBundle.message("toolwindow.label.postUploadCommand"))
+    private val localErrorLabel = JBLabel(DeployXBundle.message("toolwindow.validation.localEmpty")).apply {
+        font = JBUI.Fonts.smallFont(); foreground = DeployXColors.error; setAllowAutoWrapping(true); isVisible = false
+    }
+    private val manageServersLink = com.intellij.ui.components.ActionLink(DeployXBundle.message("toolwindow.server.manage")) {
+        ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX")
+    }
+    /** 最近一次自动带入所用的映射（effectiveId），null = 未按映射填充 */
+    private var appliedMappingId: String? = null
+    /** 程序化写入本地路径时为 true，避免把自动带入误判为用户手改 */
+    private var settingLocalProgrammatically = false
+    /** 用户是否手动改过本地路径（改过则不再被编辑器 / 项目视图选中项覆盖） */
+    private var localEditedByUser = false
+    private var suppressMappingEvents = false
 
     // 操作面板标签（保留引用以便语言切换时刷新文案）
     private val targetServerLabel = JBLabel(DeployXBundle.message("toolwindow.label.targetServer"))
@@ -283,6 +312,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     // 部署选项下两个缩进的子 panel（备份目录/解压目录）
     private lateinit var backupIndentedPanel: JPanel
     private lateinit var unzipIndentedPanel: JPanel
+    private lateinit var preBlock: JPanel
+    private lateinit var postBlock: JPanel
 
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
     private var lastUpdateReport: UpdateReport? = null
@@ -374,20 +405,31 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
         // 服务器行：宽度足够时按钮组停靠下拉框右侧；侧边栏拉窄时自动换到下拉框下方，
         // 避免右侧按钮被裁剪不可见
+        // 1.1.1：窄档下三个图标按钮仍留在下拉框右侧（minMainWidth 160 → 100）
         val serverWithTerminalPanel = AdaptiveRowPanel(
             main = serverCombo,
             side = serverButtonsPanel,
-            minMainWidth = JBUI.scale(160)
+            minMainWidth = JBUI.scale(100)
         )
 
         // 分组 1：服务器与路径
         // FormBuilder 两列 GridBag：标签列 weightx=0 不换行，窄宽时把字段列挤到不可用。
         // 改为单列 + AdaptiveRowPanel.labeled，极窄时标签落到字段上方，字段仍满宽。
+        // 1.1.1：字段顺序按原型——本地文件 → 目标服务器 → 目录映射 → 远程路径
+        val localWithError = JPanel(BorderLayout()).apply { isOpaque = false; add(localPathField, BorderLayout.CENTER); add(localErrorLabel, BorderLayout.SOUTH) }
+        val serverWithManage = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            add(serverWithTerminalPanel, BorderLayout.CENTER)
+            add(JPanel(FlowLayout(FlowLayout.TRAILING, 0, 0)).apply { isOpaque = false; add(manageServersLink) }, BorderLayout.SOUTH)
+        }
+        val mappingWithHint = JPanel(BorderLayout()).apply { isOpaque = false; add(mappingCombo, BorderLayout.CENTER); add(mappingHint, BorderLayout.SOUTH) }
         serverPathPanel = FormBuilder.createFormBuilder()
-            .addComponent(AdaptiveRowPanel.labeled(targetServerLabel, serverWithTerminalPanel, JBUI.scale(160)))
-            .addComponent(AdaptiveRowPanel.labeled(localFileLabel, localPathField))
+            .addComponent(AdaptiveRowPanel.labeled(localFileLabel, localWithError))
+            .addComponent(AdaptiveRowPanel.labeled(targetServerLabel, serverWithManage, JBUI.scale(100)))
+            .addComponent(AdaptiveRowPanel.labeled(mappingLabel, mappingWithHint))
             .addComponent(AdaptiveRowPanel.labeled(remotePathLabel, remotePathField))
             .panel
+        alignFormLabels()
         serverPathGroup = com.alianga.idea.deploy.ui.GroupHeader(DeployXBundle.message("toolwindow.group.serverAndPaths"), serverPathPanel)
 
         // 分组 2：部署选项（备份/解压，未勾选时缩进子字段灰显）
@@ -414,9 +456,22 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             .panel
 
         // 分组 3：执行命令
+        // 1.1.1：命令改为复选框 + 勾选后展开的 2 行命令框（缩进），下方注释「在远程目录执行 · 每行一条」
+        fun commandBlock(field: JComponent): JPanel = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = JBUI.Borders.emptyLeft(22)
+            add(field, BorderLayout.CENTER)
+            add(JBLabel(DeployXBundle.message("toolwindow.command.comment")).apply {
+                font = JBUI.Fonts.smallFont(); foreground = DeployXColors.secondary
+            }, BorderLayout.SOUTH)
+        }
+        preBlock = commandBlock(preCommandField)
+        postBlock = commandBlock(postCommandField)
         hooksPanel = FormBuilder.createFormBuilder()
-            .addComponent(AdaptiveRowPanel.labeled(preCommandLabel, preCommandField, JBUI.scale(160)))
-            .addComponent(AdaptiveRowPanel.labeled(postCommandLabel, postCommandField, JBUI.scale(160)))
+            .addComponent(preCheck)
+            .addComponent(preBlock)
+            .addComponent(postCheck)
+            .addComponent(postBlock)
             .panel
         // 1.1.0：「部署选项」「执行命令」合并为一个「部署流程」分组（标题 + 分隔线）
         val flowContent = JPanel().apply {
@@ -424,25 +479,17 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             isOpaque = false
             deployOptionsPanel.alignmentX = Component.LEFT_ALIGNMENT
             hooksPanel.alignmentX = Component.LEFT_ALIGNMENT
+            filledRow.alignmentX = Component.LEFT_ALIGNMENT
+            add(filledRow)
             add(deployOptionsPanel)
             add(hooksPanel)
         }
         deployFlowGroup = com.alianga.idea.deploy.ui.GroupHeader(DeployXBundle.message("toolwindow.group.deployOptions"), flowContent)
 
-        // 底部动作区：WrapLayout 自动换行，按钮始终可见。
-        // 对齐策略：宽度足够单行放下时整体居中（面板中部）；不足时靠左并换行。
-        val buttonPanel = object : JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(8), JBUI.scale(6))) {
-            override fun doLayout() {
-                val flow = layout as? WrapLayout ?: return super.doLayout()
-                flow.alignment = if (width >= flow.singleRowWidth(this)) FlowLayout.CENTER else FlowLayout.LEADING
-                super.doLayout()
-            }
-        }.apply {
-            alignmentX = Component.LEFT_ALIGNMENT
-        }
         // 1.1.0：底部操作栏只有两组——左「拉取 ▾」，右主按钮「部署 ▾」（现状问题 #8）
         applyDeployMode(DeployMode.parse(com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_PUSH_MODE), DeployMode.DEPLOY))
-        applyPullMode(DeployMode.parse(com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_PULL_MODE), DeployMode.PULL))
+        // 1.1.1：拉取主体固定为「拉取」（原型），预览拉取只在菜单里，不再被记住
+        applyPullMode(DeployMode.PULL)
         // 1.1.1：窄档自动上下堆叠（主按钮在上），不再重叠 / 裁切
         val actionBar = object : JPanel() {
             // 宽度跟随父容器而不是撑开页面；高度随堆叠状态变化
@@ -669,6 +716,13 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // 复选框
         backupCheck.text = DeployXBundle.message("toolwindow.checkbox.backupBeforeDeploy")
+        preCheck.text = DeployXBundle.message("toolwindow.label.preUploadCommand")
+        postCheck.text = DeployXBundle.message("toolwindow.label.postUploadCommand")
+        mappingLabel.text = DeployXBundle.message("toolwindow.label.mapping")
+        resetLink.text = DeployXBundle.message("toolwindow.mapping.reset")
+        manageServersLink.text = DeployXBundle.message("toolwindow.server.manage")
+        localErrorLabel.text = DeployXBundle.message("toolwindow.validation.localEmpty")
+        alignFormLabels()
         unzipCheck.text = DeployXBundle.message("toolwindow.checkbox.unzipAfterUpload")
 
         // 1.0.9 重构：3 个 TitledBorder 分组标题刷新
@@ -982,7 +1036,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // 拆分按钮主体记住上次选择的模式（与 IDE「运行」按钮一致）
         val props = com.intellij.ide.util.PropertiesComponent.getInstance()
         if (mode.push) { props.setValue(KEY_PUSH_MODE, mode.name); applyDeployMode(mode) }
-        else { props.setValue(KEY_PULL_MODE, mode.name); applyPullMode(mode) }
+        // 拉取方向不记忆模式，主体始终是「拉取」
         when (mode) {
             DeployMode.DEPLOY -> startDeploy()
             DeployMode.QUICK_PUSH -> quickPush()
@@ -997,7 +1051,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         pushMode = mode
         deploySplitButton.action = modeAction(mode)
         deploySplitButton.options = arrayOf(modeAction(DeployMode.DEPLOY), modeAction(DeployMode.QUICK_PUSH), modeAction(DeployMode.PREVIEW_PUSH))
-        // JBOptionButton 在平台 LAF 下即以默认按钮（accent）样式绘制，无需内部 API
+        // 1.1.1：主按钮用默认按钮（accent 蓝）样式。DEFAULT_STYLE_KEY 位于平台 darcula 包（内部 API），
+        // 若后续版本移除，退化为普通样式，主次仍由位置区分
+        deploySplitButton.putClientProperty(com.intellij.ide.ui.laf.darcula.ui.DarculaButtonUI.DEFAULT_STYLE_KEY, true)
         deploySplitButton.toolTipText = DeployXBundle.message("toolwindow.button.startDeploy.tooltip")
         updateSummary()
     }
@@ -1013,10 +1069,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private fun relocalizeActionBar() {
         applyDeployMode(pushMode)
         applyPullMode(pullMode)
-        statusArea.cancelButton.text = DeployXBundle.message("toolwindow.button.abort")
+        statusArea.cancelButton.toolTipText = DeployXBundle.message("toolwindow.button.abort")
         statusArea.logLink.text = DeployXBundle.message("toolwindow.status.viewLog")
         statusArea.reportLink.text = DeployXBundle.message("toolwindow.status.copyReport")
-        statusArea.closeLink.text = DeployXBundle.message("toolwindow.status.close")
+        statusArea.closeLink.toolTipText = DeployXBundle.message("toolwindow.status.close")
     }
 
 
@@ -1026,7 +1082,22 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
         localPathField.document.addDocumentListener(docListener)
         remotePathField.document.addDocumentListener(docListener)
-        serverCombo.addActionListener { updateSummary() }
+        serverCombo.addActionListener { onServerChanged() }
+        preCommandField.onTextChanged { updateSummary() }
+        postCommandField.onTextChanged { updateSummary() }
+        preCheck.addItemListener { updateCommandBlocks(); updateSummary() }
+        postCheck.addItemListener { updateCommandBlocks(); updateSummary() }
+        mappingCombo.addActionListener { if (!suppressMappingEvents) applySelectedMapping() }
+        mappingCombo.renderer = mappingRenderer()
+        localPathField.document.addDocumentListener(object : com.intellij.ui.DocumentAdapter() {
+            override fun textChanged(e: javax.swing.event.DocumentEvent) {
+                if (!settingLocalProgrammatically) localEditedByUser = true
+                refreshMappingCombo(applyDefault = true)
+            }
+        })
+        installAutoLocalPath()
+        updateCommandBlocks()
+        refreshMappingCombo(applyDefault = false)
         backupCheck.addItemListener { updateSummary() }
         unzipCheck.addItemListener { updateSummary() }
         updateSummary()
@@ -1041,7 +1112,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val r = OperationSummary.build(
             localPathField.text, title, remotePathField.text,
             backupCheck.isSelected, unzipCheck.isSelected,
-            preCommandField.text, postCommandField.text, labels
+            effectivePre(), effectivePost(), labels, pushMode
         )
         if (r.ready) {
             statusArea.headline.text = r.headline.replaceFirst(labels("deploy"), deploySplitButton.action?.getValue(Action.NAME)?.toString() ?: labels("deploy"))
@@ -1049,12 +1120,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             statusArea.headline.icon = null
             statusArea.flow.text = r.flow
         } else {
+            // 1.1.1：摘要行保持注释色（原型）；红色错误放到字段下方 + 字段红框，不只靠颜色
             val miss = r.missing.joinToString("、") { DeployXBundle.message("toolwindow.summary.missing.${it.name.lowercase()}") }
             statusArea.headline.text = DeployXBundle.message("toolwindow.summary.missing", miss)
-            statusArea.headline.foreground = DeployXColors.error
-            statusArea.headline.icon = AllIcons.General.BalloonError
+            statusArea.headline.foreground = DeployXColors.secondary
+            statusArea.headline.icon = null
             statusArea.flow.text = r.flow
         }
+        val localMissing = OperationSummary.Missing.LOCAL in r.missing
+        localErrorLabel.isVisible = localMissing
+        localPathField.putClientProperty("JComponent.outline", if (localMissing) "error" else null)
+        remotePathField.putClientProperty("JComponent.outline", if (OperationSummary.Missing.REMOTE in r.missing) "error" else null)
+        localPathField.repaint(); remotePathField.repaint()
         deploySplitButton.isEnabled = r.ready
         // 拉取同样需要服务器 + 本地 + 远程
         pullSplitButton.isEnabled = r.ready
@@ -1077,7 +1154,138 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
     }
 
+    // ===================== 1.1.1：目录映射下拉与自动带入 =====================
+
+    /** 1.1.1：同组标签统一取最长标签宽度，字段左边缘对齐（不写死像素，语言切换后重算） */
+    private fun alignFormLabels() {
+        val labels = listOf(localFileLabel, targetServerLabel, mappingLabel, remotePathLabel)
+        labels.forEach { it.preferredSize = null }
+        val w = labels.maxOf { it.preferredSize.width } + JBUI.scale(8)
+        labels.forEach { it.preferredSize = Dimension(w, it.preferredSize.height) }
+    }
+
+    private fun effectivePre(): String = if (preCheck.isSelected) preCommandField.text.trim() else ""
+    private fun effectivePost(): String = if (postCheck.isSelected) postCommandField.text.trim() else ""
+
+    private fun updateCommandBlocks() {
+        if (::preBlock.isInitialized) { preBlock.isVisible = preCheck.isSelected; postBlock.isVisible = postCheck.isSelected }
+        revalidate(); repaint()
+    }
+
+    /** 映射下拉渲染：下拉框本身只显示映射名（+默认）；弹层两行：名称 + 默认 / 本地 → 远程 */
+    private fun mappingRenderer() = object : com.intellij.ui.ColoredListCellRenderer<MappingManager.ResolvedMapping>() {
+        override fun customizeCellRenderer(list: JList<out MappingManager.ResolvedMapping>, value: MappingManager.ResolvedMapping?, index: Int, selected: Boolean, hasFocus: Boolean) {
+            value ?: return
+            append(value.mapping.name.ifBlank { value.mapping.localDir })
+            if (mappingCombo.itemCount > 1 && mappingCombo.getItemAt(0) === value) {
+                append("  " + DeployXBundle.message("toolwindow.mapping.default"), com.intellij.ui.SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+            }
+            if (index >= 0) {
+                append("  ${value.mapping.localDir} → ${value.resolvedRemoteDir}", com.intellij.ui.SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+                toolTipText = "${value.mapping.localDir} → ${value.resolvedRemoteDir}"
+            }
+        }
+    }
+
+    /** 按本地路径 + 当前服务器重算映射候选（最深层级在前）；applyDefault 时自动带入默认映射 */
+    private fun refreshMappingCombo(applyDefault: Boolean) {
+        val serverId = getSelectedServerId()
+        val local = localPathField.text.trim()
+        val candidates = if (serverId == null || local.isEmpty()) emptyList() else
+            MappingManager.sortByPriority(MappingManager.getInstance().resolveMappingsByLocalPath(local).filter { it.mapping.serverId == serverId })
+        val previous = (mappingCombo.selectedItem as? MappingManager.ResolvedMapping)?.mapping?.effectiveId
+        suppressMappingEvents = true
+        try {
+            mappingCombo.removeAllItems()
+            candidates.forEach { mappingCombo.addItem(it) }
+            val keep = candidates.indexOfFirst { it.mapping.effectiveId == previous }
+            if (candidates.isNotEmpty()) mappingCombo.selectedIndex = if (keep >= 0) keep else 0
+        } finally { suppressMappingEvents = false }
+        mappingCombo.isEnabled = candidates.isNotEmpty()
+        mappingHint.text = when {
+            candidates.isEmpty() && serverId != null && local.isNotEmpty() -> DeployXBundle.message("toolwindow.mapping.none")
+            candidates.size > 1 -> DeployXBundle.message("toolwindow.mapping.multi", candidates.size)
+            else -> ""
+        }
+        mappingHint.isVisible = mappingHint.text.isNotEmpty()
+        val current = mappingCombo.selectedItem as? MappingManager.ResolvedMapping
+        if (applyDefault && current != null && current.mapping.effectiveId != appliedMappingId) applyMapping(current)
+        updateSummary()
+    }
+
+    private fun applySelectedMapping() {
+        (mappingCombo.selectedItem as? MappingManager.ResolvedMapping)?.let { applyMapping(it) }
+    }
+
+    private fun reapplyCurrentMapping() = applySelectedMapping()
+
+    /** 带入映射的远程路径与部署流程（备份 / 解压 / 前后置命令），并显示「已按映射填充 · 重置」 */
+    private fun applyMapping(resolved: MappingManager.ResolvedMapping?) {
+        val f = MappingAutoFill.of(resolved?.mapping, resolved?.resolvedRemoteDir)
+        remotePathField.text = f.remote
+        backupCheck.isSelected = f.backupOn; backupDirField.text = f.backupDir
+        unzipCheck.isSelected = f.unzipOn; unzipDestField.text = f.unzipDir
+        preCheck.isSelected = f.preOn; preCommandField.text = f.pre
+        postCheck.isSelected = f.postOn; postCommandField.text = f.post
+        appliedMappingId = resolved?.mapping?.effectiveId
+        filledLabel.text = resolved?.let { DeployXBundle.message("toolwindow.mapping.filled", it.mapping.name.ifBlank { it.mapping.localDir }) }.orEmpty()
+        filledRow.isVisible = resolved != null
+        updateCommandBlocks()
+        updateSummary()
+    }
+
+    /** 切换服务器：取该服务器默认映射带入；没有映射时清空远程路径与流程（原型 pickServer） */
+    private fun onServerChanged() {
+        if (suppressMappingEvents) return
+        appliedMappingId = null
+        refreshMappingCombo(applyDefault = true)
+        if (mappingCombo.itemCount == 0 && localPathField.text.isNotBlank()) applyMapping(null)
+    }
+
+    /** 本地路径自动带入：当前编辑器文件（切换时）+ 工具窗口显示时读取项目视图选中项；用户手改过则不覆盖 */
+    private fun installAutoLocalPath() {
+        project.messageBus.connect(this).subscribe(
+            com.intellij.openapi.fileEditor.FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
+                override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
+                    event.newFile?.takeIf { it.isInLocalFileSystem }?.let { autoFillLocal(it.path) }
+                }
+            })
+        addHierarchyListener { e ->
+            if ((e.changeFlags and java.awt.event.HierarchyEvent.SHOWING_CHANGED.toLong()) != 0L && isShowing) {
+                val selected = runCatching {
+                    com.intellij.ide.projectView.ProjectView.getInstance(project).currentProjectViewPane?.selectedElements
+                        ?.firstNotNullOfOrNull { el ->
+                            when (el) {
+                                is com.intellij.psi.PsiFileSystemItem -> el.virtualFile
+                                is com.intellij.openapi.vfs.VirtualFile -> el
+                                is com.intellij.ide.util.treeView.AbstractTreeNode<*> -> (el.value as? com.intellij.psi.PsiFileSystemItem)?.virtualFile
+                                else -> null
+                            }
+                        }
+                }.getOrNull()
+                    ?: com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).selectedFiles.firstOrNull()
+                selected?.takeIf { it.isInLocalFileSystem }?.let { autoFillLocal(it.path) }
+            }
+        }
+    }
+
+    private fun autoFillLocal(path: String) {
+        if (localEditedByUser && localPathField.text.isNotBlank()) return
+        if (localPathField.text == path) return
+        settingLocalProgrammatically = true
+        try { localPathField.text = path } finally { settingLocalProgrammatically = false }
+    }
+
     private fun refreshServerCombo() {
+        // 1.1.1：重建列表期间屏蔽「切换服务器 → 带入映射」，避免设置页增删服务器时清掉用户填写的字段；保留原选中项
+        val previousId = getSelectedServerId()
+        suppressMappingEvents = true
+        try { repopulateServerCombo(previousId) } finally { suppressMappingEvents = false }
+        refreshMappingCombo(applyDefault = false)
+    }
+
+    private fun repopulateServerCombo(previousId: String?) {
         serverCombo.removeAllItems()
         val servers = serverManager.getServers()
         for (server in servers) {
@@ -1089,6 +1297,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             val index = servers.indexOfFirst { it.id == defaultServer.id }
             if (index >= 0) serverCombo.selectedIndex = index
         }
+        previousId?.let { id -> servers.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { serverCombo.selectedIndex = it } }
     }
 
     private fun refreshHistory() {
@@ -1233,6 +1442,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         remotePathField.text = record.targetPath
         preCommandField.text = record.preCommand
         postCommandField.text = record.postCommand
+        preCheck.isSelected = record.preCommand.isNotBlank()
+        postCheck.isSelected = record.postCommand.isNotBlank()
 
         if (record.backupDir.isNotBlank()) {
             backupCheck.isSelected = true
@@ -1287,6 +1498,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     private fun fillCommandFromScript(preCommand: Boolean, command: String) {
+        (if (preCommand) preCheck else postCheck).isSelected = true // 插入脚本后自动展开对应命令框
         val target = if (preCommand) preCommandField else postCommandField
         target.text = if (target.text.isBlank()) {
             command.trim()
@@ -1914,8 +2126,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             remotePath = remotePath,
             backupDir = if (backupCheck.isSelected) backupDirField.text.trim() else null,
             unzipDest = if (unzipCheck.isSelected) unzipDestField.text.trim() else null,
-            preCommand = preCommandField.text.trim().ifBlank { null },
-            postCommand = postCommandField.text.trim().ifBlank { null }
+            preCommand = effectivePre().ifBlank { null },
+            postCommand = effectivePost().ifBlank { null }
         )
 
         appendLog(DeployXBundle.message("toolwindow.log.startDeploy"))
@@ -2012,13 +2224,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val candidates = MappingManager.getInstance().resolveMappingsByLocalPath(localPath)
             .filter { it.mapping.serverId == serverId }
         if (candidates.size <= 1) return MappingChoice(cancelled = false, mappingId = null)
-        val server = serverManager.getServer(serverId)
-        val dialog = MappingSelectionDialog(
-            candidates = candidates,
-            serverDisplayName = server?.name ?: serverId
-        )
-        if (!dialog.showAndGet()) return MappingChoice(cancelled = true, mappingId = null)
-        return MappingChoice(cancelled = false, mappingId = dialog.selectedMapping?.effectiveId)
+        // 1.1.1：不再弹 MappingSelectionDialog——映射选择已移到操作页「目录映射」下拉（实施方案 3.4.1），
+        // 直接使用下拉当前选中项；选中项不属于该服务器时回退最深层级
+        val chosen = (mappingCombo.selectedItem as? MappingManager.ResolvedMapping)
+            ?.takeIf { sel -> candidates.any { it.mapping.effectiveId == sel.mapping.effectiveId } }
+        return MappingChoice(cancelled = false, mappingId = chosen?.mapping?.effectiveId)
     }
 
     /** 1.0.8：手动流程映射选择结果（cancelled 表示用户在对话框中取消，应中止操作） */
@@ -2107,9 +2317,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             backupDir = if (backupCheck.isSelected) backupDirField.text.trim() else "",
             unzipEnabled = unzipCheck.isSelected,
             unzipDest = if (unzipCheck.isSelected) unzipDestField.text.trim() else "",
-            preCommandEnabled = preCommandField.text.trim().isNotBlank(),
+            preCommandEnabled = preCheck.isSelected && preCommandField.text.trim().isNotBlank(),
             preCommand = preCommandField.text.trim(),
-            postCommandEnabled = postCommandField.text.trim().isNotBlank(),
+            postCommandEnabled = postCheck.isSelected && postCommandField.text.trim().isNotBlank(),
             postCommand = postCommandField.text.trim()
         )
 

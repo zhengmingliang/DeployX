@@ -31,7 +31,7 @@ class OperationSummaryTest {
 
     @Test
     fun `流程包含全部启用步骤`() =
-        assertEquals("流程：前置命令 → 备份 → 上传 → 解压 → 后置命令", OperationSummary.flowText(true, true, "a", "b", labels))
+        assertEquals("流程：备份 → 前置命令 → 上传 → 解压 → 后置命令", OperationSummary.flowText(true, true, "a", "b", labels))
 
     @Test
     fun `路径末段`() {
