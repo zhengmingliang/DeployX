@@ -901,9 +901,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     /** 日志面板顶部复制按钮工具栏（"复制全部日志"）。1.0.8 新增。 */
     private fun buildLogHeaderCopyBar(): JPanel {
-        val copyAllButton = JButton(DeployXBundle.message("toolwindow.action.copyAllLog"), AllIcons.Actions.Copy)
-        copyAllButton.toolTipText = DeployXBundle.message("toolwindow.action.copyAllLog.tooltip")
-        copyAllButton.addActionListener { copyLogText(logArea.text) }
+        // 1.1.0 #26：改为纯图标按钮节省空间，作用范围（全部页签）写在 tooltip 里
+        val copyAllButton = com.intellij.ui.InplaceButton(
+            DeployXBundle.message("toolwindow.action.copyAllLog.tooltip"),
+            AllIcons.Actions.Copy
+        ) { copyLogText(logArea.text) }
         val bar = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(copyAllButton)
@@ -917,13 +919,11 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      * @param serverId 此 Tab 对应的服务器 ID（"全部" Tab 传 null）
      */
     private fun buildLogTabContent(area: JBTextArea, serverId: String?): JPanel {
-        val copyButton = JButton(
-            DeployXBundle.message("toolwindow.action.copyLog"),
+        // 1.1.0 #26：「复制日志」改为纯图标按钮节省空间，作用范围（仅当前页签）写在 tooltip 里
+        val copyButton = com.intellij.ui.InplaceButton(
+            DeployXBundle.message("toolwindow.action.copyLog.tooltip"),
             AllIcons.Actions.Copy
-        ).apply {
-            toolTipText = DeployXBundle.message("toolwindow.action.copyLog.tooltip")
-            addActionListener { copyLogText(area.text) }
-        }
+        ) { copyLogText(area.text) }
         val top = JPanel(BorderLayout()).apply {
             add(copyButton, BorderLayout.WEST)
             border = JBUI.Borders.empty(2, 4)
