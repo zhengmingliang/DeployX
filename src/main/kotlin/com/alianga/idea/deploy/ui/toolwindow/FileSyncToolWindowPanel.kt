@@ -564,7 +564,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(historyClearAction)
         }
         val historyToolbarInstance = ActionManager.getInstance().createActionToolbar("FileSyncHistoryToolbar", historyActionGroup, true)
-        historyToolbarInstance.targetComponent = this
+        // 1.1.1：targetComponent 必须是实际显示的组件。外层面板自 1.1.0 起不再显示（setContent(JPanel())），
+        // 指向它会让工具栏取不到数据上下文、动作全部失效；改为在 historyPanel 创建后指向它（见下方）
         historyToolbar = historyToolbarInstance
         // 1.1.0：过滤栏——搜索（动作 / 服务器 / 路径）+ 胶囊过滤：全部 / 成功 / 失败 / 可回滚，各带计数
         historySearchField.addDocumentListener(object : com.intellij.ui.DocumentAdapter() {
@@ -596,6 +597,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(historyButtonPanel, BorderLayout.NORTH)
             add(historyCardPanel, BorderLayout.CENTER)
         }
+        historyToolbarInstance.targetComponent = historyPanel
 
         // ===== 脚本面板 =====
         scriptTabPanel.setContextProvider { buildScriptRunContext() }
