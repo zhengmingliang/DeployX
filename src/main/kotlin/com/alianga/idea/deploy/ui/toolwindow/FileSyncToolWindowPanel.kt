@@ -172,9 +172,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val localErrorLabel = JBLabel(DeployXBundle.message("toolwindow.validation.localEmpty")).apply {
         font = JBUI.Fonts.smallFont(); foreground = DeployXColors.error; setAllowAutoWrapping(true); isVisible = false
     }
-    private val manageServersLink = com.intellij.ui.components.ActionLink(DeployXBundle.message("toolwindow.server.manage")) {
-        ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX")
-    }
     /** 最近一次自动带入所用的映射（effectiveId），null = 未按映射填充 */
     private var appliedMappingId: String? = null
     /** 程序化写入本地路径时为 true，避免把自动带入误判为用户手改 */
@@ -739,7 +736,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         postCheck.text = DeployXBundle.message("toolwindow.label.postUploadCommand")
         mappingLabel.text = DeployXBundle.message("toolwindow.label.mapping")
         resetLink.text = DeployXBundle.message("toolwindow.mapping.reset")
-        manageServersLink.text = DeployXBundle.message("toolwindow.server.manage")
         localErrorLabel.text = DeployXBundle.message("toolwindow.validation.localEmpty")
         alignFormLabels()
         unzipCheck.text = DeployXBundle.message("toolwindow.checkbox.unzipAfterUpload")
@@ -1478,8 +1474,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         } + "</table></html>"
         hdSteps.text = com.alianga.idea.deploy.ui.HistoryDetail.steps(r).joinToString("  →  ") { (step, mark) ->
             mark.symbol + " " + DeployXBundle.message("history.detail.step." + step.name.lowercase())
-        }
-        // 1.1.1：旧记录的步骤链是推断的，tooltip 说明
+        } + if (com.alianga.idea.deploy.ui.HistoryDetail.stepsInferred(r)) " " + DeployXBundle.message("history.detail.steps.inferredShort") else ""
+        // 1.1.1：旧记录的步骤链是推断的，界面直接标「（推断）」，tooltip 给完整说明
         hdSteps.toolTipText = if (com.alianga.idea.deploy.ui.HistoryDetail.stepsInferred(r)) DeployXBundle.message("history.detail.steps.inferred") else null
         val files = com.alianga.idea.deploy.ui.HistoryDetail.files(r)
         hdFiles.text = if (files.isEmpty()) DeployXBundle.message("toolwindow.history.detail.noFiles")

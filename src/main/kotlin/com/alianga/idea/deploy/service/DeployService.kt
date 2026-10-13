@@ -341,7 +341,8 @@ class DeployService {
             if (!dryRun) {
                 val duration = System.currentTimeMillis() - startTime
                 val status = if (syncResult.success) HistoryRecord.OperationStatus.SUCCESS else HistoryRecord.OperationStatus.FAILED
-                saveDownloadGroupHistory(key, groupItems, syncResult, duration, status)
+                saveDownloadGroupHistory(key, groupItems, syncResult, duration, status,
+                    linkedMapOf("upload" to if (syncResult.success) "ok" else "fail"))
             }
         } catch (e: DeployCancelledException) {
             groupLog(DeployXBundle.message("toolwindow.log.aborted"))
@@ -1113,7 +1114,8 @@ class DeployService {
         items: List<DownloadItem>,
         syncResult: SyncResult,
         duration: Long,
-        status: HistoryRecord.OperationStatus
+        status: HistoryRecord.OperationStatus,
+        steps: Map<String, String> = emptyMap()
     ) {
         val server = ServerManager.getInstance().getServer(key.serverId)
         val reportGroup = if (server != null) {
@@ -1149,7 +1151,8 @@ class DeployService {
                 transferredFiles = reportGroup?.transferredFiles ?: emptyList(),
                 serverName = reportGroup?.serverName ?: "",
                 serverAddress = reportGroup?.serverAddress ?: "",
-                reportText = reportText
+                reportText = reportText,
+                stepResults = steps
             )
         )
     }
