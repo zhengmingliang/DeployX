@@ -75,6 +75,8 @@ import java.awt.event.MouseEvent
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import javax.swing.AbstractAction
+import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.ide.DataManager
 import javax.swing.Action
 import javax.swing.*
 
@@ -561,40 +563,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // ===== 历史面板 =====
         // 自定义渲染器：可回滚的记录显示回滚图标，与「回滚」按钮图标保持一致，
         // 便于用户快速识别哪些历史记录可以回滚。
-        historyList.cellRenderer = object : DefaultListCellRenderer() {
-            override fun getListCellRendererComponent(
-                list: JList<*>,
-                value: Any?,
-                index: Int,
-                isSelected: Boolean,
-                cellHasFocus: Boolean
-            ): java.awt.Component {
-                val component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-                if (index >= 0 && index < historyRecords.size && component is JLabel) {
-                    // 1.1.0：两行记录——状态文字 + 动作 + 服务器 + 可回滚标签 / 时间；第二行等宽路径。
-                    // 成功 / 失败同时用文字表达，不只靠颜色
-                    val r = historyRecords[index]
-                    fun esc(t: String) = com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(t)
-                    fun hex(c: java.awt.Color) = "#" + com.intellij.ui.ColorUtil.toHex(c)
-                    val (statusText, color) = when (r.status) {
-                        HistoryRecord.OperationStatus.SUCCESS -> DeployXBundle.message("toolwindow.history.status.success") to DeployXColors.success
-                        HistoryRecord.OperationStatus.FAILED -> DeployXBundle.message("toolwindow.history.status.failed") to DeployXColors.error
-                        HistoryRecord.OperationStatus.CANCELLED -> DeployXBundle.message("toolwindow.history.status.cancelled") to DeployXColors.warning
-                    }
-                    val day = DeployXBundle.message("toolwindow.history.day." + com.alianga.idea.deploy.ui.HistoryFilter.day(r.timestamp).name.lowercase())
-                    val tag = if (com.alianga.idea.deploy.ui.HistoryFilter.rollbackable(r))
-                        " <font color='${hex(DeployXColors.link)}'>[" + esc(DeployXBundle.message("toolwindow.history.filter.rollbackable")) + "]</font>" else ""
-                    val path = if (r.type == HistoryRecord.OperationType.PULL) "${r.targetPath} → ${r.sourcePath}" else "${r.sourcePath} → ${r.targetPath}"
-                    val server = ServerDisplay.title(r.serverId, r.serverName)
-                    component.text = "<html><font color='${hex(color)}'>● ${esc(statusText)}</font> <b>${esc(r.type.value)}</b> ${esc(server)}$tag" +
-                        " <font color='${hex(DeployXColors.secondary)}'>· ${esc(day)} ${esc(r.formattedTime)}</font>" +
-                        "<br><code>${esc(path)}</code></html>"
-                    component.icon = if (com.alianga.idea.deploy.ui.HistoryFilter.rollbackable(r)) AllIcons.Actions.Rollback else null
-                    component.border = JBUI.Borders.empty(4, 6)
-                }
-                return component
-            }
+        // 1.1.1：两行卡片 + 今天/昨天/更早分组头（分组头画在组内第一条记录上方，列表索引仍与记录一一对应）
+        historyList.cellRenderer = ListCellRenderer<String> { list, _, index, isSelected, _ ->
+            historyRowRenderer(list, index, isSelected)
         }
+        historyList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        historyList.addListSelectionListener { if (!it.valueIsAdjusting) updateHistoryDetail() }
 
         // 双击历史记录弹出详情对话框（展示更新文件清单等），不再跳转日志页签
         historyList.addMouseListener(object : MouseAdapter() {
@@ -611,14 +585,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         // 历史工具栏：与顶部工具栏同一机制（DefaultActionGroup + ActionToolbar），
         // 间距由平台统一控制，紧凑一致；回滚与清空之间插入 Separator 作为危险操作分组。
+        // 1.1.1：页签工具栏只保留 刷新 / 清空；回滚、重新执行、复制 / 导出报告、日志、删除移到下方详情区，
+        // 填充配置与详情对话框进「更多」（详情也可双击打开）——入口移动，功能不删
         val historyActionGroup = DefaultActionGroup().apply {
             add(historyRefreshAction)
-            add(historyRedeployAction)
-            add(historyFillConfigAction)
-            add(historyCopyReportAction)
-            add(historyExportReportAction)
-            add(historyRollbackAction)
-            add(historyViewDetailAction)
             addSeparator()
             add(historyClearAction)
         }
@@ -650,7 +620,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             }, BorderLayout.CENTER)
         }
         historyCardPanel = JPanel(historyCardLayout).apply {
-            add(JBScrollPane(historyList), "list")
+            add(com.intellij.ui.OnePixelSplitter(true, "DeployX.history.split", 0.5f).apply {
+                firstComponent = JBScrollPane(historyList)
+                secondComponent = buildHistoryDetailPanel()
+            }, "list")
             add(historyEmptyLabel, "empty")
         }
         val historyPanel = JPanel(BorderLayout()).apply {
@@ -1300,6 +1273,162 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         previousId?.let { id -> servers.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { serverCombo.selectedIndex = it } }
     }
 
+    private var historyRecordsBefore = listOf<HistoryRecord>()
+
+    // ===== 1.1.1 历史详情区 =====
+    private val hdHeader = JBLabel()
+    private val hdRows = JBLabel()
+    private val hdSteps = JBLabel()
+    private val hdFiles = com.intellij.ui.components.JBTextArea().apply { isEditable = false; rows = 5 }
+    private val hdRollbackReason = JBLabel().apply { foreground = DeployXColors.warning }
+    private val hdRollbackBtn = JButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback)
+    private val hdRerunBtn = JButton(DeployXBundle.message("history.detail.rerun.deploy"), AllIcons.Actions.Execute)
+    private val hdCopyBtn = JButton(DeployXBundle.message("toolwindow.history.copyReport"))
+    private val hdExportBtn = JButton(DeployXBundle.message("toolwindow.history.exportReport"))
+
+    private fun esc(t: String) = com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(t)
+    private fun hex(c: java.awt.Color) = "#" + com.intellij.ui.ColorUtil.toHex(c)
+    private fun typeLabel(r: HistoryRecord) = DeployXBundle.message("history.type." + r.type.value)
+    private fun statusOf(r: HistoryRecord) = when (r.status) {
+        HistoryRecord.OperationStatus.SUCCESS -> DeployXBundle.message("toolwindow.history.status.success") to DeployXColors.success
+        HistoryRecord.OperationStatus.FAILED -> DeployXBundle.message("toolwindow.history.status.failed") to DeployXColors.error
+        HistoryRecord.OperationStatus.CANCELLED -> DeployXBundle.message("toolwindow.history.status.cancelled") to DeployXColors.warning
+    }
+
+    private fun historyRowRenderer(list: JList<*>, index: Int, isSelected: Boolean): java.awt.Component {
+        val r = historyRecords.getOrNull(index) ?: return JPanel()
+        val fg = if (isSelected) list.selectionForeground else list.foreground
+        val bg = if (isSelected) list.selectionBackground else list.background
+        val (statusText, color) = statusOf(r)
+        val day = com.alianga.idea.deploy.ui.HistoryFilter.day(r.timestamp)
+        val prevDay = historyRecords.getOrNull(index - 1)?.let { com.alianga.idea.deploy.ui.HistoryFilter.day(it.timestamp) }
+        val tag = if (com.alianga.idea.deploy.ui.HistoryFilter.rollbackable(r))
+            " <font color='${hex(DeployXColors.link)}'>" + esc(DeployXBundle.message("toolwindow.history.filter.rollbackable")) + "</font>" else ""
+        val path = if (r.type == HistoryRecord.OperationType.PULL) "${r.targetPath} → ${r.sourcePath}" else "${r.sourcePath} → ${r.targetPath}"
+        val row1 = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            add(JBLabel("<html><b>${esc(typeLabel(r))}</b> ${esc(ServerDisplay.title(r.serverId, r.serverName))}$tag</html>").apply { foreground = fg }, BorderLayout.CENTER)
+            add(JBLabel("<html><font color='${hex(color)}'>${esc(statusText)}</font> ${esc(r.formattedTime)}</html>").apply { foreground = fg }, BorderLayout.EAST)
+        }
+        val row2 = JBLabel("<html><font color='${hex(color)}'>●</font> ${esc(path)}</html>").apply {
+            foreground = if (isSelected) fg else DeployXColors.secondary
+        }
+        val card = JPanel(BorderLayout()).apply {
+            background = bg; border = JBUI.Borders.empty(4, 8)
+            add(row1, BorderLayout.NORTH); add(row2, BorderLayout.SOUTH)
+        }
+        if (day == prevDay) return card
+        return JPanel(BorderLayout()).apply {
+            background = list.background
+            add(com.intellij.ui.TitledSeparator(DeployXBundle.message("toolwindow.history.day." + day.name.lowercase())), BorderLayout.NORTH)
+            add(card, BorderLayout.CENTER)
+        }
+    }
+
+    private fun selectedHistoryRecord(): HistoryRecord? = historyRecords.getOrNull(historyList.selectedIndex)
+
+    private fun buildHistoryDetailPanel(): JComponent {
+        hdRollbackBtn.addActionListener { rollbackFromHistory() }
+        hdRerunBtn.addActionListener { rerunFromHistory() }
+        hdCopyBtn.addActionListener { copyReportFromHistory() }
+        hdExportBtn.addActionListener { exportReportFromHistory() }
+        val logBtn = JButton(AllIcons.Debugger.Console).apply {
+            toolTipText = DeployXBundle.message("history.detail.viewLog"); addActionListener { switchToLogTab() }
+        }
+        val deleteBtn = JButton(AllIcons.Actions.GC).apply {
+            toolTipText = DeployXBundle.message("history.detail.delete"); addActionListener { deleteHistoryRecord() }
+        }
+        val moreBtn = JButton(DeployXBundle.message("history.detail.more"), AllIcons.General.ArrowDown).apply { horizontalTextPosition = SwingConstants.LEFT }
+        moreBtn.addActionListener {
+            val group = DefaultActionGroup(historyFillConfigAction, historyViewDetailAction)
+            JBPopupFactory.getInstance().createActionGroupPopup(null, group,
+                DataManager.getInstance().getDataContext(moreBtn), JBPopupFactory.ActionSelectionAid.MNEMONICS, true)
+                .showUnderneathOf(moreBtn)
+        }
+        val buttons = JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(4), JBUI.scale(2))).apply {
+            listOf(hdRollbackBtn, hdRerunBtn, hdCopyBtn, hdExportBtn, moreBtn, logBtn, deleteBtn).forEach { add(it) }
+        }
+        val info = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            listOf(hdHeader, hdRows, hdSteps, hdRollbackReason).forEach { it.alignmentX = LEFT_ALIGNMENT; add(it) }
+        }
+        return JPanel(BorderLayout(0, JBUI.scale(4))).apply {
+            border = JBUI.Borders.empty(6, 8)
+            add(info, BorderLayout.NORTH)
+            add(JBScrollPane(hdFiles), BorderLayout.CENTER)
+            add(buttons, BorderLayout.SOUTH)
+        }
+    }
+
+    private fun updateHistoryDetail() {
+        val r = selectedHistoryRecord()
+        listOf(hdRollbackBtn, hdRerunBtn, hdCopyBtn, hdExportBtn).forEach { it.isEnabled = r != null }
+        if (r == null) {
+            hdHeader.text = ""; hdRows.text = ""; hdSteps.text = ""; hdFiles.text = ""; hdRollbackReason.text = ""
+            return
+        }
+        val (statusText, color) = statusOf(r)
+        val note = DeployXBundle.message("history.detail.note", r.fileCount, r.formattedSize)
+        hdHeader.text = "<html><b>${esc(typeLabel(r))}</b> <font color='${hex(color)}'>${esc(statusText)}</font>" +
+            " · ${esc(r.formattedDuration)} · <font color='${hex(DeployXColors.secondary)}'>${esc(note)}</font></html>"
+        val backup = com.alianga.idea.deploy.ui.HistoryDetail.backupText(r, DeployXBundle.message("history.detail.backupDisabled"))
+        val mapping = MappingManager.getInstance().resolveMappingByLocalPath(r.sourcePath)?.mapping?.let { it.name.ifBlank { it.id } } ?: "—"
+        val rows = listOf(
+            "history.detail.k.server" to "${ServerDisplay.title(r.serverId, r.serverName)} ${r.serverAddress}".trim(),
+            "history.detail.k.mapping" to mapping,
+            "history.detail.k.local" to r.sourcePath.ifBlank { "—" },
+            "history.detail.k.remote" to r.targetPath.ifBlank { "—" },
+            "history.detail.k.backup" to backup
+        )
+        hdRows.text = "<html><table cellpadding='1'>" + rows.joinToString("") { (k, v) ->
+            "<tr><td><font color='${hex(DeployXColors.secondary)}'>${esc(DeployXBundle.message(k))}</font></td><td>${esc(v)}</td></tr>"
+        } + "</table></html>"
+        hdSteps.text = com.alianga.idea.deploy.ui.HistoryDetail.steps(r).joinToString("  →  ") { (step, mark) ->
+            mark.symbol + " " + DeployXBundle.message("history.detail.step." + step.name.lowercase())
+        }
+        val files = com.alianga.idea.deploy.ui.HistoryDetail.files(r)
+        hdFiles.text = if (files.isEmpty()) DeployXBundle.message("toolwindow.history.detail.noFiles")
+            else DeployXBundle.message("toolwindow.history.detail.updatedFilesTitle", files.size) + "\n" + files.joinToString("\n")
+        hdFiles.caretPosition = 0
+        val block = com.alianga.idea.deploy.ui.HistoryFilter.rollbackBlockReason(r)
+        val reason = block?.let { DeployXBundle.message("toolwindow.history.rollbackBlocked." + it.name.lowercase()) }
+        hdRollbackBtn.isEnabled = block == null
+        hdRollbackBtn.toolTipText = reason ?: DeployXBundle.message("toolwindow.history.rollback.tooltip")
+        hdRollbackReason.text = reason?.let { DeployXBundle.message("history.detail.rollbackUnavailable", it) } ?: ""
+        hdRollbackReason.isVisible = reason != null
+        val rerun = com.alianga.idea.deploy.ui.HistoryDetail.rerun(r)
+        hdRerunBtn.text = DeployXBundle.message(com.alianga.idea.deploy.ui.HistoryDetail.rerunLabelKey(r))
+        hdRerunBtn.isEnabled = rerun != com.alianga.idea.deploy.ui.HistoryDetail.Rerun.NONE
+        hdRerunBtn.toolTipText = if (hdRerunBtn.isEnabled) null else DeployXBundle.message("history.detail.rerun.noneTip")
+    }
+
+    /** 重新执行：按记录类型调用对应动作（部署 / 推送 / 拉取），失败记录为「重试」 */
+    private fun rerunFromHistory() {
+        val r = selectedHistoryRecord() ?: return
+        when (com.alianga.idea.deploy.ui.HistoryDetail.rerun(r)) {
+            com.alianga.idea.deploy.ui.HistoryDetail.Rerun.PUSH -> {
+                if (!java.io.File(r.sourcePath).exists()) {
+                    Messages.showWarningDialog(DeployXBundle.message("toolwindow.log.localFileNotFound", r.sourcePath), DeployXBundle.message("toolwindow.log.redeployTitle"))
+                    return
+                }
+                executePush(r.sourcePath, r.serverId)
+            }
+            com.alianga.idea.deploy.ui.HistoryDetail.Rerun.NONE -> Unit
+            // 部署与拉取：DeployService.redeploy 内按类型分派（PULL → 重新拉取）
+            else -> redeployFromHistory()
+        }
+    }
+
+    /** 删除单条历史记录（HistoryManager.deleteRecord），先确认 */
+    private fun deleteHistoryRecord() {
+        val r = selectedHistoryRecord() ?: return
+        val ok = Messages.showYesNoDialog(project, DeployXBundle.message("history.detail.delete.confirm"), DeployXBundle.message("history.detail.delete"),
+            Messages.getYesButton(), Messages.getNoButton(), Messages.getWarningIcon()) == Messages.YES
+        if (!ok) return
+        historyManager.deleteRecord(r.id)
+        refreshHistory()
+    }
+
     private fun refreshHistory() {
         val all = historyManager.getRecords()
         val query = historySearchField.text.orEmpty()
@@ -1309,11 +1438,19 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         historyChips.forEach { (k, chip) ->
             chip.text = DeployXBundle.message("toolwindow.history.filter." + k.name.lowercase()) + " " + (counts[k] ?: 0)
         }
+        val keepId = historyList.selectedIndex.takeIf { it in historyRecordsBefore.indices }?.let { historyRecordsBefore[it].id }
+        historyRecordsBefore = historyRecords
         historyListModel.clear()
         for (record in historyRecords) {
             historyListModel.addElement(record.summary)
         }
-        // 根据是否有记录切换卡片：有记录显示列表，无记录显示占位提示
+        // 1.1.1：保持原选中；没有则默认选中第一条，详情区常驻
+        if (historyRecords.isNotEmpty()) {
+            historyList.selectedIndex = historyRecords.indexOfFirst { it.id == keepId }.takeIf { it >= 0 } ?: 0
+        }
+        updateHistoryDetail()
+        // 空状态区分：一条都没有 / 过滤后没有匹配
+        historyEmptyLabel.text = DeployXBundle.message(if (all.isEmpty()) "history.empty.none" else "history.empty.noMatch")
         historyCardLayout.show(historyCardPanel, if (historyRecords.isEmpty()) "empty" else "list")
     }
 
