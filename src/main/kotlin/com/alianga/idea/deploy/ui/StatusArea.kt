@@ -89,7 +89,6 @@ class StatusArea(
     /** @param kind 0 成功 / 1 失败 / 2 取消 */
     fun showDone(text: String, kind: Int) {
         resultLabel.text = text
-        resultLabel.icon = when (kind) { 0 -> AllIcons.General.InspectionsOK; 1 -> AllIcons.General.Error; else -> AllIcons.General.Warning }
         // 文字保持正文色，只给图标上色；失败与取消用警告图标（原型）
         resultLabel.icon = if (kind == 0) AllIcons.General.InspectionsOK else AllIcons.General.Warning
         resultLabel.foreground = UIUtil.getLabelForeground()

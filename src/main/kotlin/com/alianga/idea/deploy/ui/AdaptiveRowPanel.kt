@@ -30,7 +30,9 @@ class AdaptiveRowPanel(
     private val wideSideConstraint: String = BorderLayout.EAST,
     private val narrowSideConstraint: String = BorderLayout.SOUTH,
     /** 窄屏叠放时侧栏不拉满整行，按钮/短控件保持 leading */
-    private val keepSideLeadingWhenStacked: Boolean = true
+    private val keepSideLeadingWhenStacked: Boolean = true,
+    /** 非 null 时按所在表单（带 [FORM_ROOT] 的祖先）宽度与该统一阈值判断，整张表单同时切换 */
+    private val sharedThreshold: Int? = null
 ) : JPanel(BorderLayout(hgap, vgap)) {
 
     private var sideOnWide = true
@@ -53,7 +55,11 @@ class AdaptiveRowPanel(
 
     private fun placeSide() {
         if (width <= 0) return
-        val fitsOneLine = width >= minMainWidth + hgap + side.preferredSize.width
+        val fitsOneLine = if (sharedThreshold != null) {
+            var form: java.awt.Container? = parent
+            while (form != null && (form as? JComponent)?.getClientProperty(FORM_ROOT) != true) form = form.parent
+            ((form as? JComponent)?.width?.takeIf { it > 0 } ?: width) >= sharedThreshold
+        } else width >= minMainWidth + hgap + side.preferredSize.width
         if (fitsOneLine == sideOnWide) return
         sideOnWide = fitsOneLine
         remove(side)
@@ -72,6 +78,12 @@ class AdaptiveRowPanel(
     }
 
     companion object {
+        /** 表单根面板的 client property：labeled 行按它的宽度统一切换标签在左 / 在上 */
+        const val FORM_ROOT = "DeployX.formRoot"
+
+        /** 表单统一窄档阈值（原型 / 规范约 340px） */
+        val FORM_NARROW_THRESHOLD: Int get() = JBUI.scale(340)
+
         /**
          * 标签在左、字段在右；极窄时标签换到字段上方并拉满宽度，
          * 字段仍占一整行，避免 FormBuilder 标签列吃掉可用宽度。
@@ -86,7 +98,8 @@ class AdaptiveRowPanel(
             minMainWidth = minFieldWidth,
             wideSideConstraint = BorderLayout.WEST,
             narrowSideConstraint = BorderLayout.NORTH,
-            keepSideLeadingWhenStacked = false
+            keepSideLeadingWhenStacked = false,
+            sharedThreshold = FORM_NARROW_THRESHOLD
         )
     }
 }

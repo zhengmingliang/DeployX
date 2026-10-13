@@ -60,7 +60,8 @@ class FileSyncSettingsConfigurable : Configurable {
                     addActionListener { importConfig() }
                 })
             }
-            mainPanel = JPanel(BorderLayout()).apply {
+            // 1.1.1：设置页外层是平台的滚动面板；宽度跟随视口，说明文字才能真正换行、不出横向滚动条
+            mainPanel = com.alianga.idea.deploy.ui.ViewportWidthPanel(BorderLayout()).apply {
                 add(buttonPanel, BorderLayout.NORTH)
                 add(tabbedPane, BorderLayout.CENTER)
                 // 1.1.1：给设置页合理的首选 / 最小尺寸，避免打开时被裁剪、最大化后塌成标题栏

@@ -179,7 +179,9 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
         detailPanel = buildDetail()
         val split = com.intellij.ui.OnePixelSplitter(true, "DeployX.script.split", 0.45f).apply {
             firstComponent = JBScrollPane(list)
-            secondComponent = JBScrollPane(detailPanel).apply { border = JBUI.Borders.empty() }
+            // 1.1.1：详情区宽度跟随视口（只纵向滚动），右侧「运行于」下拉与参数提示不再被裁切
+            secondComponent = JBScrollPane(com.alianga.idea.deploy.ui.ViewportWidthPanel(BorderLayout()).apply { add(detailPanel, BorderLayout.CENTER) },
+                javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER).apply { border = JBUI.Borders.empty() }
         }
         add(filters, BorderLayout.NORTH)
         add(split, BorderLayout.CENTER)
@@ -345,7 +347,13 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
                     alignmentX = LEFT_ALIGNMENT
                 })
             }
-            paramsPanel.add(JBLabel(DeployXBundle.message("script.tab2.paramHint", "\${" + DeployXBundle.message("script.tab2.paramName") + "}")).apply {
+            // 1.1.1：提示按可见宽度换行（标签不换行会被裁切）
+            paramsPanel.add(object : JBTextArea(DeployXBundle.message("script.tab2.paramHint", "\${" + DeployXBundle.message("script.tab2.paramName") + "}")) {
+                override fun getPreferredSize(): java.awt.Dimension = super.getPreferredSize().also { it.width = JBUI.scale(100) }
+                override fun getMinimumSize(): java.awt.Dimension = java.awt.Dimension(0, super.getMinimumSize().height)
+            }.apply {
+                isEditable = false; isFocusable = false; isOpaque = false; lineWrap = true; wrapStyleWord = true
+                border = JBUI.Borders.empty()
                 foreground = DeployXColors.secondary; font = JBUI.Fonts.smallFont(); alignmentX = LEFT_ALIGNMENT
             })
         }

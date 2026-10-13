@@ -106,6 +106,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
         private const val KEY_PUSH_MODE = "deployx.toolwindow.pushMode"
         private const val KEY_PULL_MODE = "deployx.toolwindow.pullMode"
+        /** 服务器下拉末尾的「管理服务器…」占位项（不是服务器 id） */
+        private const val MANAGE_SERVERS_ITEM = "\u0000deployx.manageServers"
 
         fun getPanel(project: Project): FileSyncToolWindowPanel? {
             return panelByProject[project.hashCode().toString()]
@@ -123,6 +125,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     // 操作 tab 组件
     private val serverCombo = JComboBox<String>()
+    private var lastServerIndex = -1
     // 1.0.8：本地路径改为 TextFieldWithBrowseButton，支持选目录（与选文件并存）
     // 1.0.8：传入 JBTextField 以便使用 emptyText 占位提示
     // 1.1.0：改为内置浏览按钮（Built-in button，Shift+Enter），本地用文件夹图标、远程用服务器图标
@@ -371,8 +374,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val hdExportBtn = JButton(DeployXBundle.message("toolwindow.history.exportReport"))
 
     init {
-        serverCombo.renderer = com.alianga.idea.deploy.ui.ServerComboRenderer { _, value ->
+        // 1.1.1（review #16）：下拉末尾「管理服务器…」项（原型），选中后打开设置并恢复原选中项
+        val serverRenderer = com.alianga.idea.deploy.ui.ServerComboRenderer { _, value ->
             value?.toString()?.let { serverManager.getServer(it) }
+        }
+        serverCombo.renderer = javax.swing.ListCellRenderer<String> { list, value, index, sel, focus ->
+            if (value == MANAGE_SERVERS_ITEM) {
+                JBLabel(DeployXBundle.message("toolwindow.server.manage"), AllIcons.General.Settings, SwingConstants.LEADING).apply {
+                    isOpaque = true
+                    background = if (sel && index >= 0) list.selectionBackground else list.background
+                    foreground = if (sel && index >= 0) list.selectionForeground else DeployXColors.link
+                    border = if (index >= 0) JBUI.Borders.compound(JBUI.Borders.customLineTop(DeployXColors.border), JBUI.Borders.empty(3, 6))
+                        else JBUI.Borders.empty(0, 6)
+                }
+            } else serverRenderer.getListCellRendererComponent(list, value, index, sel, focus)
         }
         panelByProject[project.hashCode().toString()] = this
         setupUI()
@@ -439,7 +454,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val serverWithManage = JPanel(BorderLayout()).apply {
             isOpaque = false
             add(serverWithTerminalPanel, BorderLayout.CENTER)
-            add(JPanel(FlowLayout(FlowLayout.TRAILING, 0, 0)).apply { isOpaque = false; add(manageServersLink) }, BorderLayout.SOUTH)
         }
         val mappingWithHint = JPanel(BorderLayout()).apply { isOpaque = false; add(mappingCombo, BorderLayout.CENTER); add(mappingHint, BorderLayout.SOUTH) }
         serverPathPanel = FormBuilder.createFormBuilder()
@@ -449,6 +463,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             .addComponent(AdaptiveRowPanel.labeled(remotePathLabel, remotePathField))
             .panel
         alignFormLabels()
+        serverPathPanel.putClientProperty(AdaptiveRowPanel.FORM_ROOT, true)
         serverPathGroup = com.alianga.idea.deploy.ui.GroupHeader(DeployXBundle.message("toolwindow.group.serverAndPaths"), serverPathPanel)
 
         // 分组 2：部署选项（备份/解压，未勾选时缩进子字段灰显）
@@ -473,6 +488,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             .addComponent(unzipCheck)
             .addComponent(unzipIndentedPanel)
             .panel
+        deployOptionsPanel.putClientProperty(AdaptiveRowPanel.FORM_ROOT, true)
 
         // 分组 3：执行命令
         // 1.1.1：命令改为复选框 + 勾选后展开的 2 行命令框（缩进），下方注释「在远程目录执行 · 每行一条」
@@ -1091,7 +1107,17 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
         localPathField.document.addDocumentListener(docListener)
         remotePathField.document.addDocumentListener(docListener)
-        serverCombo.addActionListener { onServerChanged() }
+        serverCombo.addActionListener {
+            if (serverCombo.selectedItem == MANAGE_SERVERS_ITEM) {
+                // 恢复原选中项后再打开设置，不触发映射带入
+                suppressMappingEvents = true
+                try { serverCombo.selectedIndex = lastServerIndex.coerceIn(-1, serverCombo.itemCount - 2) } finally { suppressMappingEvents = false }
+                SwingUtilities.invokeLater { ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX") }
+                return@addActionListener
+            }
+            lastServerIndex = serverCombo.selectedIndex
+            onServerChanged()
+        }
         preCommandField.onTextChanged { updateSummary() }
         postCommandField.onTextChanged { updateSummary() }
         preCheck.addItemListener { updateCommandBlocks(); updateSummary() }
@@ -1114,7 +1140,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     /** 刷新空闲摘要；缺项时置灰两个拆分按钮并写明缺什么 */
     private fun updateSummary() {
-        val serverId = serverCombo.selectedItem?.toString()
+        val serverId = getSelectedServerId()
         val server = serverId?.let { serverManager.getServer(it) }
         val title = server?.let { ServerDisplay.title(it.id, it.name) }
         val labels: (String) -> String = { DeployXBundle.message("toolwindow.summary.$it") }
@@ -1172,6 +1198,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         labels.forEach { it.preferredSize = null }
         val w = labels.maxOf { it.preferredSize.width } + JBUI.scale(8)
         labels.forEach { it.preferredSize = Dimension(w, it.preferredSize.height) }
+        // 1.1.1（review #21）：备份 / 解压目录两行同样对齐；它们在缩进 12 的子面板里，标签减去缩进，字段左边缘与上方对齐
+        val indent = JBUI.scale(12)
+        listOf(backupDirLabel, unzipDirLabel).forEach {
+            it.preferredSize = null
+            it.preferredSize = Dimension(maxOf(w - indent, it.preferredSize.width), it.preferredSize.height)
+        }
     }
 
     private fun effectivePre(): String = if (preCheck.isSelected) preCommandField.text.trim() else ""
@@ -1302,12 +1334,15 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             // 1.1.0：条目值只存 id，显示交给 ServerComboRenderer（去掉「164 - 164」重复）
             serverCombo.addItem(server.id)
         }
+        serverCombo.addItem(MANAGE_SERVERS_ITEM)
         val defaultServer = serverManager.getDefaultServer()
         if (defaultServer != null) {
             val index = servers.indexOfFirst { it.id == defaultServer.id }
             if (index >= 0) serverCombo.selectedIndex = index
         }
         previousId?.let { id -> servers.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { serverCombo.selectedIndex = it } }
+        if (servers.isEmpty()) serverCombo.selectedIndex = -1
+        lastServerIndex = serverCombo.selectedIndex
     }
 
 
@@ -1663,7 +1698,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     private fun getSelectedServerId(): String? {
-        return serverCombo.selectedItem?.toString()
+        return serverCombo.selectedItem?.toString()?.takeIf { it != MANAGE_SERVERS_ITEM }
     }
 
     fun selectScriptTab() {

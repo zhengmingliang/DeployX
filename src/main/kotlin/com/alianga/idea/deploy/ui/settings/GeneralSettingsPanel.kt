@@ -20,7 +20,7 @@ import javax.swing.SpinnerNumberModel
  *
  * 后续新增的通用设置项（如主题、日志级别、默认行为等）可继续在此面板追加。
  */
-class GeneralSettingsPanel : JPanel(BorderLayout()) {
+class GeneralSettingsPanel : com.alianga.idea.deploy.ui.ViewportWidthPanel(BorderLayout()) {
 
     private val settings = FileSyncSettings.getInstance()
 
@@ -64,7 +64,11 @@ class GeneralSettingsPanel : JPanel(BorderLayout()) {
      * 1.1.1：说明文字按面板宽度自动换行（HTML 标签不会换行，长说明被截断并出现横向滚动条）。
      * columns 取小值让首选宽度很窄，由 FormBuilder 横向拉伸后再按实际宽度折行。
      */
-    private fun wrapText(text: String, italic: Boolean = false) = com.intellij.ui.components.JBTextArea(text).apply {
+    private fun wrapText(text: String, italic: Boolean = false) = object : com.intellij.ui.components.JBTextArea(text) {
+        // 换行文本区的首选宽度默认是整段不换行的宽度，会撑宽父容器；只报一个很小的宽度，由布局拉伸后再换行
+        override fun getPreferredSize(): java.awt.Dimension = super.getPreferredSize().also { it.width = com.intellij.util.ui.JBUI.scale(100) }
+        override fun getMinimumSize(): java.awt.Dimension = java.awt.Dimension(0, super.getMinimumSize().height)
+    }.apply {
         isEditable = false; isFocusable = false; isOpaque = false
         lineWrap = true; wrapStyleWord = true; columns = 10
         border = com.intellij.util.ui.JBUI.Borders.empty()
