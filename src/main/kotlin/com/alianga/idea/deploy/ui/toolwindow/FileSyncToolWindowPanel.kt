@@ -977,7 +977,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     currentCancelToken = null
                     onProgressDone(cancelToken, result as T)
                     tabBar.setBadge(1, null)
-                    onTaskFinished(title, cancelToken)
+                    onTaskFinished(title, cancelToken, com.alianga.idea.deploy.ui.TaskOutcome.failed(result))
                 }
             }
         })
@@ -1111,9 +1111,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     }
 
     /** 任务结束：状态区显示结果行，并发一条带「查看日志」「复制报告」的平台通知 */
-    private fun onTaskFinished(title: String, token: DeployCancelToken) {
+    private fun onTaskFinished(title: String, token: DeployCancelToken, resultFailed: Boolean? = null) {
         val text = progressLabel.text.orEmpty()
-        val failed = text.contains("失败") || text.contains("fail", ignoreCase = true) || text.contains("error", ignoreCase = true)
+        // 1.1.1（review #28）：优先用任务结果的 success 标志；结果缺失（如异常 / 被终止）时才回退到文字判断
+        val failed = resultFailed ?: (text.contains("失败") || text.contains("fail", ignoreCase = true) || text.contains("error", ignoreCase = true))
         val kind = when { token.isCancelled() -> 2; failed -> 1; else -> 0 }
         val seconds = (System.currentTimeMillis() - taskStartedAt) / 100 / 10.0
         val line = DeployXBundle.message("toolwindow.status.result", text, seconds)
