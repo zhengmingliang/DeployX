@@ -44,7 +44,9 @@ class QuickPushAction : AbstractDeployAction<UploadItem>() {
             dialogMessage(fileCount),
             showCommandOptions = hasAnyCommand,
             commandAvailabilityByServerId = commandAvailability,
-            resolvedByServerId = resolvedByServerId
+            resolvedByServerId = resolvedByServerId,
+            okText = okText(),
+            hiddenServerCount = hiddenServerCount
         )
         if (!dialog.showAndGet()) return null
         val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }
@@ -56,6 +58,8 @@ class QuickPushAction : AbstractDeployAction<UploadItem>() {
             mappingIdsByServerId = dialog.selectedMappingIdsByServerId
         )
     }
+
+    override fun okText(): String = DeployXBundle.message("dialog.server.select.ok.push")
 
     override fun dialogTitle(): String =
         DeployXBundle.message("dialog.server.select.title.push")

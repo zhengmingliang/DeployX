@@ -39,11 +39,25 @@ class MappingListCellRenderer : DefaultListCellRenderer() {
         if (component is JLabel) {
             val isDefault = index == 0
             component.toolTipText = MappingManager.formatMappingEntry(resolved, isDefault)
-            component.text = buildDisplayText(resolved, isDefault, list, component)
+            // 1.1.0：三行完整显示「名称 + 默认标记 / 本地 … / 远程 …」，长路径换行不截断（现状问题 #11）
+            component.text = buildFullText(resolved, isDefault)
+            component.border = com.intellij.util.ui.JBUI.Borders.empty(4, 6)
         }
         return component
     }
 
+    private fun buildFullText(resolved: MappingManager.ResolvedMapping, isDefault: Boolean): String {
+        fun esc(t: String) = com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(t)
+        val name = esc(resolved.mapping.name.ifBlank { resolved.mapping.localDir })
+        val marker = if (isDefault) " &nbsp;<font color='#${com.intellij.ui.ColorUtil.toHex(com.alianga.idea.deploy.ui.DeployXColors.success)}'>" +
+            esc(DeployXBundle.message("dialog.mapping.select.entry.defaultDeepest")) + "</font>" else ""
+        // 等宽字体显示路径；<html> 下 JLabel 按列表宽度自动折行
+        return "<html><b>$name</b>$marker<br><code>" + esc(DeployXBundle.message("dialog.mapping.select.entry.local")) + " " +
+            esc(resolved.mapping.localDir) + "</code><br><code>" + esc(DeployXBundle.message("dialog.mapping.select.entry.remote")) + " " +
+            esc(resolved.resolvedRemoteDir) + "</code></html>"
+    }
+
+    @Suppress("unused")
     private fun buildDisplayText(
         resolved: MappingManager.ResolvedMapping,
         isDefault: Boolean,

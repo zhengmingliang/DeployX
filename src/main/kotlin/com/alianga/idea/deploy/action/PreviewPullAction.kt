@@ -16,6 +16,8 @@ import com.intellij.openapi.vfs.VirtualFile
  */
 class PreviewPullAction : AbstractDeployAction<DownloadItem>() {
 
+    override fun okText(): String = DeployXBundle.message("dialog.server.select.ok.preview")
+
     override fun dialogTitle(): String =
         DeployXBundle.message("dialog.server.select.title")
 

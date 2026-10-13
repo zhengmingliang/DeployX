@@ -38,6 +38,19 @@ object ActionUtils {
     }
 
     /**
+     * 1.1.0：没有匹配映射时的通知，附「添加映射…」动作直达设置页，省掉一次关对话框。
+     */
+    fun showNoMappingNotification(project: Project, content: String) {
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup("DeployX")
+            .createNotification(content, NotificationType.WARNING)
+            .addAction(com.intellij.notification.NotificationAction.createSimpleExpiring(com.alianga.idea.deploy.DeployXBundle.message("dialog.server.select.addMapping")) {
+                com.intellij.openapi.options.ShowSettingsUtil.getInstance().showSettingsDialog(project, "DeployX")
+            })
+            .notify(project)
+    }
+
+    /**
      * 显示传输完成通知。
      *
      * 双通道策略，保证用户总能收到提醒：

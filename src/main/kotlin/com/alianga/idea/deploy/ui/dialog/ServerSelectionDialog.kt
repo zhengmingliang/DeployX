@@ -48,8 +48,15 @@ class ServerSelectionDialog(
      * key = serverId，value = 该服务器上选中文件匹配到的全部映射（含父子嵌套）。
      * 为空 Map 时（如 SSH 终端选择）不展示映射面板，行为与旧版一致。
      */
-    private val resolvedByServerId: Map<String, List<MappingManager.ResolvedMapping>> = emptyMap()
+    private val resolvedByServerId: Map<String, List<MappingManager.ResolvedMapping>> = emptyMap(),
+    /** 1.1.0：确认按钮的具体动词（部署 / 推送 / 拉取 / 预览），null 时用平台默认 */
+    private val okText: String? = null,
+    /** 1.1.0：因没有匹配映射而被隐藏的服务器数，>0 时底部显示提示与「添加映射…」 */
+    private val hiddenServerCount: Int = 0
 ) : DialogWrapper(null) {
+
+    /** 1.1.0：页脚「已选 N 台服务器」 */
+    private val selectionCountLabel = JBLabel().apply { foreground = com.alianga.idea.deploy.ui.DeployXColors.secondary }
 
     data class CommandAvailability(
         val hasPreCommand: Boolean = false,
@@ -133,10 +140,16 @@ class ServerSelectionDialog(
 
     init {
         title = titleText
+        okText?.let { setOKButtonText(it) }
         serverList.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
         if (servers.isNotEmpty()) {
-            serverList.selectedIndex = 0
+            // 1.1.0：默认勾选默认服务器
+            serverList.selectedIndex = servers.indexOfFirst { it.isDefault }.coerceAtLeast(0)
         }
+        serverList.addListSelectionListener { if (!it.valueIsAdjusting) updateSelectionCount() }
+        // 1.1.0：列表高度按内容自适应（最多 8 行后滚动），不再固定占半屏（现状问题 #10）
+        serverList.visibleRowCount = servers.size.coerceIn(1, 8)
+        serverScrollPane.preferredSize = null
         serverList.addListSelectionListener {
             if (!it.valueIsAdjusting) {
                 updateCommandOptions()
@@ -180,16 +193,44 @@ class ServerSelectionDialog(
         }
 
         init()
+        initValidation()
         updateCommandOptions()
+        updateSelectionCount()
     }
+
+    private fun updateSelectionCount() {
+        val n = serverList.selectedIndices.size
+        selectionCountLabel.text = DeployXBundle.message("dialog.server.select.selectedCount", n)
+    }
+
+    /** 1.1.0：未选择时红字提示且主按钮不可用（错误不只靠颜色，带文字） */
+    override fun doValidate(): com.intellij.openapi.ui.ValidationInfo? =
+        if (serverList.selectedIndices.isEmpty())
+            com.intellij.openapi.ui.ValidationInfo(DeployXBundle.message("dialog.server.select.atLeastOne"), serverList)
+        else null
 
     override fun createCenterPanel(): JComponent {
         val builder = FormBuilder.createFormBuilder()
             .addComponent(JBLabel(messageText))
             .addVerticalGap(JBUI.scale(6))
-            .addComponent(searchField)
-            .addVerticalGap(JBUI.scale(4))
-            .addComponent(serverScrollPane)
+        // 1.1.0：服务器很少（≤5 台）时隐藏搜索框
+        if (servers.size > 5) builder.addComponent(searchField).addVerticalGap(JBUI.scale(4))
+        builder.addComponent(serverScrollPane)
+        if (hiddenServerCount > 0) {
+            val hiddenRow = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEADING, 0, 0)).apply {
+                add(JBLabel(DeployXBundle.message("dialog.server.select.hiddenCount", hiddenServerCount)).apply {
+                    foreground = com.alianga.idea.deploy.ui.DeployXColors.secondary
+                    font = JBUI.Fonts.smallFont()
+                    border = JBUI.Borders.emptyRight(8)
+                })
+                add(com.intellij.ui.components.ActionLink(DeployXBundle.message("dialog.server.select.addMapping")) {
+                    close(CANCEL_EXIT_CODE)
+                    com.intellij.openapi.options.ShowSettingsUtil.getInstance().showSettingsDialog(null as com.intellij.openapi.project.Project?, "DeployX")
+                })
+            }
+            builder.addVerticalGap(JBUI.scale(4)).addComponent(hiddenRow)
+        }
+        builder
             .addVerticalGap(JBUI.scale(8))
             // 1.0.8：映射选择面板（无歧义时不可见，GridBagLayout 不为其占位）
             .addComponent(mappingSectionPanel)
@@ -206,7 +247,8 @@ class ServerSelectionDialog(
         // 会压缩可收缩的映射面板，导致映射列表只剩一行、候选映射看不到、条目文本被裁切。
         // 现由两个滚动面板各自的首选尺寸自然决定弹窗大小：无歧义时约 350px 高；
         // 有歧义时按映射候选行数（2~5 行）增长，不同界面语言/字体/屏幕尺寸下均完整展示。
-        val panel = builder.panel
+        builder.addVerticalGap(JBUI.scale(8)).addComponent(selectionCountLabel)
+        val panel = builder.panel.apply { minimumSize = JBUI.size(480, 200) }
 
         // 注册键盘事件路由：对话框可见时，按字母/数字键自动把焦点转到搜索框
         registerKeyRouting()
@@ -331,10 +373,9 @@ class ServerSelectionDialog(
         val hasChoices = currentMappingCandidates.size > 1
         mappingSectionPanel.isVisible = hasChoices
         // 映射面板可见时压缩服务器列表高度，隐藏时恢复，避免弹窗过高
-        serverScrollPane.preferredSize = JBUI.size(
-            JBUI.scale(LIST_WIDTH),
-            JBUI.scale(if (hasChoices) SERVER_LIST_HEIGHT_WITH_MAPPING else SERVER_LIST_HEIGHT_NORMAL)
-        )
+        // 1.1.0：服务器列表高度按行数自适应，映射面板可见时最多 4 行，把空间让给映射
+        serverList.visibleRowCount = filteredServers.size.coerceIn(1, if (hasChoices) 4 else 8)
+        serverScrollPane.preferredSize = null
         if (!hasChoices) {
             mappingListModel.replaceAll(emptyList())
             lastMappingLeadServerId = null
@@ -347,10 +388,12 @@ class ServerSelectionDialog(
         val rows = currentMappingCandidates.size.coerceIn(MAPPING_MIN_ROWS, MAPPING_MAX_ROWS)
         mappingListModel.replaceAll(currentMappingCandidates)
         mappingList.visibleRowCount = rows
+        // 1.1.0：映射条目改为三行完整显示（名称 / 本地 / 远程），高度按行数计算，不截断
         mappingScrollPane.preferredSize = JBUI.size(
             JBUI.scale(LIST_WIDTH),
-            JBUI.scale(MAPPING_ROW_HEIGHT) * rows + JBUI.scale(8)
+            JBUI.scale(MAPPING_ROW_HEIGHT) * 3 * rows / 2 + JBUI.scale(8)
         )
+        mappingScrollPane.horizontalScrollBarPolicy = javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
         // 恢复该服务器此前选过的映射；否则默认选中最深层级（自动匹配项，索引 0）
         val rememberedId = server?.let { mappingChoiceByServerId[it.id] }
         val restoreIndex = rememberedId?.let { id ->
@@ -407,8 +450,10 @@ class ServerSelectionDialog(
         updateMappingPanel()
     }
 
+    // 1.1.0：id 与名称相同时只显示一次（不再出现「164 - 164」）
     private fun formatServer(server: ServerConfig): String =
-        "${server.id} - ${server.name} (${server.displayAddress})"
+        "${com.alianga.idea.deploy.ui.ServerDisplay.title(server.id, server.name)}  (${server.displayAddress})" +
+            if (server.isDefault) "  · " + DeployXBundle.message("dialog.server.select.defaultServer") else ""
 
     companion object {
         /** 两个列表的首选宽度（px，缩放前） */

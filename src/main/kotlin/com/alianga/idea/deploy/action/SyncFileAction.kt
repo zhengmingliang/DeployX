@@ -14,6 +14,8 @@ import com.intellij.openapi.vfs.VirtualFile
  */
 class SyncFileAction : AbstractDeployAction<UploadItem>() {
 
+    override fun okText(): String = DeployXBundle.message("dialog.server.select.ok.push")
+
     override fun dialogTitle(): String =
         DeployXBundle.message("dialog.server.select.title")
 

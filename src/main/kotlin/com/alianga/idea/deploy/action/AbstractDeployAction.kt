@@ -56,6 +56,12 @@ abstract class AbstractDeployAction<T> : AnAction() {
         val mappingIdsByServerId: Map<String, String> = emptyMap()
     )
 
+    /** 1.1.0：被隐藏（无匹配映射）的服务器数量，供对话框提示 */
+    protected var hiddenServerCount: Int = 0
+
+    /** 1.1.0：对话框确认按钮的具体动词（不再用通用「OK」） */
+    protected open fun okText(): String = DeployXBundle.message("dialog.server.select.ok.deploy")
+
     final override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     final override fun actionPerformed(e: AnActionEvent) {
@@ -70,18 +76,21 @@ abstract class AbstractDeployAction<T> : AnAction() {
             }.filterValues { it.isNotEmpty() }
 
         if (resolvedByFile.isEmpty()) {
-            ActionUtils.showNotification(
-                project,
-                DeployXBundle.message("notification.noMappingFound"),
-                NotificationType.WARNING
-            )
+            ActionUtils.showNoMappingNotification(project, DeployXBundle.message("notification.noMappingFound"))
             return
         }
 
-        val availableServers = resolvedByFile.values.flatten()
-            .map { it.mapping.serverId }
-            .distinct()
-            .mapNotNull { ServerManager.getInstance().getServer(it) }
+        // 1.1.0：只列出覆盖全部选中项的服务器（多选取交集）；没有匹配映射的服务器不显示，
+        // 对话框底部提示「已隐藏 N 台」（实施方案 3.8）
+        val coveringIds = com.alianga.idea.deploy.ui.TargetCandidates.coveringAll(
+            resolvedByFile.values.map { list -> list.map { it.mapping.serverId } }
+        )
+        val availableServers = coveringIds.mapNotNull { ServerManager.getInstance().getServer(it) }
+        hiddenServerCount = (ServerManager.getInstance().getServers().size - availableServers.size).coerceAtLeast(0)
+        if (availableServers.isEmpty()) {
+            ActionUtils.showNoMappingNotification(project, DeployXBundle.message("notification.noCommonMapping"))
+            return
+        }
 
         val multiSelection = selectServers(availableServers, resolvedByFile, files.size) ?: return
 
@@ -134,7 +143,9 @@ abstract class AbstractDeployAction<T> : AnAction() {
             showCommandOptions = showCommandOptions(),
             commandAvailabilityByServerId = commandAvailability,
             // 1.0.8：嵌套映射歧义时在对话框内提供映射选择
-            resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile)
+            resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile),
+            okText = okText(),
+            hiddenServerCount = hiddenServerCount
         )
         if (!dialog.showAndGet()) return null
         val server = dialog.selectedServer ?: return null
@@ -165,7 +176,9 @@ abstract class AbstractDeployAction<T> : AnAction() {
             showCommandOptions = showCommandOptions(),
             commandAvailabilityByServerId = commandAvailability,
             // 1.0.8：嵌套映射歧义时在对话框内提供映射选择
-            resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile)
+            resolvedByServerId = ActionUtils.buildResolvedByServerId(resolvedByFile),
+            okText = okText(),
+            hiddenServerCount = hiddenServerCount
         )
         if (!dialog.showAndGet()) return null
         val selected = dialog.selectedServers.ifEmpty { listOfNotNull(dialog.selectedServer) }
