@@ -42,22 +42,35 @@ class GeneralSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private fun setupUI() {
-        val infoLabel = JBLabel("<html><i>${DeployXBundle.message("settings.general.info")}</i></html>")
+        val infoLabel = wrapText(DeployXBundle.message("settings.general.info"), italic = true)
 
         val formPanel = FormBuilder.createFormBuilder()
             .addComponent(infoLabel)
             .addVerticalGap(8)
             .addLabeledComponent(DeployXBundle.message("settings.language.label"), languagePanel)
-            .addComponent(JBLabel("<html><small>${DeployXBundle.message("settings.language.description")}</small></html>"))
+            .addComponent(wrapText(DeployXBundle.message("settings.language.description")))
             .addVerticalGap(8)
             .addComponent(systemNotificationCheck)
-            .addComponent(JBLabel("<html><small>${DeployXBundle.message("settings.general.systemNotification.desc")}</small></html>"))
+            .addComponent(wrapText(DeployXBundle.message("settings.general.systemNotification.desc")))
             .addVerticalGap(8)
             .addLabeledComponent(DeployXBundle.message("settings.general.logFontSize"), logFontSizeSpinner)
-            .addComponent(JBLabel("<html><small>${DeployXBundle.message("settings.general.logFontSize.desc")}</small></html>"))
+            .addComponent(wrapText(DeployXBundle.message("settings.general.logFontSize.desc")))
             .panel
 
         add(formPanel, BorderLayout.NORTH)
+    }
+
+    /**
+     * 1.1.1：说明文字按面板宽度自动换行（HTML 标签不会换行，长说明被截断并出现横向滚动条）。
+     * columns 取小值让首选宽度很窄，由 FormBuilder 横向拉伸后再按实际宽度折行。
+     */
+    private fun wrapText(text: String, italic: Boolean = false) = com.intellij.ui.components.JBTextArea(text).apply {
+        isEditable = false; isFocusable = false; isOpaque = false
+        lineWrap = true; wrapStyleWord = true; columns = 10
+        border = com.intellij.util.ui.JBUI.Borders.empty()
+        val base = com.intellij.util.ui.UIUtil.getLabelFont()
+        font = if (italic) base.deriveFont(java.awt.Font.ITALIC) else base.deriveFont(base.size2D - 1f)
+        foreground = if (italic) com.intellij.util.ui.UIUtil.getLabelForeground() else com.intellij.util.ui.UIUtil.getContextHelpForeground()
     }
 
     fun isModified(): Boolean {

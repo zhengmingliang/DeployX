@@ -32,6 +32,11 @@ class SftpTransferClient {
         val localFile = File(localPath)
         if (!localFile.exists()) return SyncResult(false, error = DeployXBundle.message("ssh.sftp.localPathNotFound", localPath))
         val remoteBase = remotePath.trimEnd('/')
+        // 1.1.1：contentsOnly 时只上传目录内容（与 rsync 源加结尾斜杠一致）
+        if (options.contentsOnly && localFile.isDirectory) {
+            val children = localFile.list()?.sorted().orEmpty()
+            return uploadFilesFrom(localFile.path, remoteBase, children, serverConfig, options, logCallback, progressCallback, cancelToken)
+        }
         val relative = localFile.name + if (localFile.isDirectory) "/" else ""
         return uploadFilesFrom(localFile.parent ?: ".", remoteBase, listOf(relative), serverConfig, options, logCallback, progressCallback, cancelToken)
     }

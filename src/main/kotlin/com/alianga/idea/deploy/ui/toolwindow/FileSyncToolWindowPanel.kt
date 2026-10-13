@@ -280,7 +280,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private var historyFilterKind = com.alianga.idea.deploy.ui.HistoryFilter.Kind.ALL
     private val historyChips = linkedMapOf<com.alianga.idea.deploy.ui.HistoryFilter.Kind, JToggleButton>()
     private val historyListModel = DefaultListModel<String>()
-    private val historyList = JBList(historyListModel)
+    // 1.1.1：行宽跟随视口，长路径（如回滚备份包）截断而不是撑出横向滚动、挤掉右侧状态 / 时间
+    private val historyList = object : JBList<String>(historyListModel) {
+        override fun getScrollableTracksViewportWidth() = true
+    }
     private var historyRecords = listOf<HistoryRecord>()
     private val scriptTabPanel = ScriptTabPanel(project)
 
@@ -635,7 +638,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
         historyCardPanel = JPanel(historyCardLayout).apply {
             add(com.intellij.ui.OnePixelSplitter(true, "DeployX.history.split", 0.5f).apply {
-                firstComponent = JBScrollPane(historyList)
+                firstComponent = JBScrollPane(historyList, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER)
                 secondComponent = buildHistoryDetailPanel()
             }, "list")
             add(historyEmptyLabel, "empty")
@@ -909,12 +912,25 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     /** 1.0.8：复制日志文本到剪贴板并提示用户。空内容给出友好提示。 */
     private fun copyLogText(text: String) {
         if (text.isBlank()) {
-            Messages.showInfoMessage(project, DeployXBundle.message("toolwindow.log.nothingToCopy"), DeployXBundle.message("toolwindow.action.copyLog"))
+            logToast(DeployXBundle.message("toolwindow.log.nothingToCopy"), com.intellij.openapi.ui.MessageType.WARNING)
             return
         }
         CopyPasteManager.getInstance().setContents(StringSelection(text))
         // 1.1.1：提示文案改为「日志已复制」（原误用「更新报告已复制」）
-        Messages.showInfoMessage(project, DeployXBundle.message("toolwindow.log.copiedToClipboard"), DeployXBundle.message("toolwindow.action.copyLog"))
+        logToast(DeployXBundle.message("toolwindow.log.copiedToClipboard"), com.intellij.openapi.ui.MessageType.INFO)
+    }
+
+    /** 1.1.1：复制日志结果用工具窗口气泡提示（非模态），工具窗口不可用时退回 IDE 通知 */
+    private fun logToast(text: String, type: com.intellij.openapi.ui.MessageType) {
+        val twm = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+        val tw = twm.getToolWindow("DeployX")
+        if (tw != null && tw.isVisible) {
+            twm.notifyByBalloon(tw.id, type, text)
+        } else {
+            com.intellij.notification.NotificationGroupManager.getInstance().getNotificationGroup("DeployX")
+                .createNotification(text, if (type == com.intellij.openapi.ui.MessageType.WARNING) NotificationType.WARNING else NotificationType.INFORMATION)
+                .notify(project)
+        }
     }
 
     /**
@@ -1316,13 +1332,27 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val path = if (r.type == HistoryRecord.OperationType.PULL) "${r.targetPath} → ${r.sourcePath}" else "${r.sourcePath} → ${r.targetPath}"
         val row1 = JPanel(BorderLayout()).apply {
             isOpaque = false
-            add(JBLabel("<html><b>${esc(typeLabel(r))}</b> ${esc(ServerDisplay.title(r.serverId, r.serverName))}$tag</html>").apply { foreground = fg }, BorderLayout.CENTER)
+            add(JBLabel("<html><nobr><b>${esc(typeLabel(r))}</b> ${esc(ServerDisplay.title(r.serverId, r.serverName))}$tag</nobr></html>").apply {
+                foreground = fg; minimumSize = java.awt.Dimension(0, 0)
+            }, BorderLayout.CENTER)
             add(JBLabel("<html><font color='${hex(color)}'>${esc(statusText)}</font> ${esc(r.formattedTime)}</html>").apply { foreground = fg }, BorderLayout.EAST)
         }
-        val row2 = JBLabel("<html><font color='${hex(color)}'>●</font> ${esc(path)}</html>").apply {
-            foreground = if (isSelected) fg else DeployXColors.secondary
+        // 纯文本标签：超出宽度时以 … 截断（HTML 标签不会截断）
+        val row2 = JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
+            isOpaque = false
+            add(JBLabel("●").apply { foreground = color }, BorderLayout.WEST)
+            add(JBLabel(path).apply {
+                foreground = if (isSelected) fg else DeployXColors.secondary
+                toolTipText = path; minimumSize = java.awt.Dimension(0, 0)
+            }, BorderLayout.CENTER)
         }
-        val card = JPanel(BorderLayout()).apply {
+        val card = object : JPanel(BorderLayout()) {
+            // 首选宽度不超过列表可见宽度，避免撑宽列表
+            override fun getPreferredSize(): java.awt.Dimension = super.getPreferredSize().also { d ->
+                val w = list.visibleRect.width
+                if (w > 0) d.width = minOf(d.width, w)
+            }
+        }.apply {
             background = bg; border = JBUI.Borders.empty(4, 8)
             add(row1, BorderLayout.NORTH); add(row2, BorderLayout.SOUTH)
         }
@@ -2053,7 +2083,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             Messages.showWarningDialog(DeployXBundle.message("toolwindow.report.noReportToCopy"), DeployXBundle.message("toolwindow.report.copy.title"))
             return
         }
-        CopyPasteManager.getInstance().setContents(StringSelection(reportText))
+        CopyPasteManager.getInstance().setContents(StringSelection(com.alianga.idea.deploy.ui.ReportExport.reconcile(historyRecords[idx], reportText)))
         Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.copied"), DeployXBundle.message("toolwindow.report.copy.title"))
     }
 
@@ -2078,7 +2108,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val result = chooser.showSaveDialog(pages.firstOrNull() ?: this)
         if (result == JFileChooser.APPROVE_OPTION) {
             // 1.1.1：与「复制报告」同一份文本，UTF-8 写出
-            com.alianga.idea.deploy.ui.ReportExport.write(chooser.selectedFile, reportText)
+            com.alianga.idea.deploy.ui.ReportExport.write(chooser.selectedFile, com.alianga.idea.deploy.ui.ReportExport.reconcile(record, reportText))
             Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.exported", chooser.selectedFile.absolutePath), DeployXBundle.message("toolwindow.report.export.title"))
         }
     }

@@ -102,8 +102,10 @@ class ScriptEditDialog(
     }
 
     override fun createCenterPanel(): JComponent {
+        // 1.1.1：至少约 6 行高（编辑器自带滚动条），否则在可滚动表单里被压成一行
         val commandScroll = commandArea.apply {
-            preferredSize = JBUI.size(560, 220)
+            preferredSize = JBUI.size(560, 160)
+            minimumSize = JBUI.size(240, 130)
         }
         val variablesArea = JBTextArea(buildVariablesHelpText(), 8, 60).apply {
             isEditable = false

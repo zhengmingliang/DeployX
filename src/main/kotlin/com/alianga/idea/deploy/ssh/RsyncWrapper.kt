@@ -755,7 +755,10 @@ class RsyncWrapper {
         // 源/目标路径：PULL 时远程在前、本地在后（从服务器拉取到本地）；否则本地在前、远程在后（上传）。
         // Windows 下本地路径需转换为 Cygwin 风格路径，否则盘符 `C:` 会被 rsync 误识别为远程主机。
         // 注意：rsync 中 /path/dir（无尾斜杠）表示同步目录本身，/path/dir/ 表示只同步目录内容。
-        val localArg = toCygwinPath(localPath).trimEnd('/')
+        // 1.1.1：contentsOnly（单路径部署目录同名目标）时源加结尾斜杠，只同步目录内容
+        val localArg = com.alianga.idea.deploy.service.SingleDeployPaths.rsyncSource(
+            toCygwinPath(localPath), options.contentsOnly && options.direction != SyncDirection.PULL
+        )
         val remoteArg = "${serverConfig.user}@${serverConfig.host}:$remotePath"
         val (source, dest) = if (options.direction == SyncDirection.PULL) {
             remoteArg to localArg

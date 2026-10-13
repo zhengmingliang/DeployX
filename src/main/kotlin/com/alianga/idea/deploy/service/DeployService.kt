@@ -680,6 +680,8 @@ class DeployService {
             )
 
         val isLocal = server.isLocal
+        // 1.1.1：单路径部署的源 / 目标语义，部署与重新执行同一规则（避免 lib/lib 嵌套）
+        val syncContents = SingleDeployPaths.syncContents(request.localPath, File(request.localPath).isDirectory, request.remotePath)
         // LOCAL 服务器跳过所有 SSH 步骤；SSH 服务器按需建立连接
         val needsSshConnection = !isLocal && (
             !request.preCommand.isNullOrBlank() ||
@@ -744,7 +746,7 @@ class DeployService {
                 val backupSource = if (!request.backupSource.isNullOrBlank()) {
                     request.backupSource
                 } else {
-                    "${request.remotePath}/${localFile.name}"
+                    SingleDeployPaths.defaultBackupSource(localFile.path, request.remotePath, syncContents)
                 }
                 val backupDir = requireNotNull(request.backupDir) { "backupDir should not be null at this point" }
                 logCallback?.invoke(DeployXBundle.message("deploy.log.backupSingle", if (needsSshConnection) 4 else 2, backupSource, backupDir))
@@ -771,7 +773,7 @@ class DeployService {
             cancelToken?.throwIfCancelled()
             val uploadStep = if (needsSshConnection) 2 else 1
             logCallback?.invoke(DeployXBundle.message("deploy.log.uploadFiles", uploadStep, if (needsSshConnection) 4 else 2))
-            val syncOptions = SyncOptions(excludePatterns = request.excludePatterns)
+            val syncOptions = SyncOptions(excludePatterns = request.excludePatterns, contentsOnly = syncContents)
             val syncResult = TransferService.getInstance().transfer(
                 request.localPath,
                 request.remotePath,
@@ -803,10 +805,10 @@ class DeployService {
                 saveHistory(request, syncResult, startTime, HistoryRecord.OperationStatus.SUCCESS, null)
                 val reportGroup = ReportBuilder.buildReportGroup(
                     server = server,
-                    sourceBaseDir = File(request.localPath).parent ?: request.localPath,
+                    sourceBaseDir = request.localPath,
                     remoteBaseDir = request.remotePath,
                     localPaths = listOf(request.localPath),
-                    relativePaths = listOf(File(request.localPath).name),
+                    relativePaths = SingleDeployPaths.relativePaths(request.localPath, syncContents),
                     success = true,
                     duration = duration,
                     totalSize = syncResult.totalSize,
@@ -874,10 +876,10 @@ class DeployService {
 
             val reportGroup = ReportBuilder.buildReportGroup(
                 server = server,
-                sourceBaseDir = File(request.localPath).parent ?: request.localPath,
+                sourceBaseDir = request.localPath,
                 remoteBaseDir = request.remotePath,
                 localPaths = listOf(request.localPath),
-                relativePaths = listOf(File(request.localPath).name),
+                relativePaths = SingleDeployPaths.relativePaths(request.localPath, syncContents),
                 success = true,
                 duration = duration,
                 totalSize = syncResult.totalSize,
@@ -1194,20 +1196,21 @@ class DeployService {
         status: com.alianga.idea.deploy.model.HistoryRecord.OperationStatus,
         backupFilePath: String? = null
     ) {
+        val syncContents = SingleDeployPaths.syncContents(request.localPath, File(request.localPath).isDirectory, request.remotePath)
         val server = ServerManager.getInstance().getServer(request.serverId)
         val reportGroup = if (server != null) {
             ReportBuilder.buildReportGroup(
                 server = server,
-                sourceBaseDir = File(request.localPath).parent ?: request.localPath,
+                sourceBaseDir = request.localPath,
                 remoteBaseDir = request.remotePath,
                 localPaths = listOf(request.localPath),
-                relativePaths = listOf(File(request.localPath).name),
+                relativePaths = SingleDeployPaths.relativePaths(request.localPath, syncContents),
                 success = status == HistoryRecord.OperationStatus.SUCCESS,
                 duration = System.currentTimeMillis() - startTime,
                 totalSize = syncResult.totalSize,
                 output = syncResult.output,
                 transferredFileList = syncResult.transferredFileList,
-                backupPath = request.backupDir
+                backupPath = backupFilePath
             )
         } else null
         val reportText = reportGroup?.let {
