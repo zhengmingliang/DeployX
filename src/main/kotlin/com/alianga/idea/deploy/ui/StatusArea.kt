@@ -7,6 +7,7 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.CardLayout
+import java.awt.Dimension
 import java.awt.FlowLayout
 import javax.swing.BoxLayout
 import javax.swing.JButton
@@ -33,10 +34,17 @@ class StatusArea(
     closeText: String
 ) : JPanel(CardLayout()) {
 
-    val headline = JBLabel()
-    val flow = JBLabel().apply { foreground = UIUtil.getContextHelpForeground(); font = JBUI.Fonts.smallFont() }
+    /** 可截断标签：首选宽度不随文本增长（超长时 JLabel 自动省略号），完整文本进 tooltip */
+    class TruncLabel : JBLabel() {
+        override fun setText(text: String?) { super.setText(text); toolTipText = text }
+        override fun getPreferredSize(): Dimension = super.getPreferredSize().also { it.width = minOf(it.width, JBUI.scale(120)) }
+        override fun getMinimumSize(): Dimension = Dimension(0, super.getMinimumSize().height)
+    }
+
+    val headline = TruncLabel()
+    val flow = TruncLabel().apply { foreground = UIUtil.getContextHelpForeground(); font = JBUI.Fonts.smallFont() }
     val cancelButton = JButton(cancelText, AllIcons.Actions.Suspend).apply { addActionListener { onCancel() } }
-    private val resultLabel = JBLabel()
+    private val resultLabel = TruncLabel()
     val logLink = ActionLink(logText) { onLog() }
     val reportLink = ActionLink(reportText) { onReport() }
     val closeLink = ActionLink(closeText) { showIdle() }

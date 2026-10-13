@@ -225,6 +225,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     /** 1.1.0：四个页签作为 ToolWindow 内容页签（ContentManager）挂载，这里只保存页面组件 */
     private val pages = mutableListOf<JComponent>()
+    /** 1.1.1：自建页签行 */
+    private val tabBar = com.alianga.idea.deploy.ui.PageTabBar { onPageSelected(it) }
     /** 由 Factory 注入：切换到第 i 个内容页签 */
     var tabSelector: ((Int) -> Unit)? = null
     /** 由 Factory 注入：语言切换时刷新页签标题 */
@@ -233,7 +235,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     // 进度
     private val progressBar = JProgressBar(0, 100)
-    private val progressLabel = JBLabel(DeployXBundle.message("toolwindow.progress.ready"))
+    // 1.1.1：进度文本含长路径与速度，用可截断标签避免撑宽整页（完整文本在 tooltip）
+    private val progressLabel: JBLabel = StatusArea.TruncLabel().apply { text = DeployXBundle.message("toolwindow.progress.ready") }
 
     // 日志 tab
     private val logArea = JBTextArea()
@@ -440,10 +443,19 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // 1.1.0：底部操作栏只有两组——左「拉取 ▾」，右主按钮「部署 ▾」（现状问题 #8）
         applyDeployMode(DeployMode.parse(com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_PUSH_MODE), DeployMode.DEPLOY))
         applyPullMode(DeployMode.parse(com.intellij.ide.util.PropertiesComponent.getInstance().getValue(KEY_PULL_MODE), DeployMode.PULL))
-        val actionBar = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.emptyTop(4)
-            add(pullSplitButton, BorderLayout.WEST)
-            add(deploySplitButton, BorderLayout.EAST)
+        // 1.1.1：窄档自动上下堆叠（主按钮在上），不再重叠 / 裁切
+        val actionBar = object : JPanel() {
+            // 宽度跟随父容器而不是撑开页面；高度随堆叠状态变化
+            override fun getPreferredSize(): Dimension =
+                Dimension(layout.minimumLayoutSize(this).width, layout.preferredLayoutSize(this).height)
+        }.apply {
+            border = JBUI.Borders.emptyTop(8)
+            layout = com.alianga.idea.deploy.ui.ActionBarLayout(pullSplitButton, deploySplitButton, JBUI.scale(8))
+            add(pullSplitButton)
+            add(deploySplitButton)
+            addComponentListener(object : java.awt.event.ComponentAdapter() {
+                override fun componentResized(e: java.awt.event.ComponentEvent) { revalidate() }
+            })
         }
 
         // 进度面板：进度条整行、状态标签在下一行。进度文本含文件路径与速度，较长，
@@ -467,7 +479,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         operationPanel.add(Box.createVerticalStrut(JBUI.scale(12)))
         // 1.1.0：状态区 + 操作栏固定在底部，表单内容区单独滚动（窄档操作栏不被挤掉）
         val bottomBar = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.compound(JBUI.Borders.customLineTop(DeployXColors.border), JBUI.Borders.empty(0, 12, 8, 12))
+            border = JBUI.Borders.compound(JBUI.Borders.customLineTop(DeployXColors.border), JBUI.Borders.empty(0, 12, 10, 12))
             add(statusArea, BorderLayout.CENTER)
             add(actionBar, BorderLayout.SOUTH)
         }
@@ -567,6 +579,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // 1.1.1：targetComponent 必须是实际显示的组件。外层面板自 1.1.0 起不再显示（setContent(JPanel())），
         // 指向它会让工具栏取不到数据上下文、动作全部失效；改为在 historyPanel 创建后指向它（见下方）
         historyToolbar = historyToolbarInstance
+        historyToolbarInstance.targetComponent = this
         // 1.1.0：过滤栏——搜索（动作 / 服务器 / 路径）+ 胶囊过滤：全部 / 成功 / 失败 / 可回滚，各带计数
         historySearchField.addDocumentListener(object : com.intellij.ui.DocumentAdapter() {
             override fun textChanged(e: javax.swing.event.DocumentEvent) = refreshHistory()
@@ -581,8 +594,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             }
             chipGroup.add(chip); chipBar.add(chip); historyChips[kind] = chip
         }
+        // 1.1.1：历史工具栏移到自建页签行右侧，这里只保留搜索与过滤
         val historyButtonPanel = JPanel(BorderLayout()).apply {
-            add(historyToolbarInstance.component, BorderLayout.NORTH)
             add(JPanel(BorderLayout()).apply {
                 border = JBUI.Borders.empty(0, 8, 4, 8)
                 add(historySearchField, BorderLayout.NORTH)
@@ -597,7 +610,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(historyButtonPanel, BorderLayout.NORTH)
             add(historyCardPanel, BorderLayout.CENTER)
         }
-        historyToolbarInstance.targetComponent = historyPanel
 
         // ===== 脚本面板 =====
         scriptTabPanel.setContextProvider { buildScriptRunContext() }
@@ -605,18 +617,22 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         scriptTabPanel.setCommandFiller { preCommand, command -> fillCommandFromScript(preCommand, command) }
 
         // ===== Tab 面板 =====
-        // 1.1.0：每个页签是一个 SimpleToolWindowPanel，顶部是该页签自己的工具栏
-        fun page(content: JComponent, tb: ActionToolbar?): JComponent = SimpleToolWindowPanel(true, true).apply {
-            setContent(content)
-            if (tb != null) { tb.targetComponent = this; setToolbar(tb.component) }
-        }
+        // 1.1.1：自建页签行（PageTabBar）取代平台内容页签——窄宽下「操作」永不隐藏；
+        // 各页工具动作放在页签行右侧，空间不足折进 ⋯。面板自身重新作为唯一可见内容，
+        // 所有工具栏的 targetComponent 均为 this（实际显示中）
+        opsToolbar.targetComponent = this
+        logToolbar.targetComponent = this
         pages.clear()
-        pages += page(opsPage, opsToolbar)
-        pages += page(logPanel, logToolbar)
+        pages += opsPage
+        pages += logPanel
         pages += historyPanel
         pages += scriptTabPanel
-        // 面板本身不再直接显示，仅作为状态与动作的宿主
-        setContent(JPanel())
+        val titles = pageTitles()
+        tabBar.addPage(titles[0], opsPage, opsToolbar)
+        tabBar.addPage(titles[1], logPanel, logToolbar)
+        tabBar.addPage(titles[2], historyPanel, historyToolbarInstance)
+        tabBar.addPage(titles[3], scriptTabPanel, null)
+        setContent(tabBar)
     }
 
     /** 页签标题（与 [pageComponents] 顺序一致） */
@@ -625,16 +641,14 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
 
     fun pageComponents(): List<JComponent> = pages
 
-    /** Factory 在内容页签切换时回调：进入「历史」页时重新加载，确保展示最新记录 */
+    /** 页签切换回调：进入「历史」页时重新加载，确保展示最新记录 */
     fun onPageSelected(index: Int) {
         selectedPage = index
         if (index == 2) refreshHistory()
     }
 
     private fun selectTab(index: Int) {
-        selectedPage = index
-        tabSelector?.invoke(index)
-        if (index == 2) refreshHistory()
+        if (tabBar.selectedIndex != index) tabBar.select(index) else onPageSelected(index)
     }
 
     /**
@@ -707,8 +721,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         historyToolbar?.updateActionsImmediately()
         historyEmptyLabel.text = DeployXBundle.message("toolwindow.history.empty")
 
-        // 内容页签标题由 Factory 刷新
-        tabTitleUpdater?.invoke()
+        pageTitles().forEachIndexed { i, t -> tabBar.setTitle(i, t) }
         logToolbar?.updateActionsImmediately()
         relocalizeActionBar()
         updateSummary()
@@ -901,6 +914,8 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         taskStartedAt = System.currentTimeMillis()
         transferNotified = false
         statusArea.showRunning()
+        // 运行中「日志」页签旁显示 accent 小圆点
+        tabBar.setBadge(1, com.intellij.util.ui.ColorIcon(JBUI.scale(6), DeployXColors.accent))
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, title, true) {
             private var result: T? = null
@@ -934,6 +949,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     abortButton.isEnabled = false
                     currentCancelToken = null
                     onProgressDone(cancelToken, result as T)
+                    tabBar.setBadge(1, null)
                     onTaskFinished(title, cancelToken)
                 }
             }
