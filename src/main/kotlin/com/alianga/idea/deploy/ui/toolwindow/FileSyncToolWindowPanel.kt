@@ -902,10 +902,9 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     /** 日志面板顶部复制按钮工具栏（"复制全部日志"）。1.0.8 新增。 */
     private fun buildLogHeaderCopyBar(): JPanel {
         // 1.1.0 #26：改为纯图标按钮节省空间，作用范围（全部页签）写在 tooltip 里
-        val copyAllButton = com.intellij.ui.InplaceButton(
-            DeployXBundle.message("toolwindow.action.copyAllLog.tooltip"),
-            AllIcons.Actions.Copy
-        ) { copyLogText(logArea.text) }
+        val copyAllButton = iconOnlyButton(DeployXBundle.message("toolwindow.action.copyAllLog.tooltip")) {
+            copyLogText(logArea.text)
+        }
         val bar = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             add(copyAllButton)
@@ -920,10 +919,10 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
      */
     private fun buildLogTabContent(area: JBTextArea, serverId: String?): JPanel {
         // 1.1.0 #26：「复制日志」改为纯图标按钮节省空间，作用范围（仅当前页签）写在 tooltip 里
-        val copyButton = com.intellij.ui.InplaceButton(
-            DeployXBundle.message("toolwindow.action.copyLog.tooltip"),
-            AllIcons.Actions.Copy
-        ) { copyLogText(area.text) }
+        // 「全部」页签（serverId=null）上 tooltip 不说「此服务器」
+        val copyButton = iconOnlyButton(DeployXBundle.message(copyTabTooltipKey(serverId))) {
+            copyLogText(area.text)
+        }
         val top = JPanel(BorderLayout()).apply {
             add(copyButton, BorderLayout.WEST)
             border = JBUI.Borders.empty(2, 4)
@@ -933,6 +932,23 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             add(JBScrollPane(area), BorderLayout.CENTER)
         }
     }
+
+    /**
+     * #26 修复：纯图标按钮用标准 JButton（ActionListener 可靠触发）。
+     * 原先的 InplaceButton 放在日志子页签内容里点击不触发回调（剪贴板无内容也无提示）。
+     */
+    private fun iconOnlyButton(tooltip: String, onClick: () -> Unit): JButton =
+        JButton(AllIcons.Actions.Copy).apply {
+            toolTipText = tooltip
+            accessibleContext.accessibleName = tooltip
+            isBorderPainted = false
+            isContentAreaFilled = false
+            isFocusPainted = false
+            isRolloverEnabled = true
+            margin = JBUI.emptyInsets()
+            preferredSize = JBUI.size(24, 24)
+            addActionListener { onClick() }
+        }
 
     /** 1.0.8：复制日志文本到剪贴板并提示用户。空内容给出友好提示。 */
     private fun copyLogText(text: String) {
