@@ -80,7 +80,15 @@ data class HistoryRecord(
 
     /** 备份文件的完整路径（用于回滚） */
     @SerializedName("backup_file_path")
-    val backupFilePath: String = ""
+    val backupFilePath: String = "",
+
+    /**
+     * 1.1.1：记录来源。"batch" = deployBatch / uploadBatch（sourcePath / targetPath 为映射根，
+     * relativePaths 相对映射根）；"single" = 工具窗口单路径部署（targetPath 为上级目录）；
+     * 空 = 旧记录，按 relativePaths 推断。重新执行据此走与原操作相同的代码路径。
+     */
+    @SerializedName("origin")
+    val origin: String = ""
 ) {
     enum class OperationType(val value: String) {
         @SerializedName("sync")
@@ -99,7 +107,11 @@ data class HistoryRecord(
         BACKUP("backup"),
 
         @SerializedName("script")
-        SCRIPT("script");
+        SCRIPT("script"),
+
+        /** 1.1.1：回滚也写入历史，步骤为 备份当前状态 / 还原 / 后置命令 */
+        @SerializedName("rollback")
+        ROLLBACK("rollback");
 
         companion object {
             fun fromValue(value: String): OperationType =

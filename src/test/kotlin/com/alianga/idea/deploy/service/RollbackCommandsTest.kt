@@ -46,3 +46,20 @@ class RollbackCommandsTest {
         assertEquals(2, RollbackCommands.newerSuccessfulCount(rec, all))
     }
 }
+
+class RollbackHistoryRecordTest {
+    private val rec = HistoryRecord(id = "1", type = OperationType.DEPLOY, serverId = "s", serverName = "S",
+        targetPath = "/app/lib", backupFilePath = "/bak/a.tar.gz", postCommand = "sh restart.sh")
+
+    @Test fun rollbackRecordAndSteps() {
+        val h = RollbackCommands.historyRecord(rec, OperationStatus.SUCCESS, 10, "/bak/pre.tgz", true, listOf("a"), "rep")
+        assertEquals(OperationType.ROLLBACK, h.type)
+        assertEquals("/bak/a.tar.gz", h.sourcePath); assertEquals("/app/lib", h.targetPath); assertEquals("sh restart.sh", h.postCommand)
+        val steps = com.alianga.idea.deploy.ui.HistoryDetail.steps(h)
+        assertEquals(listOf("ROLLBACK_BACKUP", "RESTORE", "POST"), steps.map { it.first.name })
+        assertEquals(listOf("✔", "✔", "✔"), steps.map { it.second.symbol })
+        assertEquals(com.alianga.idea.deploy.ui.HistoryDetail.Rerun.NONE, com.alianga.idea.deploy.ui.HistoryDetail.rerun(h))
+        val f = RollbackCommands.historyRecord(rec, OperationStatus.FAILED, 10, null, false, emptyList(), "")
+        assertEquals(listOf("–", "✖", "–"), com.alianga.idea.deploy.ui.HistoryDetail.steps(f).map { it.second.symbol })
+    }
+}

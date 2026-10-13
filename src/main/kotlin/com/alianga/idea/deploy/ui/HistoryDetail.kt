@@ -28,12 +28,13 @@ object HistoryDetail {
 
     /** 备份字段：部署记录未备份显示「未启用备份」，其余类型显示 — */
     fun backupText(r: HistoryRecord, notEnabled: String): String = when {
+        r.type == HistoryRecord.OperationType.ROLLBACK -> r.backupDir.ifBlank { "—" }
         r.backupFilePath.isNotBlank() -> r.backupFilePath
         r.type == HistoryRecord.OperationType.DEPLOY -> notEnabled
         else -> "—"
     }
 
-    enum class Step { PRE, BACKUP, UPLOAD, UNZIP, POST }
+    enum class Step { PRE, BACKUP, UPLOAD, UNZIP, POST, ROLLBACK_BACKUP, RESTORE }
     enum class Mark(val symbol: String) { OK("✔"), FAIL("✖"), SKIP("–") }
 
     /**
@@ -41,6 +42,14 @@ object HistoryDetail {
      * 失败 / 取消的记录不知道断在哪一步，已配置步骤标「–」、上传标「✖」——不编造中间状态。
      */
     fun steps(r: HistoryRecord): List<Pair<Step, Mark>> {
+        if (r.type == HistoryRecord.OperationType.ROLLBACK) {
+            val ok = r.status == HistoryRecord.OperationStatus.SUCCESS
+            return listOf(
+                Step.ROLLBACK_BACKUP to if (r.backupDir.isNotBlank()) Mark.OK else Mark.SKIP,
+                Step.RESTORE to if (ok) Mark.OK else Mark.FAIL,
+                Step.POST to if (r.postCommand.isNotBlank() && ok) Mark.OK else Mark.SKIP
+            )
+        }
         val configured = mapOf(
             Step.PRE to r.preCommand.isNotBlank(),
             Step.BACKUP to (r.backupDir.isNotBlank() || r.backupFilePath.isNotBlank()),

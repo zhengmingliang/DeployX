@@ -340,7 +340,7 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
                     alignmentX = LEFT_ALIGNMENT
                 })
             }
-            paramsPanel.add(JBLabel(DeployXBundle.message("script.tab2.paramHint")).apply {
+            paramsPanel.add(JBLabel(DeployXBundle.message("script.tab2.paramHint", "\${" + DeployXBundle.message("script.tab2.paramName") + "}")).apply {
                 foreground = DeployXColors.secondary; font = JBUI.Fonts.smallFont(); alignmentX = LEFT_ALIGNMENT
             })
         }
@@ -504,6 +504,13 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
         val menu = JPopupMenu()
         fun item(key: String, icon: javax.swing.Icon?, action: () -> Unit) =
             menu.add(JMenuItem(DeployXBundle.message(key), icon).apply { addActionListener { action() } })
+        // 1.1.1：右键 / 更多菜单也能运行
+        selected()?.let { s ->
+            if (ScriptCard.runsDirectly(s)) item("script.tab2.run", AllIcons.Actions.Execute) { runDirect(s, s.serverId) }
+                .toolTipText = DeployXBundle.message("script.tab2.runOn", serverText(s.serverId))
+            item("script.tab2.runEllipsis", AllIcons.Actions.Execute) { onRunDialog() }
+            menu.addSeparator()
+        }
         item("script.tab2.duplicate", AllIcons.Actions.Copy) { onDuplicate() }
         item("script.tab2.exportJson", AllIcons.ToolbarDecorator.Export) { onExportJson() }
         menu.addSeparator()

@@ -130,7 +130,7 @@ class RollbackProgressDialog(
         gbc.gridx = 0
         gbc.anchor = GridBagConstraints.WEST
         gbc.fill = GridBagConstraints.NONE
-        panel.add(JBLabel("<b>$label:</b>"), gbc)
+        panel.add(JBLabel("<html><b>" + com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(label) + ":</b></html>"), gbc)
 
         // 值
         gbc.gridx = 1

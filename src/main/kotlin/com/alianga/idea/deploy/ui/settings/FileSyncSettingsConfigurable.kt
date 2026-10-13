@@ -63,6 +63,9 @@ class FileSyncSettingsConfigurable : Configurable {
             mainPanel = JPanel(BorderLayout()).apply {
                 add(buttonPanel, BorderLayout.NORTH)
                 add(tabbedPane, BorderLayout.CENTER)
+                // 1.1.1：给设置页合理的首选 / 最小尺寸，避免打开时被裁剪、最大化后塌成标题栏
+                preferredSize = com.intellij.util.ui.JBUI.size(900, 640)
+                minimumSize = com.intellij.util.ui.JBUI.size(640, 420)
             }
         }
         return mainPanel!!

@@ -909,11 +909,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     /** 1.0.8：复制日志文本到剪贴板并提示用户。空内容给出友好提示。 */
     private fun copyLogText(text: String) {
         if (text.isBlank()) {
-            Messages.showInfoMessage(project, DeployXBundle.message("toolwindow.report.noReportToCopy"), DeployXBundle.message("toolwindow.action.copyLog"))
+            Messages.showInfoMessage(project, DeployXBundle.message("toolwindow.log.nothingToCopy"), DeployXBundle.message("toolwindow.action.copyLog"))
             return
         }
         CopyPasteManager.getInstance().setContents(StringSelection(text))
-        Messages.showInfoMessage(project, DeployXBundle.message("toolwindow.report.copied"), DeployXBundle.message("toolwindow.action.copyLog"))
+        // 1.1.1：提示文案改为「日志已复制」（原误用「更新报告已复制」）
+        Messages.showInfoMessage(project, DeployXBundle.message("toolwindow.log.copiedToClipboard"), DeployXBundle.message("toolwindow.action.copyLog"))
     }
 
     /**
@@ -965,12 +966,17 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 // 启动一个轻量守护线程轮询 IDEA 的 ProgressIndicator 取消状态，
                 // 一旦用户点击 IDEA 进程窗口的取消按钮，立即联动触发 cancelToken。
                 val indicatorWatcher = Thread({
-                    while (!Thread.currentThread().isInterrupted) {
-                        if (indicator.isCanceled && !cancelToken.isCancelled()) {
-                            cancelToken.cancel()
-                            return@Thread
+                    // 1.1.1：任务结束时 interrupt() 会打断 sleep，安静退出，不再抛未捕获的 InterruptedException
+                    try {
+                        while (!Thread.currentThread().isInterrupted) {
+                            if (indicator.isCanceled && !cancelToken.isCancelled()) {
+                                cancelToken.cancel()
+                                return@Thread
+                            }
+                            Thread.sleep(150)
                         }
-                        Thread.sleep(150)
+                    } catch (_: InterruptedException) {
+                        // 正常结束
                     }
                 }, "DeployX-cancel-watcher").apply { isDaemon = true }
                 indicatorWatcher.start()
@@ -1408,16 +1414,25 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     /** 重新执行：按记录类型调用对应动作（部署 / 推送 / 拉取），失败记录为「重试」 */
     private fun rerunFromHistory() {
         val r = selectedHistoryRecord() ?: return
+        if (!java.io.File(r.sourcePath).exists()) {
+            Messages.showWarningDialog(DeployXBundle.message("toolwindow.log.localFileNotFound", r.sourcePath), DeployXBundle.message("toolwindow.log.redeployTitle"))
+            return
+        }
+        val plan = com.alianga.idea.deploy.ui.RedeployPlan
+        // 1.1.1：批量记录（右键部署 / 推送）重建与原操作相同的条目，走同一条 deployBatch / uploadBatch 代码路径，
+        // 避免 rsync 源路径缺结尾斜杠导致远程嵌套 lib/lib
+        val mapping = MappingManager.getInstance().getMappings().firstOrNull {
+            it.serverId == r.serverId && it.localDir.trimEnd('/') == r.sourcePath.trimEnd('/') && it.remoteDir.trimEnd('/') == r.targetPath.trimEnd('/')
+        }
         when (com.alianga.idea.deploy.ui.HistoryDetail.rerun(r)) {
-            com.alianga.idea.deploy.ui.HistoryDetail.Rerun.PUSH -> {
-                if (!java.io.File(r.sourcePath).exists()) {
-                    Messages.showWarningDialog(DeployXBundle.message("toolwindow.log.localFileNotFound", r.sourcePath), DeployXBundle.message("toolwindow.log.redeployTitle"))
-                    return
-                }
-                executePush(r.sourcePath, r.serverId)
-            }
+            com.alianga.idea.deploy.ui.HistoryDetail.Rerun.PUSH ->
+                if (plan.isBatch(r)) executeUploadBatch(plan.uploadItems(r, mapping?.effectiveId.orEmpty()))
+                else executePush(r.sourcePath, r.serverId)
+            com.alianga.idea.deploy.ui.HistoryDetail.Rerun.DEPLOY ->
+                if (plan.isBatch(r)) executeDeployBatch(plan.deployItems(r, mapping?.effectiveId.orEmpty(), mapping?.backupSource?.ifBlank { null }))
+                else redeployFromHistory()
             com.alianga.idea.deploy.ui.HistoryDetail.Rerun.NONE -> Unit
-            // 部署与拉取：DeployService.redeploy 内按类型分派（PULL → 重新拉取）
+            // 拉取：DeployService.redeploy 内按类型分派到 redeployPull（本身按相对路径重建）
             else -> redeployFromHistory()
         }
     }
@@ -2058,11 +2073,12 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
         val record = historyRecords[idx]
         val chooser = JFileChooser().apply {
-            selectedFile = java.io.File("deployx-report-${record.formattedDate.replace("[ :/]".toRegex(), "-")}.md")
+            selectedFile = java.io.File(com.alianga.idea.deploy.ui.ReportExport.defaultFileName(record))
         }
         val result = chooser.showSaveDialog(pages.firstOrNull() ?: this)
         if (result == JFileChooser.APPROVE_OPTION) {
-            chooser.selectedFile.writeText(reportText)
+            // 1.1.1：与「复制报告」同一份文本，UTF-8 写出
+            com.alianga.idea.deploy.ui.ReportExport.write(chooser.selectedFile, reportText)
             Messages.showInfoMessage(DeployXBundle.message("toolwindow.report.exported", chooser.selectedFile.absolutePath), DeployXBundle.message("toolwindow.report.export.title"))
         }
     }

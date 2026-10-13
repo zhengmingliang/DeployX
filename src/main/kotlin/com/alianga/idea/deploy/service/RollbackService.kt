@@ -175,6 +175,14 @@ class RollbackService {
                 log(DeployXBundle.message("rollback.log.fileCount", fileList.size))
                 progressCallback?.invoke(50, DeployXBundle.message("rollback.progress.extracting"))
 
+                // 1.1.1：回滚也写一条历史记录（类型 rollback）
+                var preArchive: String? = null
+                var postRan = false
+                fun addHistory(status: HistoryRecord.OperationStatus, report: String) =
+                    HistoryManager.getInstance().addRecord(RollbackCommands.historyRecord(
+                        record, status, System.currentTimeMillis() - startTime, preArchive, postRan, fileList,
+                        report.ifBlank { logs.joinToString("\n") }))
+
                 // 4.5 1.1.1：回滚前先备份当前状态（可选）
                 if (options.backupFirst) {
                     val ts = java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(java.util.Date())
@@ -185,8 +193,10 @@ class RollbackService {
                     if (!r.success) {
                         val error = DeployXBundle.message("rollback.error.backupCurrentFailed", r.error ?: r.output)
                         log(error)
+                        addHistory(HistoryRecord.OperationStatus.FAILED, "")
                         return RollbackResult(success = false, error = error, duration = System.currentTimeMillis() - startTime, logs = logs)
                     }
+                    preArchive = archive
                     log(DeployXBundle.message("rollback.log.backupCurrentDone", archive))
                 }
 
@@ -202,6 +212,7 @@ class RollbackService {
                         extractResult.error ?: extractResult.output
                     )
                     log(error)
+                    addHistory(HistoryRecord.OperationStatus.FAILED, "")
                     RollbackResult(
                         success = false,
                         error = error,
@@ -215,6 +226,7 @@ class RollbackService {
                         val cmd = RollbackCommands.postCommand(record.targetPath, record.postCommand)
                         log("$ $cmd")
                         val r = connection.executeCommand(cmd)
+                        postRan = true
                         log(if (r.success) r.output.trim() else DeployXBundle.message("rollback.error.postFailed", r.error ?: r.output))
                     }
                     progressCallback?.invoke(90, DeployXBundle.message("rollback.progress.recording"))
@@ -238,6 +250,7 @@ class RollbackService {
                         reportText = report
                     )
                     HistoryManager.getInstance().addRollbackRecord(rollbackRecord)
+                    addHistory(HistoryRecord.OperationStatus.SUCCESS, report)
 
                     progressCallback?.invoke(100, DeployXBundle.message("rollback.progress.completed"))
                     log(DeployXBundle.message("rollback.log.completed", duration))

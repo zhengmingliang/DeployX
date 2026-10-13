@@ -1052,6 +1052,7 @@ class DeployService {
         } ?: ""
         HistoryManager.getInstance().addRecord(
             HistoryRecord(
+                origin = "batch",
                 type = HistoryRecord.OperationType.DEPLOY,
                 sourcePath = key.sourceBaseDir,
                 serverId = key.serverId,
@@ -1161,6 +1162,7 @@ class DeployService {
         } ?: ""
         HistoryManager.getInstance().addRecord(
             HistoryRecord(
+                origin = "batch",
                 type = HistoryRecord.OperationType.UPLOAD,
                 sourcePath = key.sourceBaseDir,
                 serverId = key.serverId,
@@ -1213,6 +1215,7 @@ class DeployService {
         } ?: ""
         HistoryManager.getInstance().addRecord(
             HistoryRecord(
+                origin = "single",
                 type = HistoryRecord.OperationType.DEPLOY,
                 sourcePath = request.localPath,
                 serverId = request.serverId,

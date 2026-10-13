@@ -37,6 +37,23 @@ object RollbackCommands {
         if (options.runPostCommand && record.postCommand.isNotBlank()) add(postCommand(record.targetPath, record.postCommand))
     }
 
+    /**
+     * 回滚写入的历史记录：sourcePath = 使用的备份文件，backupDir = 回滚前备份的当前状态（未备份为空），
+     * postCommand = 实际执行了的后置命令（未执行为空）。
+     */
+    fun historyRecord(
+        record: HistoryRecord, status: HistoryRecord.OperationStatus, duration: Long,
+        preArchive: String?, postRan: Boolean, files: List<String>, report: String
+    ): HistoryRecord = HistoryRecord(
+        id = System.currentTimeMillis().toString() + "-rb",
+        type = HistoryRecord.OperationType.ROLLBACK,
+        sourcePath = record.backupFilePath, serverId = record.serverId, targetPath = record.targetPath,
+        fileCount = files.size, duration = duration, status = status,
+        backupDir = preArchive.orEmpty(), postCommand = if (postRan) record.postCommand else "",
+        transferredFiles = files, serverName = record.serverName, serverAddress = record.serverAddress,
+        reportText = report, origin = "rollback"
+    )
+
     /** 此后在同一服务器同一目标上又有多少次成功的部署 / 推送（其结果也会被覆盖） */
     fun newerSuccessfulCount(record: HistoryRecord, all: List<HistoryRecord>): Int = all.count {
         it.id != record.id && it.timestamp > record.timestamp && it.serverId == record.serverId &&

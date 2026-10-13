@@ -75,6 +75,12 @@ class ScriptEditDialog(
             serverCombo.addItem("${server.id} - ${server.name} (${server.displayAddress})")
         }
         serverCombo.preferredSize = Dimension(JBUI.scale(480), serverCombo.preferredSize.height)
+        // 1.1.1：最小宽度，避免对话框较窄时被压成「loc…2…」
+        serverCombo.minimumSize = Dimension(JBUI.scale(320), serverCombo.preferredSize.height)
+        serverCombo.renderer = object : javax.swing.DefaultListCellRenderer() {
+            override fun getListCellRendererComponent(l: javax.swing.JList<*>?, v: Any?, i: Int, s: Boolean, f: Boolean) =
+                super.getListCellRendererComponent(l, v, i, s, f).also { (it as? javax.swing.JComponent)?.toolTipText = v?.toString() }
+        }
     }
 
     private fun fillData(script: ScriptConfig) {
@@ -147,24 +153,24 @@ class ScriptEditDialog(
     private fun buildVariablesHelpText(): String {
         return buildString {
             appendLine(DeployXBundle.message("dialog.script.variables.paramHeader"))
-            appendLine("  \${'$'}{server.id} - server ID")
-            appendLine("  \${'$'}{server.name} - server name")
-            appendLine("  \${'$'}{server.host} - server host/IP")
-            appendLine("  \${'$'}{server.port} - SSH port")
-            appendLine("  \${'$'}{server.user} - SSH username")
-            appendLine("  \${'$'}{server.address} - user@host:port display address")
-            appendLine("  \${'$'}{server.auth} - auth type password/key")
-            appendLine("  \${'$'}{mapping.id} - current directory mapping ID")
-            appendLine("  \${'$'}{mapping.name} - current directory mapping name")
-            appendLine("  \${'$'}{mapping.localDir} - mapping local root directory")
-            appendLine("  \${'$'}{mapping.remoteDir} - mapping remote root directory")
-            appendLine("  \${'$'}{mapping.serverId} - mapping bound server ID")
-            appendLine("  \${'$'}{path.remoteDir} - currently resolved remote directory")
-            appendLine("  \${'$'}{path.projectBase} - current project root directory")
-            appendLine("  \${'$'}{path.artifact} - build artifact path, empty if not provided")
-            appendLine("  \${'$'}{path.local} - first selected local path")
-            appendLine("  \${'$'}{path.locals} - all selected local paths")
-            appendLine("  \${'$'}{path.local.0} - 1st local path, path.local.1 for 2nd, etc.")
+            appendLine("  \${server.id} - server ID")
+            appendLine("  \${server.name} - server name")
+            appendLine("  \${server.host} - server host/IP")
+            appendLine("  \${server.port} - SSH port")
+            appendLine("  \${server.user} - SSH username")
+            appendLine("  \${server.address} - user@host:port display address")
+            appendLine("  \${server.auth} - auth type password/key")
+            appendLine("  \${mapping.id} - current directory mapping ID")
+            appendLine("  \${mapping.name} - current directory mapping name")
+            appendLine("  \${mapping.localDir} - mapping local root directory")
+            appendLine("  \${mapping.remoteDir} - mapping remote root directory")
+            appendLine("  \${mapping.serverId} - mapping bound server ID")
+            appendLine("  \${path.remoteDir} - currently resolved remote directory")
+            appendLine("  \${path.projectBase} - current project root directory")
+            appendLine("  \${path.artifact} - build artifact path, empty if not provided")
+            appendLine("  \${path.local} - first selected local path")
+            appendLine("  \${path.locals} - all selected local paths")
+            appendLine("  \${path.local.0} - 1st local path, path.local.1 for 2nd, etc.")
             appendLine()
             appendLine(DeployXBundle.message("dialog.script.variables.hint"))
         }.trimEnd()
