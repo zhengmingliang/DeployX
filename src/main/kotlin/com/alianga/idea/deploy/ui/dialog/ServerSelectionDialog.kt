@@ -92,6 +92,26 @@ class ServerSelectionDialog(
         }
 
         init {
+            // 恢复旧版「双击直接确认」：双击服务器行（行内任意位置）勾选该行并确认
+            val dbl = object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    if (e.clickCount >= 2 && SwingUtilities.isLeftMouseButton(e)) {
+                        check.isSelected = true
+                        doOKAction()
+                    }
+                }
+            }
+            fun hook(c: Component) {
+                // 映射单选：双击选中该映射并确认（旧版映射列表双击确认）
+                if (c is JBRadioButton) { c.addMouseListener(object : java.awt.event.MouseAdapter() {
+                    override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                        if (e.clickCount >= 2 && SwingUtilities.isLeftMouseButton(e)) { c.isSelected = true; doOKAction() }
+                    }
+                }); return }
+                c.addMouseListener(dbl)
+                if (c is java.awt.Container) c.components.forEach { hook(it) }
+            }
+            hook(panel)
             check.addItemListener { mappingPanel.isVisible = check.isSelected && candidates.isNotEmpty(); onSelectionChanged() }
             radios.forEach { it.addItemListener { updateCommandOptions() } }
         }
