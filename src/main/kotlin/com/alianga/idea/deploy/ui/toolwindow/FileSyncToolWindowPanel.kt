@@ -1402,13 +1402,16 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
             }
 
             // 显示回滚确认对话框
-            val dialog = RollbackDialog(project, record)
+            val newer = com.alianga.idea.deploy.service.RollbackCommands.newerSuccessfulCount(record, historyManager.getRecords())
+            val dialog = RollbackDialog(project, record, newerCount = newer)
             if (!dialog.showAndGet()) {
                 return
             }
 
             // 执行回滚
-            val progressDialog = RollbackProgressDialog(project, record) { result ->
+            // 执行后切到日志页（回滚进度对话框保留）
+            switchToLogTab()
+            val progressDialog = RollbackProgressDialog(project, record, options = dialog.options, onComplete = { result ->
                 if (result.success) {
                     appendLog(DeployXBundle.message("toolwindow.log.rollbackSuccess"))
                     appendLog(DeployXBundle.message("toolwindow.log.restoredFiles", result.rolledBackFiles.size))
@@ -1426,7 +1429,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                     )
                 }
                 refreshHistory()
-            }
+            })
             progressDialog.show()
         }
 

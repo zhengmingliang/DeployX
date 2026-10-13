@@ -27,8 +27,30 @@ import javax.swing.SwingConstants
 class RollbackDialog(
     private val project: Project,
     private val record: HistoryRecord,
-    private val fileList: List<String> = emptyList()
+    private val fileList: List<String> = emptyList(),
+    /** 1.1.1：此后同一目标上成功的部署 / 推送次数（警告用） */
+    private val newerCount: Int = 0
 ) : DialogWrapper(project) {
+
+    // 1.1.1：两个选项 + 命令原文预览（原型 / 实施方案 3.7）
+    private val backupFirstCheck = com.intellij.ui.components.JBCheckBox(DeployXBundle.message("rollback.dialog.backupFirst"), true)
+    private val runPostCheck = com.intellij.ui.components.JBCheckBox(DeployXBundle.message("rollback.dialog.runPost"), false)
+    private val timestamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(java.util.Date())
+    private val commandArea = JBTextArea().apply {
+        isEditable = false; lineWrap = true
+        font = com.intellij.openapi.editor.colors.EditorColorsManager.getInstance().globalScheme.let { JBUI.Fonts.create(it.editorFontName, it.editorFontSize) }
+    }
+
+    /** 用户确认后的选项 */
+    val options: com.alianga.idea.deploy.service.RollbackCommands.Options
+        get() = com.alianga.idea.deploy.service.RollbackCommands.Options(
+            backupFirst = backupFirstCheck.isSelected,
+            runPostCommand = runPostCheck.isVisible && runPostCheck.isSelected
+        )
+
+    private fun refreshCommandPreview() {
+        commandArea.text = com.alianga.idea.deploy.service.RollbackCommands.preview(record, options, timestamp).joinToString("\n")
+    }
 
     init {
         title = DeployXBundle.message("rollback.dialog.title")
@@ -62,11 +84,21 @@ class RollbackDialog(
         val detailsPanel = createDetailsPanel()
         panel.add(detailsPanel, BorderLayout.CENTER)
 
-        // 文件列表（如果有）
-        if (fileList.isNotEmpty()) {
-            val filesPanel = createFilesPanel()
-            panel.add(filesPanel, BorderLayout.SOUTH)
+        // 1.1.1：将在服务器上执行的命令原文 + 两个选项 + 文件列表
+        runPostCheck.isVisible = record.postCommand.isNotBlank()
+        backupFirstCheck.addItemListener { refreshCommandPreview() }
+        runPostCheck.addItemListener { refreshCommandPreview() }
+        refreshCommandPreview()
+        val south = JPanel().apply {
+            layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
+            add(com.intellij.ui.TitledSeparator(DeployXBundle.message("rollback.dialog.commandsTitle")))
+            add(JBScrollPane(commandArea).apply { preferredSize = JBUI.size(520, 70) })
+            add(backupFirstCheck)
+            add(runPostCheck)
+            if (fileList.isNotEmpty()) add(createFilesPanel())
+            components.forEach { (it as? JComponent)?.alignmentX = java.awt.Component.LEFT_ALIGNMENT }
         }
+        panel.add(south, BorderLayout.SOUTH)
 
         return panel
     }
@@ -87,8 +119,11 @@ class RollbackDialog(
 
         val warningIcon = JBLabel(com.intellij.icons.AllIcons.General.WarningDialog)
 
+        // 1.1.1：警告补全——同名文件被覆盖、新增文件不删除、此后 N 次部署结果也会被覆盖
+        val newer = if (newerCount > 0) "<br>" + DeployXBundle.message("rollback.dialog.warningNewer", newerCount) else ""
         val warningText = JBLabel("<html>${DeployXBundle.message("rollback.dialog.warningTitle")}<br>" +
-                DeployXBundle.message("rollback.dialog.warningMessage") + "</html>").apply {
+                DeployXBundle.message("rollback.dialog.warningMessage") + "<br>" +
+                DeployXBundle.message("rollback.dialog.warningOverwrite") + newer + "</html>").apply {
             foreground = warningColor
         }
 

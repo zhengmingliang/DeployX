@@ -98,7 +98,9 @@ class RollbackService {
     fun rollback(
         record: HistoryRecord,
         logCallback: ((String) -> Unit)? = null,
-        progressCallback: ((progress: Int, message: String) -> Unit)? = null
+        progressCallback: ((progress: Int, message: String) -> Unit)? = null,
+        /** 1.1.1：回滚选项（默认与旧版行为一致：不先备份、不执行后置命令） */
+        options: RollbackCommands.Options = RollbackCommands.Options()
     ): RollbackResult {
         val startTime = System.currentTimeMillis()
         val logs = mutableListOf<String>()
@@ -173,10 +175,25 @@ class RollbackService {
                 log(DeployXBundle.message("rollback.log.fileCount", fileList.size))
                 progressCallback?.invoke(50, DeployXBundle.message("rollback.progress.extracting"))
 
+                // 4.5 1.1.1：回滚前先备份当前状态（可选）
+                if (options.backupFirst) {
+                    val ts = java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(java.util.Date())
+                    val archive = RollbackCommands.backupCurrentPath(record.backupFilePath, ts)
+                    val cmd = RollbackCommands.backupCurrent(record.targetPath, archive)
+                    log("$ $cmd")
+                    val r = connection.executeCommand(cmd)
+                    if (!r.success) {
+                        val error = DeployXBundle.message("rollback.error.backupCurrentFailed", r.error ?: r.output)
+                        log(error)
+                        return RollbackResult(success = false, error = error, duration = System.currentTimeMillis() - startTime, logs = logs)
+                    }
+                    log(DeployXBundle.message("rollback.log.backupCurrentDone", archive))
+                }
+
                 // 5. 执行解压恢复
                 log(DeployXBundle.message("rollback.log.extracting"))
                 val extractResult = connection.executeCommand(
-                    "tar -xzf '${shellEscape(record.backupFilePath)}' -C '${shellEscape(record.targetPath)}' 2>&1"
+                    RollbackCommands.restore(record.backupFilePath, record.targetPath)
                 )
 
                 if (!extractResult.success) {
@@ -192,8 +209,15 @@ class RollbackService {
                         logs = logs
                     )
                 } else {
-                    progressCallback?.invoke(90, DeployXBundle.message("rollback.progress.recording"))
                     log(DeployXBundle.message("rollback.log.extractSuccess"))
+                    // 1.1.1：回滚后执行上传后命令（可选；失败只记录日志，不影响已完成的还原）
+                    if (options.runPostCommand && record.postCommand.isNotBlank()) {
+                        val cmd = RollbackCommands.postCommand(record.targetPath, record.postCommand)
+                        log("$ $cmd")
+                        val r = connection.executeCommand(cmd)
+                        log(if (r.success) r.output.trim() else DeployXBundle.message("rollback.error.postFailed", r.error ?: r.output))
+                    }
+                    progressCallback?.invoke(90, DeployXBundle.message("rollback.progress.recording"))
 
                     val duration = System.currentTimeMillis() - startTime
 

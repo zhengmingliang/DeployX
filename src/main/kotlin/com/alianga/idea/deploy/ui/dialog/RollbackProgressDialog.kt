@@ -30,7 +30,9 @@ import javax.swing.SwingWorker
 class RollbackProgressDialog(
     private val project: Project,
     private val record: HistoryRecord,
-    private val onComplete: (RollbackResult) -> Unit
+    private val onComplete: (RollbackResult) -> Unit,
+    /** 1.1.1：确认框中选择的回滚选项 */
+    private val options: com.alianga.idea.deploy.service.RollbackCommands.Options = com.alianga.idea.deploy.service.RollbackCommands.Options()
 ) : DialogWrapper(project, true) {
 
     private val progressBar = JProgressBar(0, 100)
@@ -172,7 +174,8 @@ class RollbackProgressDialog(
             },
             progressCallback = { progress, message ->
                 publish(Pair(progress, message))
-            }
+            },
+            options = options
         )
     }
 
