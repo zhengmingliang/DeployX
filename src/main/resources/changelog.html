@@ -1,5 +1,14 @@
 <!--LANG:EN-->
 <h2> Changelog</h2>
+<h3>v1.1.0 - UI Overhaul</h3>
+<ul>
+    <li>Tool window tabs are now native content tabs; each tab has its own toolbar; Settings moved to the gear menu</li>
+    <li>Group headers (title + separator) replace titled borders; backup / unzip directories appear only when enabled</li>
+    <li>Built-in browse buttons in path fields (Shift+Enter); server dropdown no longer shows "164 - 164"</li>
+    <li>Bottom bar: Pull ▾ and primary Deploy ▾ split buttons remembering the last mode; fixed status area (summary / progress + cancel / result with Log, Report)</li>
+    <li>Target dialog lists only servers with matching mappings, concrete verb buttons, full mapping paths</li>
+    <li>History: search, All / Success / Failed / Rollbackable filters with counts, rollback reasons, confirm before clearing; rollback dialog defaults to Cancel</li>
+</ul>
 <h3>v1.0.8 - Pull, Preview Pull, Log-per-server Copy & Nested Mapping Selection</h3>
 <ul>
     <li><b>📥 Pull / Preview Pull:</b> New <b>Pull</b> and <b>Preview Pull</b> buttons in the operation panel download files from the server to the local path. Reuses the existing <code>DeployService.downloadBatch</code> path (rsync / SFTP / local copy); <code>SyncService.previewPull</code> mirrors <code>previewSync</code> with reversed argument order. The <b>Pull</b> button resolves the mapping via the new longest-prefix matcher and builds a <code>DownloadItem</code>. <b>Preview Pull</b> writes an <code>UpdateReport(operationType=PULL)</code> so the toolbar <b>Copy Report</b> button can also copy the preview result</li>
@@ -178,6 +187,15 @@
 
 <!--LANG:ZH-->
 <h2> 更新日志</h2>
+<h3>v1.1.0 - UI 全面优化</h3>
+<ul>
+    <li>工具窗口改用平台内容页签，每页自带工具栏，设置进 gear 菜单</li>
+    <li>分组改为标题 + 分隔线；备份 / 解压目录勾选后才显示</li>
+    <li>路径输入框内置浏览按钮（Shift+Enter）；服务器下拉不再显示「164 - 164」</li>
+    <li>底部「拉取 ▾」「部署 ▾」拆分按钮记住上次模式；固定状态区（摘要 / 进度+取消 / 结果+日志、报告）</li>
+    <li>部署目标对话框只列有匹配映射的服务器、具体动词按钮、映射路径完整显示</li>
+    <li>历史页搜索与过滤计数、回滚原因说明、清空前确认；回滚确认框默认「取消」</li>
+</ul>
 <h3>v1.0.8 - 拉取、预览拉取、按服务器日志复制与嵌套映射选择</h3>
 <ul>
     <li><b>📥 拉取 / 预览拉取：</b>操作面板新增「拉取」「预览拉取」两个按钮，从服务器拉取文件到本地。复用现有 <code>DeployService.downloadBatch</code> 路径（rsync / SFTP / 本地拷贝）；<code>SyncService.previewPull</code> 镜像 <code>previewSync</code>，参数方向相反便于阅读。「拉取」按最长前缀匹配解析映射并构造 <code>DownloadItem</code>；「预览拉取」写入 <code>UpdateReport(operationType=PULL)</code>，顶部「复制报告」按钮可一键复制预览结果</li>

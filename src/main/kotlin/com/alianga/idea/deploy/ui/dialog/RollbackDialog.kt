@@ -37,6 +37,19 @@ class RollbackDialog(
         init()
     }
 
+    /**
+     * 1.1.0：破坏性操作让安全选项成为默认——「取消」是默认按钮（主色、Enter 触发），
+     * 「回滚」为红色描边的次要按钮。
+     */
+    override fun createActions(): Array<javax.swing.Action> {
+        okAction.putValue(DEFAULT_ACTION, null)
+        okAction.putValue("JComponent.outline", "error")
+        cancelAction.putValue(DEFAULT_ACTION, true)
+        return arrayOf(cancelAction, okAction)
+    }
+
+    override fun getPreferredFocusedComponent(): JComponent? = getButton(cancelAction)
+
     override fun createCenterPanel(): JComponent {
         val panel = JPanel(BorderLayout(JBUI.scale(10), JBUI.scale(10)))
         panel.border = JBUI.Borders.empty(10)
@@ -64,17 +77,15 @@ class RollbackDialog(
     private fun createWarningPanel(): JComponent {
         val panel = JPanel(BorderLayout())
         // 使用标准的黄色警告颜色
-        val warningColor = Color(0xE6, 0x7C, 0x00)  // 橙色
+        // 1.1.0：警告色走 DeployXColors（JBColor，随主题切换），不再写死 Color
+        val warningColor = com.alianga.idea.deploy.ui.DeployXColors.warning
         panel.border = BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(warningColor, 1),
             JBUI.Borders.empty(10)
         )
         panel.background = Color(warningColor.red, warningColor.green, warningColor.blue, 30)
 
-        val warningIcon = JBLabel("⚠️").apply {
-            font = font.deriveFont(24f)
-            foreground = warningColor
-        }
+        val warningIcon = JBLabel(com.intellij.icons.AllIcons.General.WarningDialog)
 
         val warningText = JBLabel("<html>${DeployXBundle.message("rollback.dialog.warningTitle")}<br>" +
                 DeployXBundle.message("rollback.dialog.warningMessage") + "</html>").apply {
