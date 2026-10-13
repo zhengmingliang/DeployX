@@ -36,7 +36,7 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
         setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION)
     }
     private val searchField = JBTextField()
-    private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
+    private val gson = com.alianga.idea.deploy.model.NullSafeModels.builder().setPrettyPrinting().disableHtmlEscaping().create()
 
     init {
         setupUI()

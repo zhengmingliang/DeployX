@@ -49,7 +49,7 @@ class ConfigManager {
         /** 加密密钥派生盐（插件专属固定值） */
         private val ENCRYPTION_SALT = "DeployX-Plugin-Secret-Key-2024".toByteArray()
 
-        private val GSON: Gson = GsonBuilder()
+        private val GSON: Gson = com.alianga.idea.deploy.model.NullSafeModels.builder()
             .setPrettyPrinting()
             .disableHtmlEscaping()
             .registerTypeAdapter(ServerConfig::class.java, ServerConfigDeserializer)
@@ -128,6 +128,9 @@ class ConfigManager {
         }
     }
 
+    /** 内存密码缓存（加速频繁访问） */
+    private val passwordCache = mutableMapOf<String, String>()
+
     init {
         ensureConfigDir()
     }
@@ -157,8 +160,6 @@ class ConfigManager {
     private val passwordSafe: PasswordSafe?
         get() = ApplicationManager.getApplication().getService(PasswordSafe::class.java)
 
-    /** 内存密码缓存（加速频繁访问） */
-    private val passwordCache = mutableMapOf<String, String>()
 
     /**
      * 从 PasswordSafe + 加密备份文件加载服务器密码

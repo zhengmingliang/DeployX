@@ -20,7 +20,7 @@ import com.google.gson.reflect.TypeToken
  */
 object ScriptRefResolver {
 
-    private val gson = Gson()
+    private val gson = com.alianga.idea.deploy.model.NullSafeModels.builder().create()
     private val scriptManager get() = ScriptManager.getInstance()
 
     /**

@@ -46,7 +46,7 @@ import javax.crypto.spec.SecretKeySpec
  */
 object ConfigExporter {
 
-    private val GSON: Gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping()
+    private val GSON: Gson = com.alianga.idea.deploy.model.NullSafeModels.builder().setPrettyPrinting().disableHtmlEscaping()
         .registerTypeAdapter(ServerConfig::class.java, ServerConfigDeserializer)
         .create()
     private const val PBKDF2_ITERATIONS = 65536

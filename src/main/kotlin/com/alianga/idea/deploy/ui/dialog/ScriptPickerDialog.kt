@@ -52,7 +52,7 @@ class ScriptPickerDialog(
     private val previewArea = JBTextArea(10, 50)
     private val insertRadio = JBRadioButton(DeployXBundle.message("dialog.script.picker.radio.insertContent"), true)
     private val referenceRadio = JBRadioButton(DeployXBundle.message("dialog.script.picker.radio.referenceScript"))
-    private val gson = GsonBuilder().disableHtmlEscaping().create()
+    private val gson = com.alianga.idea.deploy.model.NullSafeModels.builder().disableHtmlEscaping().create()
     private var resultCommand: String = ""
 
     init {

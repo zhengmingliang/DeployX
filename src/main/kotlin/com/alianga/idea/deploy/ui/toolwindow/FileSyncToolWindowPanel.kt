@@ -353,6 +353,20 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         )
     }
 
+    // 1.1.1 修复：历史详情区字段必须在 init 之前声明（setupUI 在 init 中调用，之后声明的属性此时仍为 null）
+    private var historyRecordsBefore = listOf<HistoryRecord>()
+
+    // ===== 1.1.1 历史详情区 =====
+    private val hdHeader = JBLabel()
+    private val hdRows = JBLabel()
+    private val hdSteps = JBLabel()
+    private val hdFiles = com.intellij.ui.components.JBTextArea().apply { isEditable = false; rows = 5 }
+    private val hdRollbackReason = JBLabel().apply { foreground = DeployXColors.warning }
+    private val hdRollbackBtn = JButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback)
+    private val hdRerunBtn = JButton(DeployXBundle.message("history.detail.rerun.deploy"), AllIcons.Actions.Execute)
+    private val hdCopyBtn = JButton(DeployXBundle.message("toolwindow.history.copyReport"))
+    private val hdExportBtn = JButton(DeployXBundle.message("toolwindow.history.exportReport"))
+
     init {
         serverCombo.renderer = com.alianga.idea.deploy.ui.ServerComboRenderer { _, value ->
             value?.toString()?.let { serverManager.getServer(it) }
@@ -1274,18 +1288,6 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         previousId?.let { id -> servers.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { serverCombo.selectedIndex = it } }
     }
 
-    private var historyRecordsBefore = listOf<HistoryRecord>()
-
-    // ===== 1.1.1 历史详情区 =====
-    private val hdHeader = JBLabel()
-    private val hdRows = JBLabel()
-    private val hdSteps = JBLabel()
-    private val hdFiles = com.intellij.ui.components.JBTextArea().apply { isEditable = false; rows = 5 }
-    private val hdRollbackReason = JBLabel().apply { foreground = DeployXColors.warning }
-    private val hdRollbackBtn = JButton(DeployXBundle.message("toolwindow.history.rollback"), AllIcons.Actions.Rollback)
-    private val hdRerunBtn = JButton(DeployXBundle.message("history.detail.rerun.deploy"), AllIcons.Actions.Execute)
-    private val hdCopyBtn = JButton(DeployXBundle.message("toolwindow.history.copyReport"))
-    private val hdExportBtn = JButton(DeployXBundle.message("toolwindow.history.exportReport"))
 
     private fun esc(t: String) = com.intellij.openapi.util.text.StringUtil.escapeXmlEntities(t)
     private fun hex(c: java.awt.Color) = "#" + com.intellij.ui.ColorUtil.toHex(c)

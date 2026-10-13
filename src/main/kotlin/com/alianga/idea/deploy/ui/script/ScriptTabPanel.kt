@@ -547,7 +547,7 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
         val descriptor = com.intellij.openapi.fileChooser.FileSaverDescriptor(DeployXBundle.message("script.tab2.exportJson"), "", "json")
         val wrapper = com.intellij.openapi.fileChooser.FileChooserFactory.getInstance().createSaveFileDialog(descriptor, project)
             .save("deployx-script-${s.name.ifBlank { s.id }}.json") ?: return
-        val json = com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(s)
+        val json = com.alianga.idea.deploy.model.NullSafeModels.builder().setPrettyPrinting().disableHtmlEscaping().create().toJson(s)
         wrapper.file.writeText(json)
         toast(DeployXBundle.message("settings.script.exported", wrapper.file.absolutePath), moreButton)
     }

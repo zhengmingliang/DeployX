@@ -12,16 +12,16 @@ data class MappingConfig(
 
     /** 映射名称（允许重复，用于显示） */
     @SerializedName("name")
-    val name: String,
+    val name: String = "",
 
     @SerializedName("local_dir")
-    val localDir: String,
+    val localDir: String = "",
 
     @SerializedName("server_id")
-    val serverId: String,
+    val serverId: String = "",
 
     @SerializedName("remote_dir")
-    val remoteDir: String,
+    val remoteDir: String = "",
 
     /** 是否启用部署前备份 */
     @SerializedName("backup_enabled")
