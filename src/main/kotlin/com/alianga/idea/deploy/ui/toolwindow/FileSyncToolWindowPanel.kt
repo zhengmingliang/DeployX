@@ -280,12 +280,21 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     private val historySearchField = com.intellij.ui.SearchTextField(false)
     private var historyFilterKind = com.alianga.idea.deploy.ui.HistoryFilter.Kind.ALL
     private val historyChips = linkedMapOf<com.alianga.idea.deploy.ui.HistoryFilter.Kind, JToggleButton>()
-    private val historyListModel = DefaultListModel<String>()
+    private var historyListModel = DefaultListModel<String>()
     // 1.1.1：行宽跟随视口，长路径（如回滚备份包）截断而不是撑出横向滚动、挤掉右侧状态 / 时间
     private val historyList = object : JBList<String>(historyListModel) {
         override fun getScrollableTracksViewportWidth() = true
     }
     private var historyRecords = listOf<HistoryRecord>()
+    /** 与 [historyRecords] 一一对应的预计算行数据（后台线程生成，渲染器只取值不再拼 HTML） */
+    private var historyRows = listOf<HistoryRowData>()
+    /** 已加载到列表的历史版本号；页签切换时版本未变则不重新加载 */
+    private var historyLoadedVersion = -1L
+    /** 刷新代次：后台过滤结果回到 EDT 时，只有最新一次请求生效 */
+    private val historyRefreshSeq = java.util.concurrent.atomic.AtomicLong()
+    private val historyRowRendererComp = HistoryRowRenderer()
+    /** 搜索框防抖（250ms） */
+    private val historySearchDebounce = javax.swing.Timer(250) { refreshHistory() }.apply { isRepeats = false }
     private val scriptTabPanel = ScriptTabPanel(project)
 
     // 历史按钮：使用 AnAction + ActionToolbar（与顶部工具栏同一机制），
@@ -608,7 +617,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // 便于用户快速识别哪些历史记录可以回滚。
         // 1.1.1：两行卡片 + 今天/昨天/更早分组头（分组头画在组内第一条记录上方，列表索引仍与记录一一对应）
         historyList.cellRenderer = ListCellRenderer<String> { list, _, index, isSelected, _ ->
-            historyRowRenderer(list, index, isSelected)
+            historyRowRendererComp.bind(list, historyRows.getOrNull(index), isSelected)
         }
         historyList.selectionMode = ListSelectionModel.SINGLE_SELECTION
         historyList.addListSelectionListener { if (!it.valueIsAdjusting) updateHistoryDetail() }
@@ -642,7 +651,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         historyToolbarInstance.targetComponent = this
         // 1.1.0：过滤栏——搜索（动作 / 服务器 / 路径）+ 胶囊过滤：全部 / 成功 / 失败 / 可回滚，各带计数
         historySearchField.addDocumentListener(object : com.intellij.ui.DocumentAdapter() {
-            override fun textChanged(e: javax.swing.event.DocumentEvent) = refreshHistory()
+            override fun textChanged(e: javax.swing.event.DocumentEvent) = historySearchDebounce.restart()
         })
         val chipGroup = ButtonGroup()
         val chipBar = JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(4), JBUI.scale(2)))
@@ -707,7 +716,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
     /** 页签切换回调：进入「历史」页时重新加载，确保展示最新记录 */
     fun onPageSelected(index: Int) {
         selectedPage = index
-        if (index == 2) refreshHistory()
+        if (index == 2 && historyManager.version != historyLoadedVersion) refreshHistory()
     }
 
     private fun selectTab(index: Int) {
@@ -789,6 +798,7 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         // 触发工具栏刷新即可应用新语言文本。
         historyToolbar?.updateActionsImmediately()
         historyEmptyLabel.text = DeployXBundle.message("toolwindow.history.empty")
+        refreshHistory() // 行数据含预计算文案，切换语言后重建
 
         pageTitles().forEachIndexed { i, t -> tabBar.setTitle(i, t) }
         logToolbar?.updateActionsImmediately()
@@ -1384,47 +1394,79 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         HistoryRecord.OperationStatus.CANCELLED -> DeployXBundle.message("toolwindow.history.status.cancelled") to DeployXColors.warning
     }
 
-    private fun historyRowRenderer(list: JList<*>, index: Int, isSelected: Boolean): java.awt.Component {
-        val r = historyRecords.getOrNull(index) ?: return JPanel()
-        val fg = if (isSelected) list.selectionForeground else list.foreground
-        val bg = if (isSelected) list.selectionBackground else list.background
+    /** 预计算一行历史记录的显示数据（可在后台线程执行，不创建任何 Swing 组件） */
+    private fun buildHistoryRow(r: HistoryRecord, prev: HistoryRecord?): HistoryRowData {
         val (statusText, color) = statusOf(r)
         val day = com.alianga.idea.deploy.ui.HistoryFilter.day(r.timestamp)
-        val prevDay = historyRecords.getOrNull(index - 1)?.let { com.alianga.idea.deploy.ui.HistoryFilter.day(it.timestamp) }
-        val tag = if (com.alianga.idea.deploy.ui.HistoryFilter.rollbackable(r))
-            " <font color='${hex(DeployXColors.link)}'>" + esc(DeployXBundle.message("toolwindow.history.filter.rollbackable")) + "</font>" else ""
+        val prevDay = prev?.let { com.alianga.idea.deploy.ui.HistoryFilter.day(it.timestamp) }
         val path = if (r.type == HistoryRecord.OperationType.PULL) "${r.targetPath} → ${r.sourcePath}" else "${r.sourcePath} → ${r.targetPath}"
-        val row1 = JPanel(BorderLayout()).apply {
-            isOpaque = false
-            add(JBLabel("<html><nobr><b>${esc(typeLabel(r))}</b> ${esc(ServerDisplay.title(r.serverId, r.serverName))}$tag</nobr></html>").apply {
-                foreground = fg; minimumSize = java.awt.Dimension(0, 0)
-            }, BorderLayout.CENTER)
-            add(JBLabel("<html><font color='${hex(color)}'>${esc(statusText)}</font> ${esc(r.formattedTime)}</html>").apply { foreground = fg }, BorderLayout.EAST)
+        return HistoryRowData(
+            type = typeLabel(r),
+            server = ServerDisplay.title(r.serverId, r.serverName),
+            rollbackTag = if (com.alianga.idea.deploy.ui.HistoryFilter.rollbackable(r)) DeployXBundle.message("toolwindow.history.filter.rollbackable") else null,
+            statusText = statusText,
+            status = r.status,
+            time = r.formattedTime,
+            path = path,
+            dayHeader = if (day == prevDay) null else DeployXBundle.message("toolwindow.history.day." + day.name.lowercase())
+        )
+    }
+
+    private fun statusColor(s: HistoryRecord.OperationStatus) = when (s) {
+        HistoryRecord.OperationStatus.SUCCESS -> DeployXColors.success
+        HistoryRecord.OperationStatus.FAILED -> DeployXColors.error
+        HistoryRecord.OperationStatus.CANCELLED -> DeployXColors.warning
+    }
+
+    /**
+     * 历史行渲染器：一个复用组件，每次只更新字段（无 HTML 解析、不新建组件），
+     * 首选宽度固定为小值、不读取列表 visibleRect，宽度由列表（跟随视口）决定。
+     */
+    private inner class HistoryRowRenderer : JPanel(BorderLayout()) {
+        private val header = com.intellij.ui.TitledSeparator("")
+        private val title = com.intellij.ui.SimpleColoredComponent().apply { isOpaque = false; ipad = JBUI.emptyInsets() }
+        private val status = com.intellij.ui.SimpleColoredComponent().apply { isOpaque = false; ipad = JBUI.emptyInsets() }
+        private val dot = JBLabel("●")
+        private val pathLabel = JBLabel().apply { minimumSize = Dimension(0, 0) }
+        private val card = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(4, 8)
+            add(JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
+                isOpaque = false
+                add(title, BorderLayout.CENTER); add(status, BorderLayout.EAST)
+            }, BorderLayout.NORTH)
+            add(JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
+                isOpaque = false
+                add(dot, BorderLayout.WEST); add(pathLabel, BorderLayout.CENTER)
+            }, BorderLayout.SOUTH)
         }
-        // 纯文本标签：超出宽度时以 … 截断（HTML 标签不会截断）
-        val row2 = JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
-            isOpaque = false
-            add(JBLabel("●").apply { foreground = color }, BorderLayout.WEST)
-            add(JBLabel(path).apply {
-                foreground = if (isSelected) fg else DeployXColors.secondary
-                toolTipText = path; minimumSize = java.awt.Dimension(0, 0)
-            }, BorderLayout.CENTER)
-        }
-        val card = object : JPanel(BorderLayout()) {
-            // 首选宽度不超过列表可见宽度，避免撑宽列表
-            override fun getPreferredSize(): java.awt.Dimension = super.getPreferredSize().also { d ->
-                val w = list.visibleRect.width
-                if (w > 0) d.width = minOf(d.width, w)
-            }
-        }.apply {
-            background = bg; border = JBUI.Borders.empty(4, 8)
-            add(row1, BorderLayout.NORTH); add(row2, BorderLayout.SOUTH)
-        }
-        if (day == prevDay) return card
-        return JPanel(BorderLayout()).apply {
-            background = list.background
-            add(com.intellij.ui.TitledSeparator(DeployXBundle.message("toolwindow.history.day." + day.name.lowercase())), BorderLayout.NORTH)
+
+        init {
+            add(header, BorderLayout.NORTH)
             add(card, BorderLayout.CENTER)
+        }
+
+        override fun getPreferredSize(): Dimension = super.getPreferredSize().also { it.width = JBUI.scale(120) }
+
+        fun bind(list: JList<*>, row: HistoryRowData?, isSelected: Boolean): java.awt.Component {
+            if (row == null) return JPanel()
+            val fg = if (isSelected) list.selectionForeground else list.foreground
+            val color = statusColor(row.status)
+            background = list.background
+            header.isVisible = row.dayHeader != null
+            header.text = row.dayHeader.orEmpty()
+            card.background = if (isSelected) list.selectionBackground else list.background
+            title.clear(); title.foreground = fg
+            title.append(row.type, com.intellij.ui.SimpleTextAttributes(com.intellij.ui.SimpleTextAttributes.STYLE_BOLD, fg))
+            title.append(" " + row.server, com.intellij.ui.SimpleTextAttributes(com.intellij.ui.SimpleTextAttributes.STYLE_PLAIN, fg))
+            row.rollbackTag?.let { title.append(" $it", com.intellij.ui.SimpleTextAttributes(com.intellij.ui.SimpleTextAttributes.STYLE_PLAIN, DeployXColors.link)) }
+            status.clear()
+            status.append(row.statusText, com.intellij.ui.SimpleTextAttributes(com.intellij.ui.SimpleTextAttributes.STYLE_PLAIN, color))
+            status.append(" " + row.time, com.intellij.ui.SimpleTextAttributes(com.intellij.ui.SimpleTextAttributes.STYLE_PLAIN, fg))
+            dot.foreground = color
+            pathLabel.text = row.path
+            pathLabel.toolTipText = row.path
+            pathLabel.foreground = if (isSelected) fg else DeployXColors.secondary
+            return this
         }
     }
 
@@ -1451,12 +1493,24 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         val buttons = JPanel(WrapLayout(FlowLayout.LEADING, JBUI.scale(4), JBUI.scale(2))).apply {
             listOf(hdRollbackBtn, hdRerunBtn, hdCopyBtn, hdExportBtn, moreBtn, logBtn, deleteBtn).forEach { add(it) }
         }
-        val info = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            listOf(hdHeader, hdRows, hdSteps, hdRollbackReason).forEach { it.alignmentX = LEFT_ALIGNMENT; add(it) }
+        buttons.isOpaque = false
+        // 详情区：与列表明显区分——独立底色（亮/暗主题各自取值）+ 顶部分隔线 + 小标题「详情」
+        val sectionTitle = JBLabel(DeployXBundle.message("history.detail.sectionTitle")).apply {
+            font = JBUI.Fonts.smallFont().asBold()
+            foreground = DeployXColors.secondary
+            border = JBUI.Borders.emptyBottom(2)
         }
-        return JPanel(BorderLayout(0, JBUI.scale(4))).apply {
-            border = JBUI.Borders.empty(6, 8)
+        val info = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            listOf(sectionTitle, hdHeader, hdRows, hdSteps, hdRollbackReason).forEach { it.alignmentX = LEFT_ALIGNMENT; add(it) }
+        }
+        // 平台会把工具窗口内容的背景递归重置为 ToolWindow.background，这里覆写 getBackground 固定取详情区底色（随主题切换）
+        return object : JPanel(BorderLayout(0, JBUI.scale(4))) {
+            override fun getBackground(): java.awt.Color = DeployXColors.detailSurface
+        }.apply {
+            isOpaque = true
+            border = JBUI.Borders.compound(JBUI.Borders.customLineTop(DeployXColors.border), JBUI.Borders.empty(6, 8))
             add(info, BorderLayout.NORTH)
             add(JBScrollPane(hdFiles), BorderLayout.CENTER)
             add(buttons, BorderLayout.SOUTH)
@@ -1559,29 +1613,50 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         refreshHistory()
     }
 
+    /**
+     * 重新加载历史列表：过滤、计数、行数据在后台线程计算，回到 EDT 后一次性替换列表模型
+     * （避免逐条 addElement 触发 N 次全量行高重算导致卡死）。
+     */
     private fun refreshHistory() {
-        val all = historyManager.getRecords()
+        val seq = historyRefreshSeq.incrementAndGet()
         val query = historySearchField.text.orEmpty()
-        // historyRecords 保存「过滤后」的列表，与列表索引一一对应，原有按索引取记录的动作无需改动
-        historyRecords = com.alianga.idea.deploy.ui.HistoryFilter.apply(all, historyFilterKind, query)
-        val counts = com.alianga.idea.deploy.ui.HistoryFilter.counts(all, query)
+        val kind = historyFilterKind
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+            val version = historyManager.version
+            val all = historyManager.getRecords()
+            val filtered = com.alianga.idea.deploy.ui.HistoryFilter.apply(all, kind, query)
+            val counts = com.alianga.idea.deploy.ui.HistoryFilter.counts(all, query)
+            val rows = filtered.mapIndexed { i, r -> buildHistoryRow(r, filtered.getOrNull(i - 1)) }
+            val model = DefaultListModel<String>().apply { addAll(filtered.map { it.summary }) }
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater({
+                if (seq == historyRefreshSeq.get()) applyHistory(version, all.isEmpty(), filtered, rows, counts, model)
+            }, com.intellij.openapi.application.ModalityState.any())
+        }
+    }
+
+    private fun applyHistory(
+        version: Long, noneAtAll: Boolean, filtered: List<HistoryRecord>, rows: List<HistoryRowData>,
+        counts: Map<com.alianga.idea.deploy.ui.HistoryFilter.Kind, Int>, model: DefaultListModel<String>
+    ) {
         historyChips.forEach { (k, chip) ->
             chip.text = DeployXBundle.message("toolwindow.history.filter." + k.name.lowercase()) + " " + (counts[k] ?: 0)
         }
         val keepId = historyList.selectedIndex.takeIf { it in historyRecordsBefore.indices }?.let { historyRecordsBefore[it].id }
-        historyRecordsBefore = historyRecords
-        historyListModel.clear()
-        for (record in historyRecords) {
-            historyListModel.addElement(record.summary)
-        }
+        // historyRecords 保存「过滤后」的列表，与列表索引一一对应，原有按索引取记录的动作无需改动
+        historyRecords = filtered
+        historyRows = rows
+        historyRecordsBefore = filtered
+        historyLoadedVersion = version
+        historyListModel = model
+        historyList.model = model // 一次性替换：只触发一次布局
         // 1.1.1：保持原选中；没有则默认选中第一条，详情区常驻
-        if (historyRecords.isNotEmpty()) {
-            historyList.selectedIndex = historyRecords.indexOfFirst { it.id == keepId }.takeIf { it >= 0 } ?: 0
+        if (filtered.isNotEmpty()) {
+            historyList.selectedIndex = filtered.indexOfFirst { it.id == keepId }.takeIf { it >= 0 } ?: 0
         }
         updateHistoryDetail()
         // 空状态区分：一条都没有 / 过滤后没有匹配
-        historyEmptyLabel.text = DeployXBundle.message(if (all.isEmpty()) "history.empty.none" else "history.empty.noMatch")
-        historyCardLayout.show(historyCardPanel, if (historyRecords.isEmpty()) "empty" else "list")
+        historyEmptyLabel.text = DeployXBundle.message(if (noneAtAll) "history.empty.none" else "history.empty.noMatch")
+        historyCardLayout.show(historyCardPanel, if (filtered.isEmpty()) "empty" else "list")
     }
 
     /**
@@ -2234,16 +2309,23 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         appendLog(null, message)
     }
 
+    /** 追加一行日志并限制最大行数（超出时裁掉最旧的行），避免长时间运行后文档过大拖慢日志页 */
+    private fun appendCapped(area: JBTextArea, line: String) {
+        area.append(line)
+        val excess = area.lineCount - MAX_LOG_LINES
+        if (excess > 0) {
+            runCatching { area.document.remove(0, area.getLineStartOffset(excess)) }
+        }
+        area.caretPosition = area.document.length
+    }
+
     fun appendLog(serverId: String?, message: String) {
         val time = LocalTime.now().format(timeFormatter)
         val line = "[$time] $message\n"
         val block = {
-            logArea.append(line)
-            logArea.caretPosition = logArea.document.length
+            appendCapped(logArea, line)
             if (!serverId.isNullOrBlank()) {
-                val serverArea = getOrCreateServerLogArea(serverId)
-                serverArea.append(line)
-                serverArea.caretPosition = serverArea.document.length
+                appendCapped(getOrCreateServerLogArea(serverId), line)
             }
         }
         if (SwingUtilities.isEventDispatchThread()) block() else SwingUtilities.invokeLater(block)
@@ -2602,3 +2684,18 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
         }
     }
 }
+
+/** 历史列表一行的预计算显示数据 */
+private data class HistoryRowData(
+    val type: String,
+    val server: String,
+    val rollbackTag: String?,
+    val statusText: String,
+    val status: HistoryRecord.OperationStatus,
+    val time: String,
+    val path: String,
+    val dayHeader: String?
+)
+
+/** 日志区最大行数 */
+private const val MAX_LOG_LINES = 5000

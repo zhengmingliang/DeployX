@@ -28,6 +28,8 @@ object DeployXColors {
     val accent: Color get() = JBColor.namedColor("Component.focusColor", JBColor(0x3574F0, 0x3574F0))
     /** 分隔线 / 边框 */
     val border: Color get() = JBColor.border()
+    /** 历史详情区底色：与列表底色明显区分的浅蓝灰表面（亮 #EBEFF5 / 暗 #1E1F22，暗色比列表更深） */
+    val detailSurface: Color get() = JBColor(0xEBEFF5, 0x1E1F22)
     /** 状态未知（中性灰） */
     val unknown: Color get() = JBColor(0x6C707E, 0x9DA0A8)
 }

@@ -25,6 +25,11 @@ class HistoryManager {
     private val records = mutableListOf<HistoryRecord>()
     private val rollbackRecords = mutableListOf<RollbackRecord>()
 
+    /** 历史变更版本号：每次加载 / 新增 / 删除 / 清空递增，界面据此判断是否需要重新加载 */
+    @Volatile
+    var version: Long = 0L
+        private set
+
     init {
         loadFromConfig()
     }
@@ -36,6 +41,7 @@ class HistoryManager {
         synchronized(records) {
             records.clear()
             records.addAll(ConfigManager.getInstance().loadHistory())
+            version++
         }
         synchronized(rollbackRecords) {
             rollbackRecords.clear()
@@ -55,6 +61,7 @@ class HistoryManager {
     fun addRecord(record: HistoryRecord) {
         synchronized(records) {
             records.add(0, record) // 插入到最前面
+            version++
 
             // 限制历史记录数量
             if (records.size > MAX_HISTORY_SIZE) {
@@ -72,6 +79,7 @@ class HistoryManager {
     fun deleteRecord(id: String) {
         synchronized(records) {
             records.removeAll { it.id == id }
+            version++
             saveToConfig()
         }
         LOG.info("Deleted history record: $id")
@@ -83,6 +91,7 @@ class HistoryManager {
     fun clearHistory() {
         synchronized(records) {
             records.clear()
+            version++
             saveToConfig()
         }
         LOG.info("Cleared all history records")
