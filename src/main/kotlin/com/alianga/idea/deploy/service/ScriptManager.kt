@@ -14,6 +14,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * 脚本管理器 - 负责脚本配置、模板渲染和远程执行。
@@ -29,7 +30,7 @@ class ScriptManager {
             ApplicationManager.getApplication().getService(ScriptManager::class.java)
     }
 
-    private val scripts = mutableListOf<ScriptConfig>()
+    private val scripts = CopyOnWriteArrayList<ScriptConfig>()
 
     init {
         loadFromConfig()
@@ -255,7 +256,8 @@ class ScriptManager {
         context: ScriptRunContext = ScriptRunContext.EMPTY,
         serverId: String? = null,
         logCallback: ((String) -> Unit)? = null,
-        confirmCallback: ((String) -> Boolean)? = null
+        confirmCallback: ((String) -> Boolean)? = null,
+        cancelToken: DeployCancelToken? = null
     ): ScriptRunResult {
         val start = System.currentTimeMillis()
         val normalizedParams = normalizeParams(script, rawParams)
@@ -306,8 +308,10 @@ class ScriptManager {
         logCallback?.invoke(DeployXBundle.message("script.log.server", server.displayAddress))
         logCallback?.invoke(DeployXBundle.message("script.log.command", maskSensitive(command, server)))
 
+        val timeoutMs = script.timeoutSec.takeIf { it > 0 }?.let { it * 1000L } ?: SshConnection.DEFAULT_COMMAND_TIMEOUT_MS
         val connection = SshConnection(server)
         return try {
+            cancelToken?.throwIfCancelled()
             val connectResult = connection.connectWithDetails()
             if (!connectResult.success) {
                 val message = connectResult.errorMessage ?: DeployXBundle.message("script.error.cannotConnectServer")
@@ -317,11 +321,29 @@ class ScriptManager {
                 saveHistory(script, server, result)
                 result
             } else {
-                val commandResult = connection.executeCommand(command)
+                var streamedOutput = false
+                var streamedError = false
+                val commandResult = connection.executeCommand(
+                    command = command,
+                    timeoutMs = timeoutMs,
+                    cancelToken = cancelToken,
+                    onOutputLine = { line ->
+                        if (line.isNotBlank()) {
+                            streamedOutput = true
+                            logCallback?.invoke(maskSensitive(line, server))
+                        }
+                    },
+                    onErrorLine = { line ->
+                        if (line.isNotBlank()) {
+                            streamedError = true
+                            logCallback?.invoke("[ERR] ${maskSensitive(line, server)}")
+                        }
+                    }
+                )
                 val output = truncateOutput(commandResult.output)
                 val error = truncateOutput(commandResult.error)
-                if (output.isNotBlank()) logCallback?.invoke(DeployXBundle.message("script.log.output", maskSensitive(output, server)))
-                if (error.isNotBlank()) logCallback?.invoke(DeployXBundle.message("script.log.errorOutput", maskSensitive(error, server)))
+                if (!streamedOutput && output.isNotBlank()) logCallback?.invoke(DeployXBundle.message("script.log.output", maskSensitive(output, server)))
+                if (!streamedError && error.isNotBlank()) logCallback?.invoke(DeployXBundle.message("script.log.errorOutput", maskSensitive(error, server)))
                 logCallback?.invoke(if (commandResult.success) DeployXBundle.message("script.log.executeSuccess") else DeployXBundle.message("script.log.executeFailed", commandResult.exitCode))
                 val result = ScriptRunResult(
                     scriptId = script.id,
@@ -339,6 +361,22 @@ class ScriptManager {
                 saveHistory(script, server, result)
                 result
             }
+        } catch (e: DeployCancelledException) {
+            logCallback?.invoke(DeployXBundle.message("toolwindow.log.aborted"))
+            val result = ScriptRunResult(
+                scriptId = script.id,
+                scriptName = script.name,
+                serverId = server.id,
+                resolvedCommand = command,
+                success = false,
+                exitCode = -1,
+                error = DeployXBundle.message("script.userCancelled"),
+                duration = System.currentTimeMillis() - start,
+                params = normalizedParams
+            )
+            updateRunStats(script.id, false)
+            saveHistory(script, server, result)
+            result
         } finally {
             connection.disconnect()
         }

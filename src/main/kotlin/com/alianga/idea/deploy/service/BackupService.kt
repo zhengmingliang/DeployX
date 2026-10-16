@@ -27,13 +27,14 @@ object BackupService {
         remoteBaseDir: String,
         relativePaths: List<String>,
         backupDir: String,
-        logCallback: ((String) -> Unit)? = null
+        logCallback: ((String) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): BackupResult {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
 
         val existingPaths = relativePaths.map { it.trim('/') }.filter { it.isNotBlank() }.filter { relativePath ->
             val remotePath = RemotePathUtils.joinRemotePath(remoteBaseDir, relativePath)
-            sshConnection.executeCommand("test -e ${shellQuote(remotePath)}").success
+            sshConnection.executeCommand("test -e ${shellQuote(remotePath)}", cancelToken = cancelToken).success
         }
 
         if (existingPaths.isEmpty()) {
@@ -51,13 +52,14 @@ object BackupService {
         val prefix = if (existingPaths.size == 1) safeName else "${safeName}_${existingPaths.size}files"
         val backupFile = "${backupDir.trimEnd('/')}/${prefix}_bak_${timestamp}.tar.gz"
 
-        sshConnection.executeCommand("mkdir -p ${shellQuote(backupDir)}")
+        sshConnection.executeCommand("mkdir -p ${shellQuote(backupDir)}", cancelToken = cancelToken)
 
         logCallback?.invoke(DeployXBundle.message("deploy.log.compressingBackup", existingPaths.size, backupFile))
         existingPaths.forEach { logCallback?.invoke("  $it") }
         val quotedPaths = existingPaths.joinToString(" ") { shellQuote(it) }
         val result = sshConnection.executeCommand(
-            "tar -czf ${shellQuote(backupFile)} -C ${shellQuote(remoteBaseDir)} $quotedPaths"
+            "tar -czf ${shellQuote(backupFile)} -C ${shellQuote(remoteBaseDir)} $quotedPaths",
+            cancelToken = cancelToken
         )
         return if (result.success) {
             logCallback?.invoke(DeployXBundle.message("deploy.log.backupCompleteFile", backupFile))
@@ -79,17 +81,18 @@ object BackupService {
         sshConnection: SshConnection,
         backupSource: String,
         backupDir: String,
-        logCallback: ((String) -> Unit)? = null
+        logCallback: ((String) -> Unit)? = null,
+        cancelToken: DeployCancelToken? = null
     ): BackupResult {
         // 检查源文件/目录是否存在
-        val checkResult = sshConnection.executeCommand("test -e ${shellQuote(backupSource)}")
+        val checkResult = sshConnection.executeCommand("test -e ${shellQuote(backupSource)}", cancelToken = cancelToken)
         if (!checkResult.success) {
             logCallback?.invoke(DeployXBundle.message("deploy.log.skipBackupSourceNotFound", backupSource))
             return BackupResult(true, null)
         }
 
         // 确保备份目录存在
-        sshConnection.executeCommand("mkdir -p ${shellQuote(backupDir)}")
+        sshConnection.executeCommand("mkdir -p ${shellQuote(backupDir)}", cancelToken = cancelToken)
 
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
         val sourceName = File(backupSource).name
@@ -113,7 +116,7 @@ object BackupService {
             }
             val backupFile = "$backupDir/${baseName}_bak_${timestamp}.$ext"
             logCallback?.invoke(DeployXBundle.message("deploy.log.archiveBackup", backupSource, backupFile))
-            val copyResult = sshConnection.executeCommand("cp ${shellQuote(backupSource)} ${shellQuote(backupFile)}")
+            val copyResult = sshConnection.executeCommand("cp ${shellQuote(backupSource)} ${shellQuote(backupFile)}", cancelToken = cancelToken)
             Pair(copyResult, backupFile)
         } else {
             // 目录或非压缩文件：压缩为 tar.gz，命名统一为 {源名}_bak_{时间戳}.tar.gz
@@ -122,7 +125,8 @@ object BackupService {
             val sourceParent = File(backupSource).parent
             logCallback?.invoke(DeployXBundle.message("deploy.log.compressBackup", backupSource, tarPath))
             val tarResult = sshConnection.executeCommand(
-                "tar -czf ${shellQuote(tarPath)} -C ${shellQuote(sourceParent ?: ".")} ${shellQuote(sourceName)}"
+                "tar -czf ${shellQuote(tarPath)} -C ${shellQuote(sourceParent ?: ".")} ${shellQuote(sourceName)}",
+                cancelToken = cancelToken
             )
             Pair(tarResult, tarPath)
         }
@@ -143,16 +147,20 @@ object BackupService {
     fun doUnzip(
         sshConnection: SshConnection,
         zipPath: String,
-        destDir: String
+        destDir: String,
+        cancelToken: DeployCancelToken? = null
     ): UnzipResult {
-        val checkResult = sshConnection.executeCommand("test -f ${shellQuote(zipPath)}")
+        val checkResult = sshConnection.executeCommand("test -f ${shellQuote(zipPath)}", cancelToken = cancelToken)
         if (!checkResult.success) {
             return UnzipResult(false, error = DeployXBundle.message("deploy.error.fileNotFound", zipPath))
         }
 
-        sshConnection.executeCommand("mkdir -p ${shellQuote(destDir)}")
+        sshConnection.executeCommand("mkdir -p ${shellQuote(destDir)}", cancelToken = cancelToken)
 
-        val result = sshConnection.executeCommand("unzip -o ${shellQuote(zipPath)} -d ${shellQuote(destDir)}")
+        val result = sshConnection.executeCommand(
+            "unzip -o ${shellQuote(zipPath)} -d ${shellQuote(destDir)}",
+            cancelToken = cancelToken
+        )
         return if (result.success) {
             UnzipResult(true)
         } else {

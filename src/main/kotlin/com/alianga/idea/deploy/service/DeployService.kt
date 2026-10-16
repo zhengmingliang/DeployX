@@ -172,9 +172,19 @@ class DeployService {
                 val resolvedPreCommand = ScriptRefResolver.resolve(key.preCommand, server, key.remoteBaseDir)
                 groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                 val conn = sshConnection ?: return
-                val preResult = conn.executeCommand(resolvedPreCommand)
+                var streamedPre = false
+                val preResult = conn.executeCommand(
+                    command = resolvedPreCommand,
+                    cancelToken = cancelToken,
+                    onOutputLine = { line ->
+                        if (line.isNotBlank()) {
+                            streamedPre = true
+                            groupLog(DeployXBundle.message("deploy.log.preOutput", line))
+                        }
+                    }
+                )
                 steps["pre"] = if (preResult.success) "ok" else "fail"
-                if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
+                if (!streamedPre && preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                 if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandFailedBatch", preResult.exitCode, preResult.error))
             } else if (isLocal && !dryRun && (!key.preCommand.isNullOrBlank() || !key.postCommand.isNullOrBlank())) {
                 groupLog(DeployXBundle.message("deploy.log.skipCommandsForLocal"))
@@ -218,9 +228,19 @@ class DeployService {
                 val resolvedPostCommand = ScriptRefResolver.resolve(key.postCommand, server, key.remoteBaseDir)
                 groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                 val conn = sshConnection ?: return
-                val postResult = conn.executeCommand(resolvedPostCommand)
+                var streamedPost = false
+                val postResult = conn.executeCommand(
+                    command = resolvedPostCommand,
+                    cancelToken = cancelToken,
+                    onOutputLine = { line ->
+                        if (line.isNotBlank()) {
+                            streamedPost = true
+                            groupLog(DeployXBundle.message("deploy.log.postOutput", line))
+                        }
+                    }
+                )
                 steps["post"] = if (postResult.success) "ok" else "fail"
-                if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
+                if (!streamedPost && postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                 if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandFailedBatch", postResult.exitCode, postResult.error))
             }
 
@@ -454,9 +474,19 @@ class DeployService {
                     val resolvedPreCommand = ScriptRefResolver.resolve(key.preCommand, server, key.remoteBaseDir)
                     groupLog(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                     val conn = sshConnection ?: return@forEach
-                    val preResult = conn.executeCommand(resolvedPreCommand)
+                    var streamedPre = false
+                    val preResult = conn.executeCommand(
+                        command = resolvedPreCommand,
+                        cancelToken = cancelToken,
+                        onOutputLine = { line ->
+                            if (line.isNotBlank()) {
+                                streamedPre = true
+                                groupLog(DeployXBundle.message("deploy.log.preOutput", line))
+                            }
+                        }
+                    )
                     steps["pre"] = if (preResult.success) "ok" else "fail"
-                    if (preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
+                    if (!streamedPre && preResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                     if (!preResult.success) groupLog(DeployXBundle.message("deploy.log.preCommandExecuteFailed", preResult.exitCode, preResult.error))
                     else groupLog(DeployXBundle.message("deploy.log.preCommandSuccess"))
                 }
@@ -468,10 +498,10 @@ class DeployService {
                     cancelToken?.throwIfCancelled()
                     val backupResult = if (!key.backupSource.isNullOrBlank()) {
                         groupLog(DeployXBundle.message("deploy.log.backupConfigSource", if (needsSshConnection) 4 else 2, key.backupSource, backupDir))
-                        BackupService.doBackup(sshConnection, key.backupSource, backupDir, groupLog)
+                        BackupService.doBackup(sshConnection, key.backupSource, backupDir, groupLog, cancelToken)
                     } else {
                         groupLog(DeployXBundle.message("deploy.log.backupSelectedFiles", if (needsSshConnection) 4 else 2, backupDir))
-                        BackupService.doBackupSelected(sshConnection, key.remoteBaseDir, groupItems.map { it.relativePath }, backupDir, groupLog)
+                        BackupService.doBackupSelected(sshConnection, key.remoteBaseDir, groupItems.map { it.relativePath }, backupDir, groupLog, cancelToken)
                     }
                     steps["backup"] = when { !backupResult.success -> "fail"; backupResult.path != null -> "ok"; else -> "skip" }
                     if (!backupResult.success) {
@@ -560,7 +590,7 @@ class DeployService {
                             val remoteZip = RemotePathUtils.joinRemotePath(key.remoteBaseDir, zipItems.first().relativePath)
                             groupLog(DeployXBundle.message("deploy.log.unzipRemoteFile", remoteZip, key.unzipDest))
                             val conn = sshConnection ?: return@forEach
-                            val unzipResult = BackupService.doUnzip(conn, remoteZip, key.unzipDest)
+                            val unzipResult = BackupService.doUnzip(conn, remoteZip, key.unzipDest, cancelToken)
                             steps["unzip"] = if (unzipResult.success) "ok" else "fail"
                             if (!unzipResult.success) {
                                 val result = DeployResult(
@@ -603,9 +633,19 @@ class DeployService {
                     val resolvedPostCommand = ScriptRefResolver.resolve(key.postCommand, server, key.remoteBaseDir)
                     groupLog(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                     val conn = sshConnection ?: return@forEach
-                    val postResult = conn.executeCommand(resolvedPostCommand)
+                    var streamedPost = false
+                    val postResult = conn.executeCommand(
+                        command = resolvedPostCommand,
+                        cancelToken = cancelToken,
+                        onOutputLine = { line ->
+                            if (line.isNotBlank()) {
+                                streamedPost = true
+                                groupLog(DeployXBundle.message("deploy.log.postOutput", line))
+                            }
+                        }
+                    )
                     steps["post"] = if (postResult.success) "ok" else "fail"
-                    if (postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
+                    if (!streamedPost && postResult.output.isNotBlank()) groupLog(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                     if (!postResult.success) groupLog(DeployXBundle.message("deploy.log.postCommandExecuteFailed", postResult.exitCode, postResult.error))
                     else groupLog(DeployXBundle.message("deploy.log.postCommandSuccess"))
                 }
@@ -742,9 +782,19 @@ class DeployService {
                 val resolvedPreCommand = ScriptRefResolver.resolve(request.preCommand, server, request.remotePath)
                 logCallback?.invoke(DeployXBundle.message("deploy.log.preCommand", resolvedPreCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
-                val preResult = conn.executeCommand(resolvedPreCommand)
+                var streamedPre = false
+                val preResult = conn.executeCommand(
+                    command = resolvedPreCommand,
+                    cancelToken = cancelToken,
+                    onOutputLine = { line ->
+                        if (line.isNotBlank()) {
+                            streamedPre = true
+                            logCallback?.invoke(DeployXBundle.message("deploy.log.preOutput", line))
+                        }
+                    }
+                )
                 steps["pre"] = if (preResult.success) "ok" else "fail"
-                if (preResult.output.isNotBlank()) {
+                if (!streamedPre && preResult.output.isNotBlank()) {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.preOutput", preResult.output.trim()))
                 }
                 if (!preResult.success) {
@@ -766,7 +816,7 @@ class DeployService {
                 }
                 val backupDir = requireNotNull(request.backupDir) { "backupDir should not be null at this point" }
                 logCallback?.invoke(DeployXBundle.message("deploy.log.backupSingle", if (needsSshConnection) 4 else 2, backupSource, backupDir))
-                val backupResult = BackupService.doBackup(sshConnection, backupSource, backupDir, logCallback)
+                val backupResult = BackupService.doBackup(sshConnection, backupSource, backupDir, logCallback, cancelToken)
                 steps["backup"] = when { !backupResult.success -> "fail"; backupResult.path != null -> "ok"; else -> "skip" }
                 if (backupResult.success) {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.backupSuccess", backupResult.path ?: ""))
@@ -848,9 +898,9 @@ class DeployService {
                 cancelToken?.throwIfCancelled()
                 logCallback?.invoke(DeployXBundle.message("deploy.log.unzipRemoteFileStart"))
                 val filename = File(request.localPath).name
-                val remoteFile = "${request.remotePath}/$filename"
+                val remoteFile = "${request.remotePath.trimEnd('/')}/$filename"
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
-                val unzipResult = BackupService.doUnzip(conn, remoteFile, request.unzipDest)
+                val unzipResult = BackupService.doUnzip(conn, remoteFile, request.unzipDest, cancelToken)
                 steps["unzip"] = if (unzipResult.success) "ok" else "fail"
 
                 if (unzipResult.success) {
@@ -878,9 +928,19 @@ class DeployService {
                 val resolvedPostCommand = ScriptRefResolver.resolve(request.postCommand, server, request.remotePath)
                 logCallback?.invoke(DeployXBundle.message("deploy.log.postCommand", resolvedPostCommand))
                 val conn = requireNotNull(sshConnection) { "SSH connection should not be null at this point" }
-                val postResult = conn.executeCommand(resolvedPostCommand)
+                var streamedPost = false
+                val postResult = conn.executeCommand(
+                    command = resolvedPostCommand,
+                    cancelToken = cancelToken,
+                    onOutputLine = { line ->
+                        if (line.isNotBlank()) {
+                            streamedPost = true
+                            logCallback?.invoke(DeployXBundle.message("deploy.log.postOutput", line))
+                        }
+                    }
+                )
                 steps["post"] = if (postResult.success) "ok" else "fail"
-                if (postResult.output.isNotBlank()) {
+                if (!streamedPost && postResult.output.isNotBlank()) {
                     logCallback?.invoke(DeployXBundle.message("deploy.log.postOutput", postResult.output.trim()))
                 }
                 if (!postResult.success) {
