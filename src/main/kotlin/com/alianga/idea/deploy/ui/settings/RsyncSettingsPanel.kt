@@ -67,6 +67,18 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
         checkTools()
     }
 
+    /** 切换语言后重建表单（组件均为字段复用，输入值不丢失），并刷新按钮与状态文案 */
+    fun relocalize() {
+        removeAll()
+        setupUI()
+        detectButton.text = DeployXBundle.message("settings.rsync.button.detectTools")
+        downloadButton.text = DeployXBundle.message("settings.rsync.button.downloadRsync")
+        osHelpLabel.text = osHelpText()
+        checkTools()
+        revalidate()
+        repaint()
+    }
+
     private fun setupUI() {
         val infoLabel = JBLabel("<html>${DeployXBundle.message("settings.rsync.info")}</html>").apply {
             setAllowAutoWrapping(true)

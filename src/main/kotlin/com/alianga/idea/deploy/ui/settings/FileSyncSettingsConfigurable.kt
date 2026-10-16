@@ -56,6 +56,7 @@ class FileSyncSettingsConfigurable : Configurable {
                     }
                     generalPanel.relocalize()
                     serverPanel.relocalize()
+                    rsyncPanel.relocalize()
                     mappingPanel.relocalize()
                     scriptPanel.relocalize()
                     changelogPanel.refresh()
