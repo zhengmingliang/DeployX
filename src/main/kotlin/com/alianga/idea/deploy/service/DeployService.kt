@@ -363,6 +363,10 @@ class DeployService {
                 val status = if (syncResult.success) HistoryRecord.OperationStatus.SUCCESS else HistoryRecord.OperationStatus.FAILED
                 saveDownloadGroupHistory(key, groupItems, syncResult, duration, status,
                     linkedMapOf("upload" to if (syncResult.success) "ok" else "fail"))
+                // 拉取成功后刷新本地 VFS，让项目树/编辑器立即看到新文件（此前拉取后不刷新）
+                if (syncResult.success) {
+                    refreshLocalVfs(key.localBaseDir, relativePaths)
+                }
             }
         } catch (e: DeployCancelledException) {
             groupLog(DeployXBundle.message("toolwindow.log.aborted"))
@@ -1091,6 +1095,10 @@ class DeployService {
             progressCallback = progressCallback,
             cancelToken = cancelToken
         )
+        // 拉取成功后刷新本地 VFS，让项目树/编辑器立即看到新文件
+        if (syncResult.success) {
+            refreshLocalVfs(record.sourcePath, record.relativePaths)
+        }
         return DeployResult(
             success = syncResult.success,
             transferredFiles = syncResult.transferredFiles,
@@ -1099,6 +1107,15 @@ class DeployService {
             error = syncResult.error,
             logs = syncResult.output.lines().filter { it.isNotBlank() }
         )
+    }
+
+    /** 拉取结束后刷新本地 VFS（异步，不阻塞调用线程）；targets 是 BASE 目录下各绝对路径文件/目录 */
+    private fun refreshLocalVfs(localBaseDir: String, relativePaths: Collection<String>) {
+        val targets = relativePaths.mapNotNull { rel ->
+            rel.takeIf { it.isNotBlank() }?.let { java.io.File(localBaseDir.trimEnd('/') + "/" + it.trim('/')) }
+        }
+        if (targets.isEmpty()) return
+        com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshIoFiles(targets, true, false, null)
     }
 
     private fun saveGroupHistory(
