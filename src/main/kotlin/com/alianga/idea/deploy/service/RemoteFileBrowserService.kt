@@ -5,6 +5,7 @@ import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.ssh.SshConnection
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
@@ -27,6 +28,7 @@ import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.security.MessageDigest
 import java.util.Vector
 import java.util.concurrent.ConcurrentHashMap
 
@@ -41,7 +43,7 @@ import java.util.concurrent.ConcurrentHashMap
  * （通常在对话框 dispose 时调用）。
  */
 @Service
-class RemoteFileBrowserService {
+class RemoteFileBrowserService : Disposable {
 
     /**
      * 为指定服务器打开一个浏览会话。
@@ -134,9 +136,9 @@ class RemoteFileBrowserService {
         remotePath: String, fileName: String, content: String
     ) {
         try {
-            // 写入本地临时文件
-            val serverDir = File(editorTempRoot, server.id).also { it.mkdirs() }
-            val localFile = File(serverDir, fileName)
+            // 按 serverId + 远程路径层级哈希隔离本地临时目录，避免同一服务器不同目录下同名文件互相覆盖
+            val localFile = resolveEditorTempFile(editorTempRoot, server.id, remotePath, fileName)
+            localFile.parentFile?.mkdirs()
             localFile.writeText(content, Charsets.UTF_8)
             // 刷新虚拟文件系统以获取 VirtualFile
             val vfile = VfsUtil.findFileByIoFile(localFile, true)
@@ -144,6 +146,15 @@ class RemoteFileBrowserService {
             if (vfile == null) {
                 notify(project, "Cannot open temp file: ${localFile.absolutePath}", NotificationType.ERROR)
                 return
+            }
+            // 若该文件此前已在编辑器中打开，同步刷新内存 Document 内容
+            vfile.refresh(false, false)
+            FileDocumentManager.getInstance().getCachedDocument(vfile)?.let { doc ->
+                if (doc.text != content) {
+                    ApplicationManager.getApplication().runWriteAction {
+                        doc.setText(content)
+                    }
+                }
             }
             // 追踪：按本地文件路径索引（而非 VirtualFile 实例）
             openRemoteFiles[vfile.path] = RemoteFileHandle(server.id, remotePath, fileName, localFile.absolutePath)
@@ -201,6 +212,12 @@ class RemoteFileBrowserService {
             .notify(project)
     }
 
+    override fun dispose() {
+        editorSessions.values.forEach { runCatching { it.close() } }
+        editorSessions.clear()
+        openRemoteFiles.clear()
+    }
+
     companion object {
         private val LOG = Logger.getInstance(RemoteFileBrowserService::class.java)
         /** 允许在 IDE 编辑器中打开的最大文件大小（5MB） */
@@ -208,6 +225,32 @@ class RemoteFileBrowserService {
 
         fun getInstance(): RemoteFileBrowserService =
             ApplicationManager.getApplication().getService(RemoteFileBrowserService::class.java)
+
+        /**
+         * 为远程文件计算唯一的本地临时文件路径：
+         * `~/.deploy-x/editor/{serverId}/{remoteParentHash}/{fileName}`
+         *
+         * 既保留原始文件名（确保 IDE 根据扩展名识别语言与语法高亮），又通过远程父目录哈希隔离同名文件，
+         * 防止不同目录下的同名文件（如 `/app/a/config.yml` 与 `/app/b/config.yml`）互相覆盖并写错目标。
+         */
+        internal fun resolveEditorTempFile(
+            rootDir: File,
+            serverId: String,
+            remotePath: String,
+            fileName: String
+        ): File {
+            val normalizedRemote = remotePath.trim().replace('\\', '/')
+            val parentPath = normalizedRemote.substringBeforeLast('/', "/").ifBlank { "/" }
+            val hash = sha256Short(parentPath)
+            val safeServerId = serverId.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "default" }
+            val safeFileName = fileName.substringAfterLast('/').substringAfterLast('\\').ifBlank { "remote_file" }
+            return File(File(File(rootDir, safeServerId), hash), safeFileName)
+        }
+
+        private fun sha256Short(input: String): String {
+            val bytes = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+            return bytes.take(8).joinToString("") { "%02x".format(it) }
+        }
     }
 
     /**
@@ -500,12 +543,16 @@ class RemoteFileBrowserService {
         }
 
         /**
-         * 删除目录（含非空目录）。SFTP 的 rmdir 仅能删除空目录，因此非空目录通过 `rm -rf` 递归删除。
+         * 删除目录（含非空目录）。SFTP 的 rmdir 仅能删除空目录，因此非空目录通过 `rm -rf --` 递归删除。
+         * 使用 POSIX 单引号安全转义并拒绝删除根目录 `/`、`.`、`..`，防止命令注入与误删系统根目录。
          */
         fun deleteDirectory(path: String) {
+            if (!RemotePathUtils.isSafeToDeleteDirectory(path)) {
+                throw IOException("Refusing to delete unsafe or root directory: '$path'")
+            }
             if (!ensureConnected()) throw IOException("SFTP channel not connected")
-            val escaped = path.replace("\"", "\\\"")
-            val result = connection.executeCommand("rm -rf \"$escaped\"")
+            val quoted = RemotePathUtils.shellQuote(path)
+            val result = connection.executeCommand("rm -rf -- $quoted")
             if (!result.success) {
                 throw IOException("Failed to delete directory '$path': ${result.error.ifBlank { "exit code ${result.exitCode}" }}")
             }

@@ -2,6 +2,7 @@ package com.alianga.idea.deploy.ui.dialog
 
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.ServerConfig
+import com.alianga.idea.deploy.service.RemotePathUtils
 import com.alianga.idea.deploy.ssh.SshConnection
 import com.alianga.idea.deploy.ui.WrapLayout
 import com.intellij.icons.AllIcons
@@ -226,7 +227,7 @@ class RemotePathChooserDialog(
                             LOG.warn("Failed to connect to ${server.displayAddress}")
                         } else {
                             indicator.checkCanceled()
-                            val mkdirResult = connection.executeCommand("mkdir -p \"$fullPath\"")
+                            val mkdirResult = connection.executeCommand("mkdir -p -- ${RemotePathUtils.shellQuote(fullPath)}")
                             if (!mkdirResult.success) {
                                 error = DeployXBundle.message("dialog.remote.path.error.createFailed", mkdirResult.error)
                                 LOG.warn("Failed to create directory: ${mkdirResult.error}")
@@ -306,7 +307,7 @@ class RemotePathChooserDialog(
                         } else {
                             indicator.checkCanceled()
                             LOG.info("Connected successfully, executing ls command...")
-                            val lsResult = connection.executeCommand("cd \"$normalizedPath\" && ls -1F")
+                            val lsResult = connection.executeCommand("cd -- ${RemotePathUtils.shellQuote(normalizedPath)} && ls -1F")
                             LOG.info("ls command result - success: ${lsResult.success}, exitCode: ${lsResult.exitCode}")
                             LOG.info("ls output: ${lsResult.output}")
                             if (lsResult.error.isNotBlank()) {
