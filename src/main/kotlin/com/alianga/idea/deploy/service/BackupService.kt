@@ -1,6 +1,7 @@
 package com.alianga.idea.deploy.service
 
 import com.alianga.idea.deploy.DeployXBundle
+import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.ssh.SshConnection
 import java.io.File
 import java.text.SimpleDateFormat
@@ -63,6 +64,7 @@ object BackupService {
         )
         return if (result.success) {
             logCallback?.invoke(DeployXBundle.message("deploy.log.backupCompleteFile", backupFile))
+            pruneOldBackups(sshConnection, backupDir, prefix, logCallback)
             BackupResult(true, backupFile)
         } else {
             BackupResult(false, error = result.error)
@@ -133,6 +135,9 @@ object BackupService {
 
         return if (backupResult.first.success) {
             logCallback?.invoke(DeployXBundle.message("deploy.log.backupComplete"))
+            // 备份文件名形如 {前缀}_bak_时间戳.扩展名，取最后一段 _bak_ 之前的名称作为清理前缀
+            val prunePrefix = backupResult.second.substringAfterLast('/').substringBeforeLast("_bak_")
+            if (prunePrefix.isNotBlank()) pruneOldBackups(sshConnection, backupDir, prunePrefix, logCallback)
             // 返回具体的备份文件路径（而非备份目录），便于报告与回滚时定位
             BackupResult(true, backupResult.second)
         } else {
@@ -165,6 +170,35 @@ object BackupService {
             UnzipResult(true)
         } else {
             UnzipResult(false, error = result.error)
+        }
+    }
+
+    /**
+     * 备份成功后按设置 maxBackups 清理同一前缀的历史备份（1.1.1 复活死配置）。
+     * 用 find + 单引号转义，避免 glob/shell 展开；超出的最旧备份删除，失败仅记日志不中断部署。
+     */
+    private fun pruneOldBackups(
+        sshConnection: SshConnection,
+        backupDir: String,
+        prefix: String,
+        logCallback: ((String) -> Unit)?
+    ) {
+        val keep = FileSyncSettings.getInstance().maxBackups
+        if (keep <= 0 || prefix.isBlank()) return
+        // 按修改时间从新到旧列出同前缀的历史备份（含本次）
+        val listResult = sshConnection.executeCommand(
+            "find ${shellQuote(backupDir)} -maxdepth 1 -type f -name ${shellQuote("${prefix}_bak_*")} -printf '%T@\\n%p\\n'"
+        )
+        if (!listResult.success) return
+        val lines = listResult.output.lines().map { it.trim() }.filter { it.isNotBlank() }
+        // 奇数行是时间戳，偶数行是路径，按时间倒序已是文件顺序
+        val stale = lines.filterIndexed { idx, _ -> idx % 2 == 1 }.drop(keep).filter { it.startsWith("/") || it.contains('/') }
+        var pruned = 0
+        for (path in stale) {
+            if (sshConnection.executeCommand("rm -f ${shellQuote(path)}").success) pruned++
+        }
+        if (pruned > 0) {
+            logCallback?.invoke(DeployXBundle.message("deploy.log.pruneBackups", pruned, keep))
         }
     }
 
