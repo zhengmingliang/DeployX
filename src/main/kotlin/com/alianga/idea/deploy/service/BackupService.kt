@@ -147,7 +147,23 @@ object BackupService {
     }
 
     /**
-     * 执行解压
+     * 按扩展名判断归档类型对应的解压命令（null 表示不支持）。
+     * 服务端常见 .tar.gz/.tgz/.tar 一并支持，不只取决于远端是否安装 unzip。
+     */
+    fun archiveCommandFor(path: String): String? {
+        val lower = path.lowercase()
+        return when {
+            lower.endsWith(".tar.gz") || lower.endsWith(".tgz") -> "tar -xzf"
+            lower.endsWith(".tar.bz2") || lower.endsWith(".tbz2") -> "tar -xjf"
+            lower.endsWith(".tar.xz") || lower.endsWith(".txz") -> "tar -xJf"
+            lower.endsWith(".tar") -> "tar -xf"
+            lower.endsWith(".zip") -> "unzip -o"
+            else -> null
+        }
+    }
+
+    /**
+     * 执行解压（1.1.1：按扩展名选择 unzip/tar，不再一侟 unzip，误解压 .jar 等会直接报清晰错误）
      */
     fun doUnzip(
         sshConnection: SshConnection,
@@ -160,12 +176,15 @@ object BackupService {
             return UnzipResult(false, error = DeployXBundle.message("deploy.error.fileNotFound", zipPath))
         }
 
+        val extractCmd = when (val cmd = archiveCommandFor(zipPath)) {
+            "unzip -o" -> "unzip -o ${shellQuote(zipPath)} -d ${shellQuote(destDir)}"
+            null -> return UnzipResult(false, error = DeployXBundle.message("deploy.error.unsupportedArchive", zipPath.substringAfterLast('/')))
+            else -> "$cmd ${shellQuote(zipPath)} -C ${shellQuote(destDir)}"
+        }
+
         sshConnection.executeCommand("mkdir -p ${shellQuote(destDir)}", cancelToken = cancelToken)
 
-        val result = sshConnection.executeCommand(
-            "unzip -o ${shellQuote(zipPath)} -d ${shellQuote(destDir)}",
-            cancelToken = cancelToken
-        )
+        val result = sshConnection.executeCommand(extractCmd, cancelToken = cancelToken)
         return if (result.success) {
             UnzipResult(true)
         } else {

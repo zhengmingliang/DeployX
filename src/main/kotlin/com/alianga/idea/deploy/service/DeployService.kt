@@ -580,26 +580,36 @@ class DeployService {
                     return@forEach
                 }
 
-                // 步骤 4: 解压
+                // 步骤 4: 解压（1.1.1：支持 zip/tar.gz/tgz/tar 等多种格式，多压缩包逐个解压，不再直接报错中止）
                 if (!key.unzipDest.isNullOrBlank()) {
                     cancelToken?.throwIfCancelled()
-                    val zipItems = groupItems.filter { it.relativePath.endsWith(".zip", ignoreCase = true) }
+                    val archiveItems = groupItems.filter { BackupService.archiveCommandFor(it.relativePath) != null }
                     when {
-                        zipItems.isEmpty() -> groupLog(DeployXBundle.message("deploy.log.skipUnzipNoZip"))
-                        zipItems.size == 1 -> {
-                            val remoteZip = RemotePathUtils.joinRemotePath(key.remoteBaseDir, zipItems.first().relativePath)
-                            groupLog(DeployXBundle.message("deploy.log.unzipRemoteFile", remoteZip, key.unzipDest))
+                        archiveItems.isEmpty() -> groupLog(DeployXBundle.message("deploy.log.skipUnzipNoZip"))
+                        else -> {
                             val conn = sshConnection ?: return@forEach
-                            val unzipResult = BackupService.doUnzip(conn, remoteZip, key.unzipDest, cancelToken)
-                            steps["unzip"] = if (unzipResult.success) "ok" else "fail"
-                            if (!unzipResult.success) {
+                            var allExtracted = true
+                            var firstError = ""
+                            for (item in archiveItems) {
+                                cancelToken?.throwIfCancelled()
+                                val remoteArchive = RemotePathUtils.joinRemotePath(key.remoteBaseDir, item.relativePath)
+                                groupLog(DeployXBundle.message("deploy.log.unzipRemoteFile", remoteArchive, key.unzipDest))
+                                val unzipResult = BackupService.doUnzip(conn, remoteArchive, key.unzipDest, cancelToken)
+                                if (!unzipResult.success) {
+                                    allExtracted = false
+                                    firstError = unzipResult.error ?: ""
+                                    break
+                                }
+                            }
+                            steps["unzip"] = if (allExtracted) "ok" else "fail"
+                            if (!allExtracted) {
                                 val result = DeployResult(
                                     false,
                                     taskId = taskId,
                                     backupPath = backupPath,
                                     transferredFiles = syncResult.transferredFiles,
                                     totalSize = syncResult.totalSize,
-                                    error = DeployXBundle.message("deploy.error.unzipFailed", unzipResult.error ?: ""),
+                                    error = DeployXBundle.message("deploy.error.unzipFailed", firstError),
                                     duration = System.currentTimeMillis() - startTime
                                 )
                                 results.add(result)
@@ -607,20 +617,6 @@ class DeployService {
                                 return@forEach
                             }
                             groupLog(DeployXBundle.message("deploy.log.unzipSuccess", key.unzipDest))
-                        }
-                        else -> {
-                            val result = DeployResult(
-                                false,
-                                taskId = taskId,
-                                backupPath = backupPath,
-                                transferredFiles = syncResult.transferredFiles,
-                                totalSize = syncResult.totalSize,
-                                error = DeployXBundle.message("deploy.error.multipleZipFiles"),
-                                duration = System.currentTimeMillis() - startTime
-                            )
-                            results.add(result)
-                            groupLog(DeployXBundle.message("deploy.log.errorLog", result.error ?: ""))
-                            return@forEach
                         }
                     }
                 } else {
