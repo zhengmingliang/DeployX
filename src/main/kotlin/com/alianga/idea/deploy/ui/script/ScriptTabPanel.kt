@@ -497,6 +497,12 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
         val params = collectParams()
         val ctx = context()
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, DeployXBundle.message("script.tab2.running", s.name), true) {
+            private val cancelToken = com.alianga.idea.deploy.service.DeployCancelToken()
+
+            override fun onCancel() {
+                cancelToken.cancel()
+            }
+
             override fun run(indicator: ProgressIndicator) {
                 try {
                     scriptManager.runScript(s, params, ctx, serverId,
@@ -508,7 +514,8 @@ class ScriptTabPanel(private val project: Project) : JPanel(BorderLayout(JBUI.sc
                                     DeployXBundle.message("script.tab2.run"), Messages.getWarningIcon()) == Messages.YES
                             }
                             ok
-                        })
+                        },
+                        cancelToken = cancelToken)
                 } catch (e: Exception) {
                     logAppender?.invoke(serverId, e.message ?: e.toString())
                 }

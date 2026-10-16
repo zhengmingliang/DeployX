@@ -87,7 +87,7 @@ class RemotePathChooserDialog(
                     AllIcons.FileTypes.Any_type
                 }
                 if (value.endsWith("/")) {
-                    append(value.removeSuffix("/"), SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, JBColor.BLUE))
+                    append(value.removeSuffix("/"), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
                 } else {
                     append(value, SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, JBColor.GRAY))
                 }
@@ -344,11 +344,10 @@ class RemotePathChooserDialog(
                         updateUIState()
                         listModel.clear()
                         if (error != null) {
-                            JOptionPane.showMessageDialog(
+                            Messages.showErrorDialog(
                                 this@RemotePathChooserDialog.contentPanel,
                                 error,
-                                DeployXBundle.message("dialog.remote.path.error.title"),
-                                JOptionPane.ERROR_MESSAGE
+                                DeployXBundle.message("dialog.remote.path.error.title")
                             )
                         } else {
                             result?.forEach { listModel.addElement(it) }

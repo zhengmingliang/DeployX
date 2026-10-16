@@ -3,6 +3,7 @@ package com.alianga.idea.deploy.ui.settings
 import com.alianga.idea.deploy.DeployXBundle
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.Color
@@ -38,7 +39,8 @@ class ChangelogTabPanel : JPanel(BorderLayout()) {
     private val editorPane = object : JEditorPane() {
         override fun getPreferredSize(): Dimension {
             val d = super.getPreferredSize()
-            if (d.width > MAX_CONTENT_WIDTH) d.width = MAX_CONTENT_WIDTH
+            val maxW = JBUI.scale(MAX_CONTENT_WIDTH)
+            if (d.width > maxW) d.width = maxW
             return d
         }
     }
@@ -89,8 +91,10 @@ class ChangelogTabPanel : JPanel(BorderLayout()) {
      */
     override fun getPreferredSize(): Dimension {
         val d = super.getPreferredSize()
-        if (d.width > MAX_PANEL_WIDTH) d.width = MAX_PANEL_WIDTH
-        if (d.height > MAX_PANEL_HEIGHT) d.height = MAX_PANEL_HEIGHT
+        val maxW = JBUI.scale(MAX_PANEL_WIDTH)
+        val maxH = JBUI.scale(MAX_PANEL_HEIGHT)
+        if (d.width > maxW) d.width = maxW
+        if (d.height > maxH) d.height = maxH
         return d
     }
 

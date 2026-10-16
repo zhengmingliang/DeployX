@@ -5,23 +5,29 @@ import com.alianga.idea.deploy.config.FileSyncSettings
 import com.alianga.idea.deploy.ssh.RsyncWrapper
 import com.alianga.idea.deploy.service.TransferService
 import com.alianga.idea.deploy.ui.AdaptiveRowPanel
+import com.alianga.idea.deploy.ui.DeployXColors
 import com.alianga.idea.deploy.ui.WrapLayout
 import com.alianga.idea.deploy.util.RsyncDownloader
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
+import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import javax.swing.Action
 import javax.swing.JButton
 import javax.swing.JComboBox
+import javax.swing.JComponent
+import javax.swing.JEditorPane
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 
@@ -129,17 +135,17 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
                 rsyncAvailable = rsyncOk
                 if (rsyncOk) {
                     rsyncStatusLabel.text = DeployXBundle.message("settings.rsync.rsync.available")
-                    rsyncStatusLabel.foreground = java.awt.Color(0, 128, 0)
+                    rsyncStatusLabel.foreground = DeployXColors.success
                 } else {
                     rsyncStatusLabel.text = DeployXBundle.message("settings.rsync.rsync.unavailable")
-                    rsyncStatusLabel.foreground = java.awt.Color(200, 0, 0)
+                    rsyncStatusLabel.foreground = DeployXColors.error
                 }
                 if (sshpassOk) {
                     sshpassStatusLabel.text = DeployXBundle.message("settings.rsync.sshpass.available")
-                    sshpassStatusLabel.foreground = java.awt.Color(0, 128, 0)
+                    sshpassStatusLabel.foreground = DeployXColors.success
                 } else {
                     sshpassStatusLabel.text = DeployXBundle.message("settings.rsync.sshpass.unavailable")
-                    sshpassStatusLabel.foreground = java.awt.Color(200, 0, 0)
+                    sshpassStatusLabel.foreground = DeployXColors.error
                 }
                 // 仅 Windows + rsync 不可用时显示下载按钮
                 downloadButton.isVisible = SystemInfo.isWindows && !rsyncOk
@@ -156,7 +162,7 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
     private fun startDownloadAndInstall() {
         downloadButton.isEnabled = false
         rsyncStatusLabel.text = DeployXBundle.message("settings.rsync.download.installing")
-        rsyncStatusLabel.foreground = java.awt.Color(0, 0, 200)
+        rsyncStatusLabel.foreground = DeployXColors.accent
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(null, "Downloading rsync...", true) {
             override fun run(indicator: ProgressIndicator) {
@@ -172,14 +178,14 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
                             val path = rsyncExe.absolutePath.replace('\\', '/')
                             rsyncPathField.text = path
                             rsyncStatusLabel.text = DeployXBundle.message("settings.rsync.download.success", path)
-                            rsyncStatusLabel.foreground = java.awt.Color(0, 128, 0)
+                            rsyncStatusLabel.foreground = DeployXColors.success
                             // 立即持久化路径，避免用户忘记点 Apply
                             settings.rsyncPath = path
                             checkTools()
                         },
                         onFailure = { error ->
                             rsyncStatusLabel.text = DeployXBundle.message("settings.rsync.rsync.unavailable")
-                            rsyncStatusLabel.foreground = java.awt.Color(200, 0, 0)
+                            rsyncStatusLabel.foreground = DeployXColors.error
                             showDownloadFailedDialog(error.message ?: error.toString())
                         }
                     )
@@ -202,27 +208,30 @@ class RsyncSettingsPanel : JPanel(BorderLayout()) {
             </body></html>
         """.trimIndent()
 
-        val dialog = javax.swing.JDialog()
-        dialog.title = DeployXBundle.message("settings.rsync.download.failed", "").trim()
-        dialog.isModal = true
-        // 使用 Messages.showInputDialog 的替代方案：用 JEditorPane 支持超链接
-        val editorPane = javax.swing.JEditorPane("text/html", htmlMessage).apply {
-            isEditable = false
-            addHyperlinkListener { e ->
-                if (e.eventType == javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) {
-                    BrowserUtil.browse(e.url)
+        object : DialogWrapper(this@RsyncSettingsPanel, true) {
+            init {
+                title = DeployXBundle.message("settings.rsync.download.failed", "").trim()
+                init()
+            }
+
+            override fun createActions(): Array<Action> = arrayOf(okAction)
+
+            override fun createCenterPanel(): JComponent {
+                val editorPane = JEditorPane("text/html", htmlMessage).apply {
+                    isEditable = false
+                    isOpaque = false
+                    addHyperlinkListener { e ->
+                        if (e.eventType == javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) {
+                            BrowserUtil.browse(e.url)
+                        }
+                    }
+                }
+                return JBScrollPane(editorPane).apply {
+                    preferredSize = JBUI.size(520, 200)
+                    border = JBUI.Borders.empty(8)
                 }
             }
-        }
-        val scrollPane = javax.swing.JScrollPane(editorPane)
-        scrollPane.preferredSize = JBUI.size(520, 200)
-        dialog.contentPane.add(scrollPane, BorderLayout.CENTER)
-        val okButton = JButton(DeployXBundle.message("common.ok")).apply { addActionListener { dialog.dispose() } }
-        val buttonPanel = JPanel(FlowLayout(FlowLayout.CENTER)).apply { add(okButton) }
-        dialog.contentPane.add(buttonPanel, BorderLayout.SOUTH)
-        dialog.pack()
-        dialog.setLocationRelativeTo(null)
-        dialog.isVisible = true
+        }.show()
     }
 
     private fun osHelpText(): String {

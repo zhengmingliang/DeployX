@@ -1,6 +1,7 @@
 package com.alianga.idea.deploy.ui
 
 import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
@@ -10,6 +11,10 @@ import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Graphics
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.Icon
@@ -30,23 +35,48 @@ class PageTabBar(private val onSelected: (Int) -> Unit) : JPanel(BorderLayout())
 
     private class Tab(text: String) : JBLabel(text) {
         var selected = false
-            set(v) { field = v; foreground = if (v) UIUtil.getLabelForeground() else UIUtil.getContextHelpForeground(); repaint() }
+            set(v) {
+                field = v
+                foreground = if (v) UIUtil.getLabelForeground() else UIUtil.getContextHelpForeground()
+                repaint()
+            }
+        var hovered = false
+            set(v) {
+                if (field != v) {
+                    field = v
+                    repaint()
+                }
+            }
 
         init {
             border = JBUI.Borders.empty(0, 10)
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             iconTextGap = JBUI.scale(4)
             horizontalTextPosition = LEFT
+            isFocusable = true
+            accessibleContext?.accessibleName = text
+        }
+
+        override fun setText(text: String?) {
+            super.setText(text)
+            accessibleContext?.accessibleName = text
         }
 
         override fun getPreferredSize(): Dimension = super.getPreferredSize().also { it.height = JBUI.scale(34) }
         override fun getMinimumSize(): Dimension = preferredSize
 
         override fun paintComponent(g: Graphics) {
+            if (hovered && !selected) {
+                g.color = JBColor.namedColor("ActionButton.hoverBackground", JBColor(0xEDEFF2, 0x35373B))
+                g.fillRect(0, 0, width, height)
+            }
             super.paintComponent(g)
             if (selected) { // 选中态：底部 2px accent 下划线（原型 .tab.on）
                 g.color = DeployXColors.accent
                 g.fillRect(0, height - JBUI.scale(2), width, JBUI.scale(2))
+            } else if (hasFocus()) {
+                g.color = DeployXColors.accent
+                g.drawRect(JBUI.scale(1), JBUI.scale(1), width - JBUI.scale(3), height - JBUI.scale(3))
             }
         }
     }
@@ -74,6 +104,34 @@ class PageTabBar(private val onSelected: (Int) -> Unit) : JPanel(BorderLayout())
         val tab = Tab(title)
         tab.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) = select(index)
+            override fun mouseEntered(e: MouseEvent) { tab.hovered = true }
+            override fun mouseExited(e: MouseEvent) { tab.hovered = false }
+        })
+        tab.addFocusListener(object : FocusAdapter() {
+            override fun focusGained(e: FocusEvent) = tab.repaint()
+            override fun focusLost(e: FocusEvent) = tab.repaint()
+        })
+        tab.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                when (e.keyCode) {
+                    KeyEvent.VK_ENTER, KeyEvent.VK_SPACE -> {
+                        select(index)
+                        e.consume()
+                    }
+                    KeyEvent.VK_LEFT -> {
+                        val prev = (index - 1 + tabs.size) % tabs.size
+                        select(prev)
+                        tabs.getOrNull(prev)?.requestFocusInWindow()
+                        e.consume()
+                    }
+                    KeyEvent.VK_RIGHT -> {
+                        val next = (index + 1) % tabs.size
+                        select(next)
+                        tabs.getOrNull(next)?.requestFocusInWindow()
+                        e.consume()
+                    }
+                }
+            }
         })
         tabs += tab
         tabsPanel.add(tab)

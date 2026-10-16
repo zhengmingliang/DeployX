@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.ex.ActionUtil
+import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.SimpleTextAttributes
@@ -31,6 +32,8 @@ class ShowDeployXMenuAction : AnAction() {
             "DeployX.PreviewPull",
             "DeployX.OpenSshTerminal",
             "DeployX.OpenRemoteBrowser",
+            "DeployX.OpenScriptLibrary",
+            "DeployX.RunScriptOnSelection",
         )
     }
 
@@ -114,6 +117,10 @@ class ShowDeployXMenuAction : AnAction() {
         ) {
             item.presentation.icon?.let { icon = it }
             append(item.presentation.text ?: item.id)
+            val shortcut = KeymapUtil.getFirstKeyboardShortcutText(item.action)
+            if (shortcut.isNotBlank()) {
+                append("  $shortcut", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+            }
         }
     }
 }

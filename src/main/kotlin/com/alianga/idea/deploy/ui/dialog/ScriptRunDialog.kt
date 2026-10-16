@@ -8,10 +8,13 @@ import com.alianga.idea.deploy.model.ScriptRunResult
 import com.alianga.idea.deploy.service.ScriptManager
 import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.ui.ScriptEditorFactory
+import com.alianga.idea.deploy.ui.ServerComboRenderer
+import com.alianga.idea.deploy.ui.ServerDisplay
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.ComboBoxWithWidePopup
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.ValidationInfo
@@ -21,13 +24,17 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Font
+import java.awt.Rectangle
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.ScrollPaneConstants
+import javax.swing.Scrollable
 import javax.swing.SwingUtilities
 import javax.swing.AbstractAction
 
@@ -42,7 +49,7 @@ class ScriptRunDialog(
 ) : DialogWrapper(project) {
 
     private val scriptManager = ScriptManager.getInstance()
-    private val serverCombo = JComboBox<String>()
+    private val serverCombo = ComboBoxWithWidePopup<String>()
     private val paramComponents = linkedMapOf<String, JComponent>()
     private val previewArea: EditorTextField = ScriptEditorFactory.createViewer("", project)
     private var runResult: ScriptRunResult? = null
@@ -52,16 +59,19 @@ class ScriptRunDialog(
         setupServerCombo()
         init()
         setOKButtonText(DeployXBundle.message("dialog.script.run.button.run"))
+        runCatching { renderPreview() }
     }
 
     private fun setupServerCombo() {
-        ServerManager.getInstance().getServers().forEach { server ->
-            serverCombo.addItem("${server.id} - ${server.name} (${server.displayAddress})")
-        }
-        serverCombo.preferredSize = Dimension(560, serverCombo.preferredSize.height)
-        serverCombo.minimumSize = Dimension(420, serverCombo.minimumSize.height)
-        val preferred = script.serverId.ifBlank { context.server?.id ?: context.mapping?.serverId ?: "" }
         val servers = ServerManager.getInstance().getServers()
+        servers.forEach { server ->
+            serverCombo.addItem(ServerDisplay.title(server.id, server.name))
+        }
+        serverCombo.renderer = ServerComboRenderer { index, _ ->
+            val i = if (index >= 0) index else serverCombo.selectedIndex
+            servers.getOrNull(i)
+        }
+        val preferred = script.serverId.ifBlank { context.server?.id ?: context.mapping?.serverId ?: "" }
         val index = servers.indexOfFirst { it.id == preferred }
         if (index >= 0) serverCombo.selectedIndex = index
     }
@@ -84,26 +94,43 @@ class ScriptRunDialog(
             paramsPanel.addLabeledComponent(param.displayLabel + if (param.required) " *:" else ":", comp)
         }
 
-        val variablesArea = JBTextArea(buildVariablesHelpText(), 9, 60).apply {
+        val variablesArea = JBTextArea(buildVariablesHelpText(), 7, 60).apply {
             isEditable = false
-            font = Font("Monospaced", Font.PLAIN, 12)
+            font = JBUI.Fonts.create("Monospaced", 12)
             lineWrap = true
             wrapStyleWord = true
         }
         val top = FormBuilder.createFormBuilder()
             .addComponent(JLabel(script.description.ifBlank { DeployXBundle.message("dialog.script.run.description.default") }))
             .addLabeledComponent(DeployXBundle.message("dialog.script.run.label.targetServer"), serverCombo)
-            .addVerticalGap(6)
+            .addVerticalGap(JBUI.scale(6))
             .addComponent(paramsPanel.panel)
-            .addVerticalGap(6)
-            .addLabeledComponent(DeployXBundle.message("dialog.script.run.label.variablesHelp"), JBScrollPane(variablesArea).apply { preferredSize = Dimension(680, 170) })
-            .addVerticalGap(6)
-            .addLabeledComponent(DeployXBundle.message("dialog.script.run.label.commandPreview"), previewArea.apply { preferredSize = Dimension(680, 180) })
+            .addVerticalGap(JBUI.scale(6))
+            .addLabeledComponent(
+                DeployXBundle.message("dialog.script.run.label.variablesHelp"),
+                JBScrollPane(variablesArea).apply { preferredSize = JBUI.size(640, 140) }
+            )
+            .addVerticalGap(JBUI.scale(6))
+            .addLabeledComponent(
+                DeployXBundle.message("dialog.script.run.label.commandPreview"),
+                previewArea.apply { preferredSize = JBUI.size(640, 150) }
+            )
             .panel
 
-        return JPanel(BorderLayout()).apply {
-            add(top, BorderLayout.CENTER)
-            preferredSize = Dimension(820, 680)
+        val scrollable = object : JPanel(BorderLayout()), Scrollable {
+            init { add(top, BorderLayout.NORTH) }
+            override fun getPreferredScrollableViewportSize(): Dimension = preferredSize
+            override fun getScrollableUnitIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int = JBUI.scale(16)
+            override fun getScrollableBlockIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int = JBUI.scale(64)
+            override fun getScrollableTracksViewportWidth(): Boolean = true
+            override fun getScrollableTracksViewportHeight(): Boolean = false
+        }
+
+        return JBScrollPane(scrollable).apply {
+            border = JBUI.Borders.empty()
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+            preferredSize = JBUI.size(720, 560)
         }
     }
 
@@ -182,7 +209,10 @@ class ScriptRunDialog(
         }
     }
 
-    private fun selectedServerId(): String? = serverCombo.selectedItem?.toString()?.substringBefore(" - ")?.trim()?.takeIf { it.isNotBlank() }
+    private fun selectedServerId(): String? {
+        val servers = ServerManager.getInstance().getServers()
+        return servers.getOrNull(serverCombo.selectedIndex)?.id
+    }
 
     private fun effectiveContext(): ScriptRunContext {
         val server = selectedServerId()?.let { ServerManager.getInstance().getServer(it) } ?: context.server
@@ -221,6 +251,12 @@ class ScriptRunDialog(
         }
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, DeployXBundle.message("dialog.script.run.progress.title", script.name), true) {
+            private val cancelToken = com.alianga.idea.deploy.service.DeployCancelToken()
+
+            override fun onCancel() {
+                cancelToken.cancel()
+            }
+
             override fun run(indicator: ProgressIndicator) {
                 val result = scriptManager.runScript(
                     script = script,
@@ -228,11 +264,12 @@ class ScriptRunDialog(
                     context = effectiveContext(),
                     serverId = serverId,
                     logCallback = logCallback,
-                    confirmCallback = { true }
+                    confirmCallback = { true },
+                    cancelToken = cancelToken
                 )
                 runResult = result
                 SwingUtilities.invokeLater {
-                    if (!result.success) {
+                    if (!result.success && !cancelToken.isCancelled()) {
                         Messages.showWarningDialog(result.error.ifBlank { DeployXBundle.message("dialog.script.run.failed") }, DeployXBundle.message("dialog.script.run.button.run"))
                     }
                     close(OK_EXIT_CODE)
