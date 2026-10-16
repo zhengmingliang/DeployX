@@ -2,9 +2,12 @@ package com.alianga.idea.deploy.ui.settings
 
 import com.alianga.idea.deploy.DeployXBundle
 import com.alianga.idea.deploy.model.MappingConfig
+import com.alianga.idea.deploy.model.ServerConfig
 import com.alianga.idea.deploy.model.ScriptRunContext
 import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.ui.CommandFieldWithScriptButton
+import com.alianga.idea.deploy.ui.ServerDisplay
+import com.alianga.idea.deploy.ui.ServerComboRenderer
 import com.alianga.idea.deploy.ui.dialog.RemotePathChooserDialog
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.project.Project
@@ -14,6 +17,7 @@ import com.intellij.openapi.ui.TextBrowseFolderListener
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.ComboBoxWithWidePopup
 import com.intellij.ui.components.JBCheckBox
+import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
@@ -37,6 +41,12 @@ class MappingEditDialog(
     private val project: Project? = null
 ) : DialogWrapper(project) {
 
+    /** 服务器列表缓存（combo 索引 -> ServerConfig），避免按文本反解析 id */
+    private var comboServers: List<ServerConfig> = emptyList()
+
+    /** 抑制 fillData 设置 selectedIndex 时不触发额外联动 */
+    private var suppressServerAction = false
+
     private val nameField = JBTextField()
     private val localDirField = TextFieldWithBrowseButton()
     private val serverCombo = ComboBoxWithWidePopup<String>()
@@ -50,6 +60,13 @@ class MappingEditDialog(
     private val preCommandEnabledCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.enablePreCommand"))
     private val postCommandEnabledCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.enablePostCommand"))
     private val autoCdCheck = JBCheckBox(DeployXBundle.message("dialog.mapping.checkbox.autoCd"), false)
+
+    // 子选项块标签引用（渐进披露：未勾选对应功能时随输入框一起隐藏）
+    private val backupDirLabel = JBLabel(DeployXBundle.message("dialog.mapping.label.backupDirectory"))
+    private val backupSourceLabel = JBLabel(DeployXBundle.message("dialog.mapping.label.backupSource"))
+    private val unzipDestLabel = JBLabel(DeployXBundle.message("dialog.mapping.label.unzipDestination"))
+    private val preCommandLabel = JBLabel(DeployXBundle.message("dialog.mapping.label.preUploadCommand"))
+    private val postCommandLabel = JBLabel(DeployXBundle.message("dialog.mapping.label.postUploadCommand"))
 
     /** 带脚本库选择按钮的上传前命令输入组件（多行编辑，含行号，支持全屏） */
     private val preCommandField = CommandFieldWithScriptButton(
@@ -110,6 +127,11 @@ class MappingEditDialog(
         postCommandEnabledCheck.addChangeListener {
             postCommandField.isEnabled = postCommandEnabledCheck.isSelected
         }
+        // 勾选状态也驱动渐进披露（隐藏整块），保证运行中切换即时生效
+        backupEnabledCheck.addChangeListener { updateOptionVisibility() }
+        unzipEnabledCheck.addChangeListener { updateOptionVisibility() }
+        preCommandEnabledCheck.addChangeListener { updateOptionVisibility() }
+        postCommandEnabledCheck.addChangeListener { updateOptionVisibility() }
         backupDirField.isEnabled = false
         backupSourceField.isEnabled = false
         unzipDestField.isEnabled = false
@@ -126,8 +148,7 @@ class MappingEditDialog(
      * 构建脚本运行的上下文，供 CommandFieldWithScriptButton 打开脚本选择对话框时使用。
      */
     private fun buildContext(): ScriptRunContext {
-        val selectedServerStr = serverCombo.selectedItem?.toString() ?: ""
-        val serverId = selectedServerStr.substringBefore(" - ").takeIf { it.isNotBlank() }
+        val serverId = selectedServerId()
         val server = serverId?.let { ServerManager.getInstance().getServer(it) }
         val remoteDir = remoteDirField.text.trim()
         return ScriptRunContext(
@@ -138,32 +159,21 @@ class MappingEditDialog(
     }
 
     private fun setupServerCombo() {
-        val servers = ServerManager.getInstance().getServers()
-        var maxLengthText = ""
-        for (server in servers) {
-            val itemText = "${server.id} - ${server.name}"
-            serverCombo.addItem(itemText)
-            if (itemText.length > maxLengthText.length) {
-                maxLengthText = itemText
-            }
-        }
-
-        // ComboBoxWithWidePopup 允许下拉弹层比输入框本身更宽，从而完整显示最长的
-        // 「服务器id - 名称」。prototypeDisplayValue 让系统按最长项计算首选宽度；
-        // 不再手动 setPreferredSize，否则 ComboBoxWithWidePopup.getMinimumPopupWidth()
-        // 会返回被改小的固定宽度，反而限制弹层自适应。
-        if (maxLengthText.isNotEmpty()) {
+        comboServers = ServerManager.getInstance().getServers()
+        comboServers.forEach { serverCombo.addItem(ServerDisplay.title(it.id, it.name)) }
+        if (comboServers.isNotEmpty()) {
+            val longest = comboServers.maxBy { ServerDisplay.title(it.id, it.name).length }
+            val maxLengthText = ServerDisplay.title(longest.id, longest.name)
+            // ComboBoxWithWidePopup 允许下拉弹层比输入框本身更宽，从而完整显示最长的
+            // 「服务器id · 名称」。prototypeDisplayValue 让系统按最长项计算首选宽度；
+            // 不手动 setPreferredSize，弹层与关闭态宽度均由布局按内容自适应。
             serverCombo.prototypeDisplayValue = maxLengthText
             serverCombo.setMinLength(maxLengthText.length)
         }
-
-        // 1.0.8 修复：「目标服务器」下拉关闭状态未能显示完整服务器名称。
-        // ComboBoxWithWidePopup 只保证弹层比输入框宽，关闭状态仍由 FormBuilder 给的列宽决定；
-        // 在 FormBuilder 的格子内显式给一个最小首选宽度，确保关闭态也展示完整文本不被截断。
-        val fontMetrics = serverCombo.getFontMetrics(serverCombo.font)
-        val maxTextWidth = fontMetrics.stringWidth(maxLengthText)
-        val preferredWidth = (maxTextWidth + JBUI.scale(48)).coerceAtLeast(JBUI.scale(280))
-        serverCombo.preferredSize = Dimension(preferredWidth, serverCombo.preferredSize.height)
+        serverCombo.renderer = ServerComboRenderer { index, _ ->
+            val i = if (index >= 0) index else serverCombo.selectedIndex
+            comboServers.getOrNull(i)
+        }
     }
 
     private fun setupLocalDirBrowser() {
@@ -180,9 +190,8 @@ class MappingEditDialog(
     private fun setupRemoteDirBrowser() {
         remoteDirField.addActionListener {
             // 获取当前选中的服务器
-            val selectedServerStr = serverCombo.selectedItem?.toString() ?: return@addActionListener
-            val serverId = selectedServerStr.substringBefore(" - ")
-            val server = ServerManager.getInstance().getServer(serverId) ?: return@addActionListener
+            val server = selectedServerId()?.let { ServerManager.getInstance().getServer(it) }
+                ?: return@addActionListener
 
             if (server.isLocal) {
                 // LOCAL 服务器：remoteDir 实际是本地目标目录，改用本地目录选择器
@@ -254,8 +263,29 @@ class MappingEditDialog(
         val servers = ServerManager.getInstance().getServers()
         val index = servers.indexOfFirst { it.id == mapping.serverId }
         if (index >= 0) {
-            serverCombo.selectedIndex = index
+            suppressServerAction = true
+            try { serverCombo.selectedIndex = index } finally { suppressServerAction = false }
         }
+        updateOptionVisibility()
+    }
+
+    /** 渐进披露：未勾选的子选项块（含标签与输入框）整体隐藏，表单高度自动收缩 */
+    private fun updateOptionVisibility() {
+        val backup = backupEnabledCheck.isSelected
+        backupDirLabel.isVisible = backup
+        backupDirField.isVisible = backup
+        backupSourceLabel.isVisible = backup
+        backupSourceField.isVisible = backup
+        val unzip = unzipEnabledCheck.isSelected
+        unzipDestLabel.isVisible = unzip
+        unzipDestField.isVisible = unzip
+        val pre = preCommandEnabledCheck.isSelected
+        preCommandLabel.isVisible = pre
+        preCommandField.isVisible = pre
+        val post = postCommandEnabledCheck.isSelected
+        postCommandLabel.isVisible = post
+        postCommandField.isVisible = post
+        autoCdCheck.isVisible = pre || post
     }
 
     override fun createCenterPanel(): JComponent {
@@ -266,18 +296,18 @@ class MappingEditDialog(
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.remoteDir"), remoteDirField)
             .addVerticalGap(JBUI.scale(8))
             .addComponent(backupEnabledCheck)
-            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.backupDirectory"), backupDirField)
-            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.backupSource"), backupSourceField)
+            .addLabeledComponent(backupDirLabel, backupDirField)
+            .addLabeledComponent(backupSourceLabel, backupSourceField)
             .addVerticalGap(JBUI.scale(8))
             .addComponent(unzipEnabledCheck)
-            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.unzipDestination"), unzipDestField)
+            .addLabeledComponent(unzipDestLabel, unzipDestField)
             .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.excludeRules"), excludeField)
             .addVerticalGap(JBUI.scale(12))
             .addComponent(preCommandEnabledCheck)
-            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.preUploadCommand"), preCommandField)
+            .addLabeledComponent(preCommandLabel, preCommandField)
             .addVerticalGap(JBUI.scale(4))
             .addComponent(postCommandEnabledCheck)
-            .addLabeledComponent(DeployXBundle.message("dialog.mapping.label.postUploadCommand"), postCommandField)
+            .addLabeledComponent(postCommandLabel, postCommandField)
             .addComponent(autoCdCheck)
             .panel
 
@@ -313,9 +343,14 @@ class MappingEditDialog(
         return null
     }
 
+    /** 当前选中服务器 id：按 combo 索引反查，避免按文本「id - 名称」反解析出歧义 */
+    private fun selectedServerId(): String? {
+        val idx = serverCombo.selectedIndex
+        return comboServers.getOrNull(idx)?.id
+    }
+
     fun getMappingConfig(): MappingConfig {
-        val selectedServer = serverCombo.selectedItem?.toString() ?: ""
-        val serverId = selectedServer.substringBefore(" - ")
+        val serverId = selectedServerId().orEmpty()
         val remoteDir = remoteDirField.text.trim()
 
         val rawPreCommand = preCommandField.trimmedText()
