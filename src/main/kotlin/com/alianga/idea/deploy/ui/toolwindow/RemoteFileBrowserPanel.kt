@@ -690,38 +690,66 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
             }
         }
 
-        /** 导出（树节点拖出到项目视图）：下载到临时目录后以文件列表提供 */
+        /** 导出（树节点拖出到项目视图）：在模态进度条后台下载到临时目录后以文件列表提供，避免阻塞 EDT */
         override fun getSourceActions(c: JComponent?): Int = COPY
 
         override fun createTransferable(c: JComponent?): Transferable? {
             val entries = getSelectedEntries()
             if (entries.isEmpty()) return null
             val sess = session ?: return null
-            return RemoteEntriesTransferable(entries, sess)
+            var files: List<File>? = null
+            var error: String? = null
+            val completed = ProgressManager.getInstance().runProcessWithProgressSynchronously(
+                {
+                    val indicator = ProgressManager.getInstance().progressIndicator
+                    val tempDir = Files.createTempDirectory("deployx-dnd-").toFile().apply { deleteOnExit() }
+                    val result = mutableListOf<File>()
+                    try {
+                        for ((idx, entry) in entries.withIndex()) {
+                            indicator?.checkCanceled()
+                            indicator?.text = "${entry.name} (${idx + 1}/${entries.size})"
+                            val target = File(tempDir, entry.name)
+                            if (entry.isDirectory) sess.downloadDirectory(entry.path, target.absolutePath)
+                            else sess.downloadFile(entry.path, target.absolutePath)
+                            result.add(target)
+                        }
+                        files = result
+                    } catch (e: ProcessCanceledException) {
+                        throw e
+                    } catch (e: Exception) {
+                        LOG.warn("Drag download failed", e)
+                        error = e.message ?: e.toString()
+                    }
+                },
+                DeployXBundle.message("remote.browser.download.progress"),
+                true,
+                project
+            )
+            if (!completed) return null
+            if (error != null) {
+                Messages.showErrorDialog(
+                    this@RemoteFileBrowserPanel,
+                    DeployXBundle.message("remote.browser.download.failed", error),
+                    DeployXBundle.message("remote.browser.error.title")
+                )
+                return null
+            }
+            val downloaded = files?.takeIf { it.isNotEmpty() } ?: return null
+            return LocalFilesTransferable(downloaded)
         }
     }
 
     /**
-     * 远程条目传输器：在 [getTransferData] 时将远程文件/目录下载到临时目录，
-     * 以 javaFileListFlavor 形式提供给放置目标（如项目视图）。
+     * 已下载到本地临时目录的文件列表传输器：数据已在后台准备好，[getTransferData] 立即返回，不阻塞 EDT。
      */
-    private class RemoteEntriesTransferable(
-        private val entries: List<RemoteFileEntry>,
-        private val session: RemoteFileBrowserService.BrowserSession
+    private class LocalFilesTransferable(
+        private val files: List<File>
     ) : Transferable {
         override fun getTransferDataFlavors(): Array<DataFlavor> = arrayOf(DataFlavor.javaFileListFlavor)
         override fun isDataFlavorSupported(flavor: DataFlavor): Boolean = flavor == DataFlavor.javaFileListFlavor
         override fun getTransferData(flavor: DataFlavor): Any {
             if (flavor != DataFlavor.javaFileListFlavor) throw UnsupportedFlavorException(flavor)
-            val tempDir = Files.createTempDirectory("deployx-dnd-").toFile()
-            val result = mutableListOf<File>()
-            for (entry in entries) {
-                val target = File(tempDir, entry.name)
-                if (entry.isDirectory) session.downloadDirectory(entry.path, target.absolutePath)
-                else session.downloadFile(entry.path, target.absolutePath)
-                result.add(target)
-            }
-            return result
+            return files
         }
     }
 
