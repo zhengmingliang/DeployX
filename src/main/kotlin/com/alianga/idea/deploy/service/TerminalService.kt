@@ -80,7 +80,9 @@ class TerminalService : Disposable {
 
                     // 3. 构建 TtyConnector + CloudTerminal 适配
                     // 使用工厂方法创建 SshCloudTerminalRunner，确保新旧 IDEA 版本兼容
-                    val ttyConnector = SshTtyConnector(serverConfig, channel, title)
+                    val ttyConnector = SshTtyConnector(serverConfig, channel, title) {
+                        connection.disconnect()
+                    }
                     val cloudProcess = SshCloudTerminalProcess(ttyConnector)
                     val runner = SshCloudTerminalRunner.create(project, pipeName, cloudProcess, ttyConnector)
 
@@ -126,7 +128,7 @@ class TerminalService : Disposable {
         LOG.info("Opening SSH terminal with cd to: $initialDirectory for ${serverConfig.displayAddress}")
         val title = "SSH: ${serverConfig.name} - ${serverConfig.user}@${serverConfig.host}"
         val pipeName = "${serverConfig.host}:${serverConfig.port}"
-        val escapedDir = initialDirectory.replace("\"", "\\\"")
+        val quotedDir = RemotePathUtils.shellQuote(initialDirectory)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, DeployXBundle.message("terminal.opening.title", serverConfig.displayAddress), true) {
             private var opened = false
@@ -146,7 +148,9 @@ class TerminalService : Disposable {
                     indicator.text = DeployXBundle.message("terminal.openingShell")
                     val channel = connection.openShellChannel()
                     indicator.fraction = 0.7
-                    val ttyConnector = SshTtyConnector(serverConfig, channel, title)
+                    val ttyConnector = SshTtyConnector(serverConfig, channel, title) {
+                        connection.disconnect()
+                    }
                     val cloudProcess = SshCloudTerminalProcess(ttyConnector)
                     val runner = SshCloudTerminalRunner.create(project, pipeName, cloudProcess, ttyConnector)
                     opened = true
@@ -157,7 +161,7 @@ class TerminalService : Disposable {
                     // 等终端初始化完成（EDT 创建 widget + shell 加载 profile），再通过 TtyConnector 发送 cd
                     Thread.sleep(600)
                     try {
-                        ttyConnector.write("cd \"$escapedDir\" 2>/dev/null && echo \"→ \$(pwd)\"\n")
+                        ttyConnector.write("cd -- $quotedDir 2>/dev/null && echo \"→ \$(pwd)\"\n")
                     } catch (_: Exception) {
                         LOG.warn("Failed to send cd command to terminal via ttyConnector")
                     }

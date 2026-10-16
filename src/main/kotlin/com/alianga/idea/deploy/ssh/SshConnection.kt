@@ -19,7 +19,6 @@ class SshConnection(private val serverConfig: ServerConfig) {
 
     companion object {
         private val LOG = Logger.getInstance(SshConnection::class.java)
-        private val jsch = JSch()
     }
 
     private var session: Session? = null
@@ -47,6 +46,8 @@ class SshConnection(private val serverConfig: ServerConfig) {
 
         for (attempt in 1..maxRetries) {
             try {
+                // 每次连接使用独立的 JSch 实例，避免多服务器并发部署时共享 identity 列表引发线程安全与密钥混用问题
+                val jsch = JSch()
                 val session = jsch.getSession(serverConfig.user, serverConfig.host, serverConfig.port)
                 val timeout = FileSyncSettings.getInstance().connectTimeout
 

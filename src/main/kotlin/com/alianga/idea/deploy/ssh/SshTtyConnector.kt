@@ -19,7 +19,8 @@ import java.nio.charset.StandardCharsets
 class SshTtyConnector(
     private val serverConfig: ServerConfig,
     private val channel: ChannelShell,
-    private val title: String
+    private val title: String,
+    private val onClose: (() -> Unit)? = null
 ) : TtyConnector {
 
     companion object {
@@ -70,13 +71,27 @@ class SshTtyConnector(
     override fun getName(): String = title
 
     override fun close() {
-        LOG.info("Closing SSH terminal channel for ${serverConfig.displayAddress}")
+        LOG.info("Closing SSH terminal channel and session for ${serverConfig.displayAddress}")
         try {
             if (!channel.isClosed) {
                 channel.disconnect()
             }
         } catch (e: Exception) {
             LOG.warn("Error closing channel shell", e)
+        } finally {
+            try {
+                onClose?.invoke()
+            } catch (e: Exception) {
+                LOG.warn("Error closing SSH connection for terminal", e)
+            }
+            try {
+                val sess = channel.session
+                if (sess != null && sess.isConnected) {
+                    sess.disconnect()
+                }
+            } catch (e: Exception) {
+                LOG.warn("Error disconnecting SSH session for terminal", e)
+            }
         }
     }
 
