@@ -50,10 +50,9 @@ class TransferService {
     ): SyncResult {
         // LOCAL 服务器：直接本地拷贝，不走 SSH/rsync
         if (serverConfig.isLocal) {
-            return LocalTransferService.getInstance().copyFilesFrom(
-                sourceBaseDir = localPath,
-                targetBaseDir = remotePath,
-                relativePaths = listOf(""),  // 整目录
+            return LocalTransferService.getInstance().copyPath(
+                sourcePath = localPath,
+                targetDir = remotePath,
                 options = options,
                 cancelToken = cancelToken,
                 logCallback = logCallback,
@@ -116,11 +115,13 @@ class TransferService {
     ): SyncResult {
         // LOCAL 服务器：本地->本地拷贝，方向对称
         if (serverConfig.isLocal) {
-            return LocalTransferService.getInstance().copyFilesFrom(
-                sourceBaseDir = remotePath,
-                targetBaseDir = localPath,
-                relativePaths = listOf(""),
-                options = options,
+            val remoteFile = java.io.File(remotePath)
+            val pullContentsOnly = options.contentsOnly ||
+                (remoteFile.isDirectory && SingleDeployPaths.syncContents(localPath, true, remotePath))
+            return LocalTransferService.getInstance().copyPath(
+                sourcePath = remotePath,
+                targetDir = localPath,
+                options = options.copy(contentsOnly = pullContentsOnly),
                 cancelToken = cancelToken,
                 logCallback = logCallback,
                 progressCallback = progressCallback
@@ -236,15 +237,13 @@ class TransferService {
         val sshpassAvailable = RsyncWrapper.isSshpassAvailable()
 
         // Windows 下首次检测到 rsync 不可用时，提示用户是否一键安装
-        var userDeclinedInstall = false
         if (!rsyncAvailable && SystemInfo.isWindows && !settings.declinedRsyncAutoInstall) {
             val installed = promptAndInstallRsync(logCallback)
             if (installed) {
                 rsyncAvailable = RsyncWrapper.isRsyncAvailable()
-            } else {
-                userDeclinedInstall = true
             }
         }
+        val userDeclinedInstall = SystemInfo.isWindows && settings.declinedRsyncAutoInstall
 
         return when (mode) {
             TransferMode.SFTP_ONLY -> {

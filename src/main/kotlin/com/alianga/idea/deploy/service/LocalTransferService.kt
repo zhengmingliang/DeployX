@@ -45,6 +45,51 @@ class LocalTransferService {
     }
 
     /**
+     * 本地增量拷贝（单路径语义：sourcePath -> targetDir，对齐 [com.alianga.idea.deploy.ssh.SftpTransferClient.upload] 与 rsync）。
+     *
+     * - 当 [sourcePath] 为普通文件时，拷贝为 `[targetDir]/<fileName>`；
+     * - 当 [sourcePath] 为目录且 `options.contentsOnly == true` 时，仅将该目录内容拷贝到 [targetDir] 下；
+     * - 当 [sourcePath] 为目录且 `options.contentsOnly == false` 时，将该目录本身拷贝到 `[targetDir]/<dirName>` 下。
+     */
+    fun copyPath(
+        sourcePath: String,
+        targetDir: String,
+        options: SyncOptions = SyncOptions(),
+        cancelToken: DeployCancelToken? = null,
+        logCallback: ((String) -> Unit)? = null,
+        progressCallback: ((RsyncWrapper.SyncProgress) -> Unit)? = null
+    ): SyncResult {
+        val sourceFile = File(sourcePath)
+        if (!sourceFile.exists()) {
+            val msg = DeployXBundle.message("ssh.sftp.localPathNotFound", sourcePath)
+            logCallback?.invoke("[ERROR] $msg")
+            return SyncResult(false, error = msg)
+        }
+        if (options.contentsOnly && sourceFile.isDirectory) {
+            return copyFilesFrom(
+                sourceBaseDir = sourceFile.path,
+                targetBaseDir = targetDir,
+                relativePaths = listOf(""),
+                options = options,
+                cancelToken = cancelToken,
+                logCallback = logCallback,
+                progressCallback = progressCallback
+            )
+        }
+        val parentDir = sourceFile.parent ?: "."
+        val relative = sourceFile.name + if (sourceFile.isDirectory) "/" else ""
+        return copyFilesFrom(
+            sourceBaseDir = parentDir,
+            targetBaseDir = targetDir,
+            relativePaths = listOf(relative),
+            options = options,
+            cancelToken = cancelToken,
+            logCallback = logCallback,
+            progressCallback = progressCallback
+        )
+    }
+
+    /**
      * 本地增量拷贝（PUSH 语义：sourceBaseDir -> targetBaseDir）。
      *
      * @param sourceBaseDir 本地源基础目录（通常是映射的 localDir）
@@ -210,8 +255,9 @@ class LocalTransferService {
                 }
             })
         } else {
-            val rel = sourceBase.relativize(source).toString().replace(File.separatorChar, '/')
-            if (!isExcluded(rel, matchers)) {
+            val rawRel = sourceBase.relativize(source).toString().replace(File.separatorChar, '/')
+            val rel = rawRel.ifBlank { source.fileName?.toString().orEmpty() }
+            if (rel.isNotBlank() && !isExcluded(rel, matchers)) {
                 val attrs = Files.readAttributes(source, BasicFileAttributes::class.java)
                 out.add(FileScanItem(source, rel, attrs.size(), attrs.lastModifiedTime()))
             }
