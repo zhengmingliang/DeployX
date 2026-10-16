@@ -44,11 +44,20 @@ class FileSyncSettingsConfigurable : Configurable {
                 addTab(DeployXBundle.message("settings.tab.rsyncConfig"), rsyncPanel)
                 addTab(DeployXBundle.message("settings.tab.scriptLibrary"), scriptPanel)
                 addTab(DeployXBundle.message("settings.tab.changelog"), changelogPanel)
-                // 语言切换时刷新「版本更新说明」文案与 Tab 标题
+                // 语言切换时刷新全部页签标题、各面板文案/列头与「版本更新说明」内容
                 langListenerRemover = DeployXBundle.addLanguageChangeListener {
-                    tabbedPane?.let {
-                        it.setTitleAt(it.tabCount - 1, DeployXBundle.message("settings.tab.changelog"))
+                    tabbedPane?.let { tabs ->
+                        tabs.setTitleAt(0, DeployXBundle.message("settings.tab.general"))
+                        tabs.setTitleAt(1, DeployXBundle.message("settings.tab.serverManagement"))
+                        tabs.setTitleAt(2, DeployXBundle.message("settings.tab.mappingManagement"))
+                        tabs.setTitleAt(3, DeployXBundle.message("settings.tab.rsyncConfig"))
+                        tabs.setTitleAt(4, DeployXBundle.message("settings.tab.scriptLibrary"))
+                        tabs.setTitleAt(5, DeployXBundle.message("settings.tab.changelog"))
                     }
+                    generalPanel.relocalize()
+                    serverPanel.relocalize()
+                    mappingPanel.relocalize()
+                    scriptPanel.relocalize()
                     changelogPanel.refresh()
                 }
             }

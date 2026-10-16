@@ -223,6 +223,15 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
 
     fun isModified(): Boolean = false
 
+    /** 切换语言后刷新视图单选/提示与列头 */
+    fun relocalize() {
+        projectViewRadio.text = DeployXBundle.message("settings.mapping.view.project")
+        allViewRadio.text = DeployXBundle.message("settings.mapping.view.all")
+        projectUnavailableLabel.text = DeployXBundle.message("settings.mapping.view.projectUnavailable")
+        searchField.emptyText.text = DeployXBundle.message("settings.mapping.search.placeholder")
+        tableModel.relocalize()
+    }
+
     fun apply() {}
 
     fun reset() {
@@ -230,17 +239,20 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
     }
 
     private class MappingTableModel : AbstractTableModel() {
-        private val columns = arrayOf(
-            DeployXBundle.message("settings.mapping.column.name"),
-            DeployXBundle.message("settings.mapping.column.localDir"),
-            DeployXBundle.message("settings.mapping.column.server"),
-            DeployXBundle.message("settings.mapping.column.remoteDir"),
-            DeployXBundle.message("settings.mapping.column.backup"),
-            DeployXBundle.message("settings.mapping.column.unzip"),
-            DeployXBundle.message("settings.mapping.column.preCmd"),
-            DeployXBundle.message("settings.mapping.column.postCmd")
+        // 列名存储 bundle 键，getColumnName 实时取文案，语言切换后无需重建模型
+        private val columnKeys = arrayOf(
+            "settings.mapping.column.name",
+            "settings.mapping.column.localDir",
+            "settings.mapping.column.server",
+            "settings.mapping.column.remoteDir",
+            "settings.mapping.column.backup",
+            "settings.mapping.column.unzip",
+            "settings.mapping.column.preCmd",
+            "settings.mapping.column.postCmd"
         )
         private var mappings = listOf<MappingConfig>()
+
+        fun relocalize() = fireTableStructureChanged()
 
         fun setData(mappings: List<MappingConfig>) {
             this.mappings = mappings
@@ -250,8 +262,8 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
         fun getMappingAt(row: Int): MappingConfig? = mappings.getOrNull(row)
 
         override fun getRowCount(): Int = mappings.size
-        override fun getColumnCount(): Int = columns.size
-        override fun getColumnName(column: Int): String = columns[column]
+        override fun getColumnCount(): Int = columnKeys.size
+        override fun getColumnName(column: Int): String = DeployXBundle.message(columnKeys[column])
 
         override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
             val mapping = mappings[rowIndex]

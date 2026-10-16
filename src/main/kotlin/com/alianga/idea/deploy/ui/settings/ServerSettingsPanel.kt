@@ -191,6 +191,12 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
 
     fun isModified(): Boolean = false // 服务器管理是即时保存的
 
+    /** 切换语言后刷新列头与占位文案 */
+    fun relocalize() {
+        searchField.emptyText.text = DeployXBundle.message("settings.server.search.placeholder")
+        tableModel.relocalize()
+    }
+
     fun apply() {
         // 服务器管理是即时保存的，不需要额外操作
     }
@@ -203,17 +209,20 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
      * 服务器表格模型
      */
     private class ServerTableModel : AbstractTableModel() {
-        private val columns = arrayOf(
-            DeployXBundle.message("settings.server.column.id"),
-            DeployXBundle.message("settings.server.column.name"),
-            DeployXBundle.message("settings.server.column.type"),
-            DeployXBundle.message("settings.server.column.host"),
-            DeployXBundle.message("settings.server.column.port"),
-            DeployXBundle.message("settings.server.column.user"),
-            DeployXBundle.message("settings.server.column.auth"),
-            DeployXBundle.message("settings.server.column.default")
+        // 列名存储 bundle 键，getColumnName 实时取文案，语言切换后无需重建模型
+        private val columnKeys = arrayOf(
+            "settings.server.column.id",
+            "settings.server.column.name",
+            "settings.server.column.type",
+            "settings.server.column.host",
+            "settings.server.column.port",
+            "settings.server.column.user",
+            "settings.server.column.auth",
+            "settings.server.column.default"
         )
         private var servers = listOf<ServerConfig>()
+
+        fun relocalize() = fireTableStructureChanged()
 
         fun setData(servers: List<ServerConfig>) {
             this.servers = servers
@@ -224,8 +233,8 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
             servers.getOrNull(row)
 
         override fun getRowCount(): Int = servers.size
-        override fun getColumnCount(): Int = columns.size
-        override fun getColumnName(column: Int): String = columns[column]
+        override fun getColumnCount(): Int = columnKeys.size
+        override fun getColumnName(column: Int): String = DeployXBundle.message(columnKeys[column])
 
         override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
             val server = servers[rowIndex]

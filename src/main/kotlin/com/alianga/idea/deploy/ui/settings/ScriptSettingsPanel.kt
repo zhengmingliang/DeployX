@@ -205,18 +205,26 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
     private fun selectedScript(): ScriptConfig? = selectedScripts().firstOrNull()
 
     fun isModified(): Boolean = false
+
+    /** 切换语言后刷新搜索占位与列头 */
+    fun relocalize() {
+        searchField.emptyText.text = DeployXBundle.message("settings.script.search.placeholder")
+        tableModel.relocalize()
+    }
+
     fun apply() {}
     fun reset() = refreshTable()
 
     private class ScriptTableModel : AbstractTableModel() {
-        private val columns = arrayOf(
-            DeployXBundle.message("settings.script.table.name"),
-            DeployXBundle.message("settings.script.table.group"),
-            DeployXBundle.message("settings.script.table.server"),
-            DeployXBundle.message("settings.script.table.params"),
-            DeployXBundle.message("settings.script.table.tags"),
-            DeployXBundle.message("settings.script.table.lastRun"),
-            DeployXBundle.message("settings.script.table.status")
+        // 列名存储 bundle 键，getColumnName 实时取文案，语言切换后无需重建模型
+        private val columnKeys = arrayOf(
+            "settings.script.table.name",
+            "settings.script.table.group",
+            "settings.script.table.server",
+            "settings.script.table.params",
+            "settings.script.table.tags",
+            "settings.script.table.lastRun",
+            "settings.script.table.status"
         )
         private var scripts = listOf<ScriptConfig>()
         private val sdf = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
@@ -227,9 +235,11 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
         }
 
         fun getScriptAt(row: Int): ScriptConfig? = scripts.getOrNull(row)
+        fun relocalize() = fireTableStructureChanged()
+
         override fun getRowCount(): Int = scripts.size
-        override fun getColumnCount(): Int = columns.size
-        override fun getColumnName(column: Int): String = columns[column]
+        override fun getColumnCount(): Int = columnKeys.size
+        override fun getColumnName(column: Int): String = DeployXBundle.message(columnKeys[column])
 
         override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
             val script = scripts[rowIndex]

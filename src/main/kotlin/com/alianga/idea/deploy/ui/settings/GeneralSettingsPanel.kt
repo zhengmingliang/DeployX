@@ -41,6 +41,14 @@ class GeneralSettingsPanel : com.alianga.idea.deploy.ui.ViewportWidthPanel(Borde
         setupUI()
     }
 
+    /** 切换语言后重建表单，使说明、复选框与标签文案跟随新语言 */
+    fun relocalize() {
+        removeAll()
+        setupUI()
+        revalidate()
+        repaint()
+    }
+
     private fun setupUI() {
         val infoLabel = wrapText(DeployXBundle.message("settings.general.info"), italic = true)
 
