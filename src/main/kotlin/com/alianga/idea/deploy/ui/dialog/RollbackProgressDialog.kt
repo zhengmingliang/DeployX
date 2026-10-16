@@ -32,7 +32,9 @@ class RollbackProgressDialog(
     private val record: HistoryRecord,
     private val onComplete: (RollbackResult) -> Unit,
     /** 1.1.1：确认框中选择的回滚选项 */
-    private val options: com.alianga.idea.deploy.service.RollbackCommands.Options = com.alianga.idea.deploy.service.RollbackCommands.Options()
+    private val options: com.alianga.idea.deploy.service.RollbackCommands.Options = com.alianga.idea.deploy.service.RollbackCommands.Options(),
+    /** 日志镜像回调：把弹窗内日志同步写入调用方（如工具窗口日志页），避免弹窗关闭后日志页一片空白 */
+    private val onLog: ((String) -> Unit)? = null
 ) : DialogWrapper(project, true) {
 
     private val progressBar = JProgressBar(0, 100)
@@ -221,6 +223,7 @@ class RollbackProgressDialog(
      * 添加日志
      */
     private fun addLog(log: String) {
+        onLog?.invoke(log)
         logList.add(log)
         logArea.append(log + "\n")
         // 滚动到底部

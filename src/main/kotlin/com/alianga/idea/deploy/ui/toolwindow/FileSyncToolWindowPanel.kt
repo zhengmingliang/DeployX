@@ -1743,17 +1743,44 @@ class FileSyncToolWindowPanel(private val project: Project) : SimpleToolWindowPa
                 return
             }
 
-            // 显示回滚确认对话框
+            // 显示回滚确认对话框（1.1.1：后台预载备份包内文件清单，让确认框能看到将恢复哪些文件，
+            // 避免 EDT 上的网络 IO 卡顿；失败/无清单时照常显示确认框）
             val newer = com.alianga.idea.deploy.service.RollbackCommands.newerSuccessfulCount(record, historyManager.getRecords())
-            val dialog = RollbackDialog(project, record, newerCount = newer)
+            ProgressManager.getInstance().run(object : Task.Backgroundable(
+                project,
+                DeployXBundle.message("rollback.progress.listingFiles"),
+                true
+            ) {
+                override fun run(indicator: ProgressIndicator) {
+                    val server = serverManager.getServer(record.serverId)
+                    val files = if (server?.isLocal == true) {
+                        emptyList()
+                    } else {
+                        try {
+                            com.alianga.idea.deploy.service.RollbackService.getInstance().getBackupFileList(record)
+                        } catch (e: Exception) {
+                            // 预载失败不影响回滚确认流程
+                            emptyList()
+                        }
+                    }
+                    SwingUtilities.invokeLater { showRollbackConfirmDialog(record, newer, files) }
+                }
+            })
+        }
+
+        /** 创建并显示回滚确认对话框，确认后启动回滚进度对话框 */
+        private fun showRollbackConfirmDialog(record: HistoryRecord, newer: Int, fileList: List<String>) {
+            val dialog = RollbackDialog(project, record, fileList = fileList, newerCount = newer)
             if (!dialog.showAndGet()) {
                 return
             }
 
-            // 执行回滚
-            // 执行后切到日志页（回滚进度对话框保留）
+            // 执行后切到日志页（回滚进度对话框保留），并镜像日志到工具窗口日志页
             switchToLogTab()
-            val progressDialog = RollbackProgressDialog(project, record, options = dialog.options, onComplete = { result ->
+            val progressDialog = RollbackProgressDialog(
+                project, record, options = dialog.options,
+                onLog = { line -> appendLog(line) },
+                onComplete = { result ->
                 if (result.success) {
                     appendLog(DeployXBundle.message("toolwindow.log.rollbackSuccess"))
                     appendLog(DeployXBundle.message("toolwindow.log.restoredFiles", result.rolledBackFiles.size))
