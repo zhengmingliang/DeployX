@@ -9,6 +9,8 @@ import com.alianga.idea.deploy.service.RemoteFileBrowserService
 import com.alianga.idea.deploy.service.ServerManager
 import com.alianga.idea.deploy.service.TerminalService
 import com.alianga.idea.deploy.ui.AdaptiveRowPanel
+import com.alianga.idea.deploy.ui.ServerComboRenderer
+import com.alianga.idea.deploy.ui.ServerDisplay
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
@@ -18,6 +20,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.ComboBoxWithWidePopup
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.JBColor
@@ -80,7 +83,7 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
     private val browserService = RemoteFileBrowserService.getInstance()
     private val settings = FileSyncSettings.getInstance()
 
-    private val serverCombo = JComboBox<String>()
+    private val serverCombo = ComboBoxWithWidePopup<String>()
     private val pathCombo = JComboBox<String>().apply { isEditable = true }
     private val goButton = toolButton(AllIcons.Actions.Forward, DeployXBundle.message("remote.browser.button.go"))
     private val upButton = toolButton(AllIcons.Actions.Upload, DeployXBundle.message("remote.browser.button.up"))
@@ -109,6 +112,22 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
     @Volatile private var isLoading = false
     /** 抑制切换服务器/刷新历史时 pathCombo 触发的事件 */
     private var suppressPathAction = false
+    /** 抑制重建 combo 时 selectedIndex 触发的 switchServer */
+    @Volatile private var suppressServerAction = false
+    /** 服务器列表缓存（combo 索引 -> ServerConfig），避免按文本反解析 id */
+    private var comboServers: List<ServerConfig> = emptyList()
+
+    /** 语言变更监听器注销回调（切换语言后刷新按钮提示与状态文案） */
+    private val languageChangeUnsubscribe: () -> Unit =
+        DeployXBundle.addLanguageChangeListener {
+            SwingUtilities.invokeLater { relocalize() }
+        }
+
+    /** 服务器列表变更监听器注销回调（设置页增删改服务器后刷新下拉） */
+    private val serverListUnsubscribe: () -> Unit =
+        serverManager.addChangeListener {
+            SwingUtilities.invokeLater { refreshServerCombo() }
+        }
 
     init {
         setupUI()
@@ -118,6 +137,7 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
 
     private fun setupUI() {
         serverCombo.addActionListener {
+            if (suppressServerAction) return@addActionListener
             val server = selectedServer() ?: return@addActionListener
             if (server.id == currentServer?.id) return@addActionListener
             switchServer(server)
@@ -217,27 +237,75 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
             .addVerticalGap(JBUI.scale(4))
             .addComponent(statusLabel)
             .panel
+        // 统一内边距，避免控件贴边紧促
+        content.border = JBUI.Borders.empty(8, 12, 4, 12)
         add(content, BorderLayout.CENTER)
     }
 
     // ===== 服务器与路径管理 =====
 
     private fun populateServers() {
-        serverCombo.removeAllItems()
-        val servers = serverManager.getServers()
-        if (servers.isEmpty()) {
-            statusLabel.text = DeployXBundle.message("remote.browser.empty")
-            return
+        suppressPathAction = true
+        suppressServerAction = true
+        try {
+            serverCombo.removeAllItems()
+            comboServers = serverManager.getServers()
+            serverCombo.renderer = ServerComboRenderer { index, _ ->
+                val i = if (index >= 0) index else serverCombo.selectedIndex
+                comboServers.getOrNull(i)
+            }
+            if (comboServers.isEmpty()) {
+                statusLabel.text = DeployXBundle.message("remote.browser.empty")
+                return
+            }
+            comboServers.forEach { serverCombo.addItem(ServerDisplay.title(it.id, it.name)) }
+            // 优先保持当前选中服务器（如由变更监听触发重建），否则用默认服务器
+            val keep = currentServer?.let { cur -> comboServers.indexOfFirst { it.id == cur.id } }
+                ?.takeIf { it >= 0 }
+            val slot = keep ?: comboServers.indexOfFirst { it.id == (serverManager.getDefaultServer() ?: comboServers.first()).id }
+                .coerceAtLeast(0)
+            serverCombo.selectedIndex = slot
+            switchServer(comboServers[slot])
+        } finally {
+            suppressServerAction = false
+            suppressPathAction = false
         }
-        for (server in servers) serverCombo.addItem("${server.id} - ${server.name}")
-        val defaultServer = serverManager.getDefaultServer() ?: servers.first()
-        serverCombo.selectedIndex = servers.indexOfFirst { it.id == defaultServer.id }.coerceAtLeast(0)
-        switchServer(defaultServer)
+    }
+
+    /** 语言 / 服务器列表变更后仅刷新下拉与文案，不重复打开会话 */
+    private fun refreshServerCombo() {
+        if (isDisposed) return
+        val prev = currentServer
+        suppressPathAction = true
+        try {
+            serverCombo.removeAllItems()
+            comboServers = serverManager.getServers()
+            comboServers.forEach { serverCombo.addItem(ServerDisplay.title(it.id, it.name)) }
+            val idx = prev?.let { cur -> comboServers.indexOfFirst { it.id == cur.id } } ?: -1
+            when {
+                idx >= 0 -> {
+                    suppressServerAction = true
+                    try { serverCombo.selectedIndex = idx } finally { suppressServerAction = false }
+                }
+                comboServers.isNotEmpty() -> switchServer(comboServers.first())
+            }
+        } finally {
+            suppressPathAction = false
+        }
+    }
+
+    private fun relocalize() {
+        goButton.toolTipText = DeployXBundle.message("remote.browser.button.go")
+        upButton.toolTipText = DeployXBundle.message("remote.browser.button.up")
+        refreshButton.toolTipText = DeployXBundle.message("remote.browser.refresh")
+        newDirButton.toolTipText = DeployXBundle.message("remote.browser.newDir")
+        historyButton.toolTipText = DeployXBundle.message("remote.browser.button.history")
+        if (tree.selectionCount == 0) statusLabel.text = DeployXBundle.message("remote.browser.status.ready")
     }
 
     private fun selectedServer(): ServerConfig? {
-        val selected = serverCombo.selectedItem?.toString() ?: return null
-        return serverManager.getServer(selected.substringBefore(" - "))
+        val i = if (serverCombo.selectedIndex >= 0) serverCombo.selectedIndex else -1
+        return comboServers.getOrNull(i)
     }
 
     private fun switchServer(server: ServerConfig) {
@@ -664,6 +732,8 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
     /** 释放会话资源（工具窗口隐藏时调用） */
     fun dispose() {
         isDisposed = true
+        languageChangeUnsubscribe()
+        serverListUnsubscribe()
         session?.close()
         session = null
     }
@@ -772,7 +842,7 @@ class RemoteFileBrowserPanel(private val project: Project) : JPanel(BorderLayout
             }
             val entry = node.entry ?: return
             icon = when { entry.isLink -> LINK_ICON; entry.isDirectory -> FOLDER_ICON; else -> FILE_ICON }
-            if (entry.isDirectory) append(entry.name, SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, JBColor.BLUE))
+            if (entry.isDirectory) append(entry.name, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
             else append(entry.name, SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, JBColor.foreground()))
             if (!entry.isDirectory && entry.size > 0L) append("  (${entry.displaySize})", SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, JBColor.GRAY), false)
         }
