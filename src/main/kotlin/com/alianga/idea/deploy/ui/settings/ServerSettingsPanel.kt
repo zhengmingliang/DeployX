@@ -13,6 +13,7 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
+import java.awt.event.MouseEvent
 import javax.swing.JPanel
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -46,6 +47,15 @@ class ServerSettingsPanel : JPanel(BorderLayout()) {
             add(searchField, BorderLayout.CENTER)
         }
         add(searchPanel, BorderLayout.NORTH)
+
+        // 双击行直接编辑（与工具栏铅笔等效）
+        object : com.intellij.ui.DoubleClickListener() {
+            override fun onDoubleClick(e: MouseEvent): Boolean {
+                if (table.rowAtPoint(e.point) < 0) return false
+                editServer()
+                return true
+            }
+        }.installOn(table)
 
         // 创建带工具栏的表格
         val decorator = ToolbarDecorator.createDecorator(table)

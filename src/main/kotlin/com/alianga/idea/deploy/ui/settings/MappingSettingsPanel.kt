@@ -17,6 +17,7 @@ import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import javax.swing.ButtonGroup
+import java.awt.event.MouseEvent
 import javax.swing.JPanel
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -86,6 +87,15 @@ class MappingSettingsPanel : JPanel(BorderLayout()) {
             override fun removeUpdate(e: DocumentEvent) = refreshTable()
             override fun changedUpdate(e: DocumentEvent) = refreshTable()
         })
+
+        // 双击行直接编辑（与工具栏铅笔等效）
+        object : com.intellij.ui.DoubleClickListener() {
+            override fun onDoubleClick(e: MouseEvent): Boolean {
+                if (table.rowAtPoint(e.point) < 0) return false
+                editMapping()
+                return true
+            }
+        }.installOn(table)
 
         val decorator = ToolbarDecorator.createDecorator(table)
             .setAddAction { addMapping() }

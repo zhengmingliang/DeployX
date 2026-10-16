@@ -20,6 +20,7 @@ import java.util.Date
 import java.util.Locale
 import javax.swing.JFileChooser
 import javax.swing.ListSelectionModel
+import java.awt.event.MouseEvent
 import javax.swing.JPanel
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -56,6 +57,15 @@ class ScriptSettingsPanel : JPanel(BorderLayout()) {
             add(searchField, BorderLayout.CENTER)
         }
         add(searchPanel, BorderLayout.NORTH)
+
+        // 双击行直接编辑（与工具栏铅笔等效）
+        object : com.intellij.ui.DoubleClickListener() {
+            override fun onDoubleClick(e: MouseEvent): Boolean {
+                if (table.rowAtPoint(e.point) < 0) return false
+                editScript()
+                return true
+            }
+        }.installOn(table)
 
         val decorator = ToolbarDecorator.createDecorator(table)
             .setAddAction { addScript() }
