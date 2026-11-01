@@ -58,6 +58,9 @@
     <!-- ============================================================ -->
     <extensions defaultExtensionNs="com.intellij">
 
+        <!-- Error Handler (JetBrains Marketplace Exception & UI Freeze Reporting) -->
+        <errorHandler implementation="com.intellij.diagnostic.JetBrainsMarketplaceErrorReportSubmitter"/>
+
         <!-- Application Services -->
         <applicationService
             serviceImplementation="com.alianga.idea.deploy.config.ConfigManager"/>

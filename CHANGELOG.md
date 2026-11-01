@@ -5,6 +5,7 @@
 > UI 全面优化，依据《DeployX-UI优化实施方案》《交互原型 · 全流程》《设计规范 · 令牌与组件》《现状问题标注》。逐项映射见 `docs/1.1.0-UI优化变更说明.md`。
 
 ### 🔧 第三轮补充（同为 1.1.0）
+- **Marketplace 错误与 UI 卡顿（Freeze）上报**：接入 JetBrains 官方 `JetBrainsMarketplaceErrorReportSubmitter`，支持在 Marketplace 管理后台的 Exceptions 与 Freezes 页签中收集用户未捕获异常与 UI 卡顿堆栈、线程转储（dump）及 CPU 性能快照
 - **历史页常驻详情区**：旧记录的步骤链为推断时，直接在步骤链后标「（推断）」，与详情对话框一致（tooltip 仍给完整说明）
 - **拉取记录**保存真实步骤结果（`stepResults`），不再一直按推断显示
 - **#28 结果判定回退说明**：状态区优先用任务返回的 success 标志；拿不到结果（异常 / 返回前被终止 / 旧调用未传标志）时回退到进度文字是否含「失败 / fail / error」。回退只影响状态区图标与通知级别，不影响历史记录；英文界面无标志时路径含 error 可能误判
