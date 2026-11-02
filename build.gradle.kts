@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.3.10"
@@ -76,13 +78,39 @@ tasks {
         sinceBuild.set("233.8")
         untilBuild.set("262.*") // 兼容性范围：2023.3.8 - 2026.2
         changeNotes.set(
-        runCatching { File(projectDir, "src/main/resources/changelog.html").readText() }
-            .getOrElse { "DeployX changelog. See CHANGELOG.md for details." }
-    )
+            runCatching {
+                val fullText = File(projectDir, "src/main/resources/changelog.html").readText()
+                // 仅截取最近版本的更新日志，避免超出 JetBrains Marketplace 数据库 TEXT 限制 (65535 字节)
+                fun extractRecent(block: String, count: Int = 2): String {
+                    val splits = Regex("(?i)<h3>").findAll(block).toList()
+                    return if (splits.size > count) {
+                        block.substring(0, splits[count].range.first).trimEnd() + "\n<p><i>... More in CHANGELOG ...</i></p>\n"
+                    } else block
+                }
+                val enIdx = fullText.indexOf("<!--LANG:EN-->")
+                val zhIdx = fullText.indexOf("<!--LANG:ZH-->")
+                val endIdx = fullText.indexOf("<!--LANG:END-->").let { if (it >= 0) it else fullText.length }
+                if (enIdx >= 0 && zhIdx > enIdx) {
+                    val enBlock = extractRecent(fullText.substring(enIdx, zhIdx))
+                    val zhBlock = extractRecent(fullText.substring(zhIdx, endIdx))
+                    "$enBlock\n<hr/>\n$zhBlock"
+                } else {
+                    extractRecent(fullText, 2)
+                }
+            }.getOrElse { "DeployX changelog. See CHANGELOG.md for details." }
+        )
     }
 
-    // 安全读取 Token：优先环境变量，其次 gradle.properties，找不到就留空（不报错）
-    val publishToken: String = System.getenv("PUBLISH_TOKEN") ?: providers.gradleProperty("publishToken").getOrElse("")
+    // 发布 Token：优先环境变量，其次 gradle.properties，若 GRADLE_USER_HOME 被重定向则回退尝试读取 ~/.gradle/gradle.properties
+    val publishToken: String = System.getenv("PUBLISH_TOKEN")?.takeIf { it.isNotBlank() }
+        ?: providers.gradleProperty("publishToken").orNull?.takeIf { it.isNotBlank() }
+        ?: runCatching {
+            val userProps = File(System.getProperty("user.home"), ".gradle/gradle.properties")
+            if (userProps.exists()) {
+                val p = Properties().apply { userProps.reader().use { load(it) } }
+                p.getProperty("publishToken")
+            } else null
+        }.getOrNull() ?: ""
     publishPlugin {
         token.set(publishToken)
         // 可选：指定发布渠道，默认是 stable
